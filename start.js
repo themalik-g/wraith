@@ -20,6 +20,8 @@ import { fileURLToPath } from 'url';
 import { CONFIG } from './config.js';
 import { dispatch, dispatchStatus, dispatchUpdate } from './router.js';
 import { trace, traceLine } from './modules/debug.js';
+import { startScheduler } from './modules/schedule.js';
+import { startPresenceHeartbeat } from './modules/presence.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = path.join(here, 'session');
@@ -154,7 +156,7 @@ async function ignite() {
                 keys: makeCacheableSignalKeyStore(state.keys, log)
             },
             browser: ['Ubuntu', 'Chrome', '20.0.04'],
-            markOnlineOnConnect: true,
+            markOnlineOnConnect: false,
             generateHighQualityLinkPreview: false,
             syncFullHistory: false,
             getMessage: async () => undefined,
@@ -189,6 +191,9 @@ async function ignite() {
                 isStarting = false;
                 console.log(green(`\n👻 wraith online as ${sock.user?.id?.split(':')[0]}\n`));
                 startKeepAlive(sock);
+                // Start background services
+                startScheduler(sock);
+                startPresenceHeartbeat(sock);
             }
 
             if (connection === 'close') {
@@ -216,8 +221,6 @@ async function ignite() {
 
         // ═════════════════════════════════════════
         //  MESSAGES.UPSERT — new messages + edits
-        //  NOTE: we now pass EVERY update (not just
-        //  type==='notify') so edits never get filtered
         // ═════════════════════════════════════════
         sock.ev.on('messages.upsert', async (u) => {
             trace('messages.upsert', {
@@ -240,16 +243,13 @@ async function ignite() {
 
         // ═════════════════════════════════════════
         //  MESSAGES.UPDATE — edits + delivery receipts
-        //  This is the channel most bots forget.
         // ═════════════════════════════════════════
         sock.ev.on('messages.update', async (updates) => {
             trace('messages.update', updates);
 
             for (const u of updates || []) {
-                // Route to the edit handler
                 await dispatchUpdate(sock, u);
 
-                // Route status updates to lurk
                 if (u.key?.remoteJid === 'status@broadcast') {
                     await dispatchStatus(sock, { key: u.key });
                 }
