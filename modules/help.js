@@ -1,15 +1,9 @@
 // ─────────────────────────────────────────────
 //  WRAITH · modules/help.js
 //  Central registry of every command.
-//  Add a new entry here whenever you add a module.
 // ─────────────────────────────────────────────
 import { isOwner } from '../core/identity.js';
 
-// ─────────────────────────────────────────────
-//  Command registry
-//  Every command the bot understands lives here.
-//  ownerOnly: true  → only CONFIG.owner can run it
-// ─────────────────────────────────────────────
 const REGISTRY = [
     {
         group: '👻  ghost',
@@ -43,9 +37,71 @@ const REGISTRY = [
             { cmd: '.lurk off',              desc: 'stop auto-viewing' },
             { cmd: '.lurk react on',         desc: 'react to statuses' },
             { cmd: '.lurk react off',        desc: 'stop reacting' },
+            { cmd: '.lurk download on',      desc: 'download statuses to owner DM silently' },
+            { cmd: '.lurk download off',     desc: 'stop downloading statuses' },
             { cmd: '.lurk emoji ❤️',         desc: 'set a custom reaction emoji' },
             { cmd: '.lurk emoji random',     desc: 'pick a random emoji per status' },
             { cmd: '.lurk emoji none',       desc: 'revert to empty reaction' }
+        ]
+    },
+    {
+        group: '📅  schedule',
+        subtitle: 'send messages later',
+        commands: [
+            { cmd: '.schedule',              desc: 'show schedule help' },
+            { cmd: '.schedule <msg> <target> dd,mm,yy h mm am/pm', desc: 'schedule a new message' },
+            { cmd: '.schedule <target> dd,mm,yy h mm am/pm',       desc: 'schedule a replied message' }
+        ]
+    },
+    {
+        group: '👥  admin',
+        subtitle: 'group management',
+        commands: [
+            { cmd: '.kick @user',            desc: 'remove a member (reply or mention)' },
+            { cmd: '.add 923...',            desc: 'add a member' },
+            { cmd: '.promote @user',         desc: 'make admin' },
+            { cmd: '.demote @user',          desc: 'remove admin' },
+            { cmd: '.antilink on|off',       desc: 'block links in group' },
+            { cmd: '.antispam on|off',       desc: 'block spam in group' },
+            { cmd: '.antisticker on|off',    desc: 'block stickers in group' }
+        ]
+    },
+    {
+        group: '🖼️  getpp',
+        subtitle: 'profile pictures',
+        commands: [
+            { cmd: '.getpp',                 desc: 'get profile pic of current chat' },
+            { cmd: '.getpp owner',           desc: 'send profile pic to owner DM' },
+            { cmd: '.getpp chat',            desc: 'send profile pic to this chat' },
+            { cmd: '.getpp <number>',        desc: 'get profile pic of target' }
+        ]
+    },
+    {
+        group: '📌  getjid',
+        subtitle: 'JID resolver',
+        commands: [
+            { cmd: '.getjid',                desc: 'get JID of current chat' },
+            { cmd: '.getjid currentchat',    desc: 'get JID of this chat' },
+            { cmd: '.getjid owner <target>', desc: 'resolve a number/username to JID' },
+            { cmd: '.getjid channels',       desc: 'list joined channels with JIDs' }
+        ]
+    },
+    {
+        group: '⚙️  presence',
+        subtitle: 'online & typing control',
+        commands: [
+            { cmd: '.presence',              desc: 'show presence status' },
+            { cmd: '.presence online on|off', desc: 'always online' },
+            { cmd: '.presence typing on|off', desc: 'auto-typing indicator' },
+            { cmd: '.presence recording on|off', desc: 'auto-recording indicator' },
+            { cmd: '.presence reads on|off', desc: 'read receipts' }
+        ]
+    },
+    {
+        group: '📊  activity',
+        subtitle: 'chat activity dashboard',
+        commands: [
+            { cmd: '.activity',              desc: 'show global activity dashboard' }
         ]
     },
     {
@@ -66,9 +122,6 @@ const REGISTRY = [
     }
 ];
 
-// ─────────────────────────────────────────────
-//  Render
-// ─────────────────────────────────────────────
 function renderAll() {
     const lines = [];
     lines.push(`👻 *wraith · command index*`);
@@ -100,9 +153,6 @@ function renderGroup(name) {
     return lines.join('\n');
 }
 
-// ─────────────────────────────────────────────
-//  .help command
-// ─────────────────────────────────────────────
 export async function helpCommand(sock, chat, msg, args) {
     const from = msg.key.participant || msg.key.remoteJid;
 
@@ -116,13 +166,12 @@ export async function helpCommand(sock, chat, msg, args) {
         return sock.sendMessage(chat, { text: renderAll() }, { quoted: msg });
     }
 
-    // Strip emojis and non-letters from group name query, match loosely
     const wanted = target.replace(/[^a-z]/g, '');
     const rendered = renderGroup(wanted);
 
     if (!rendered) {
         return sock.sendMessage(chat, {
-            text: `👻 no group called _${target}_.\nAvailable: ghost · peek · lurk · probe · system`
+            text: `👻 no group called _${target}_.\nAvailable: ghost · peek · lurk · schedule · admin · getpp · getjid · presence · activity · probe · system`
         }, { quoted: msg });
     }
 
