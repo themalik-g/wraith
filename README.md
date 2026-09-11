@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/License-MIT-DC2626?style=for-the-badge&logo=opensourceinitiative&logoColor=white&labelColor=000000"/>
   <img src="https://img.shields.io/badge/Platform-WhatsApp-25D366?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=000000"/>
 </p>
-<div>
+</div>
 ---
 
 > A silent watcher for WhatsApp — remembers what was deleted, peeks at what was hidden, lurks on statuses, schedules messages, and manages groups.
@@ -178,6 +178,7 @@ MIT
 - Built by [@themalik-g](https://github.com/themalik-g)
 
 ---
+<div align="center">
 <!-- VIBRANT ELECTRIC OCEAN FOOTER -->
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:00E5FF,50:1E88E5,100:0052D4&height=150&section=footer&text=Thanks%20For%20Visiting!&fontSize=40&fontColor=ffffff&animation=twinkling&fontAlignY=65" width="100%"/>
 
