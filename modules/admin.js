@@ -1,12 +1,12 @@
 // ─────────────────────────────────────────────
 //  WRAITH · modules/admin.js
-//  Group admin tools: kick, add, promote, demote,
-//  antilink, antispam, antisticker.
+//  Group admin tools — LID-aware for Baileys v7.
 // ─────────────────────────────────────────────
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { isOwner } from '../core/identity.js';
+import { stripDevice, jidType } from '../core/jid-resolver.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const STATE = path.join(here, '..', 'state', 'admin.json');
@@ -14,9 +14,6 @@ const DEBUG = process.env.WRAITH_DEBUG === '1';
 
 fs.mkdirSync(path.dirname(STATE), { recursive: true });
 
-// ─────────────────────────────────────────────
-//  State
-// ─────────────────────────────────────────────
 function readState() {
     try {
         if (!fs.existsSync(STATE)) return {};
@@ -25,11 +22,7 @@ function readState() {
 }
 
 function writeState(o) {
-    try {
-        fs.writeFileSync(STATE, JSON.stringify(o, null, 2));
-    } catch (e) {
-        if (DEBUG) console.log('[admin] write failed:', e.message);
-    }
+    try { fs.writeFileSync(STATE, JSON.stringify(o, null, 2)); } catch {}
 }
 
 function getGroupSettings(groupJid) {
@@ -44,46 +37,87 @@ function setGroupSettings(groupJid, settings) {
 }
 
 // ─────────────────────────────────────────────
-//  Resolve target JID
+//  Resolve to PN JID — required by groupParticipantsUpdate
 // ─────────────────────────────────────────────
-async function resolveTarget(sock, raw) {
+async function resolveToPnJid(sock, raw, groupJid = null) {
     if (!raw) return null;
-    const clean = raw.trim();
+    const clean = stripDevice(raw.trim());
 
-    if (clean.includes('@')) {
-        if (clean.endsWith('@g.us') || clean.endsWith('@newsletter')) return clean;
-        if (clean.endsWith('@s.whatsapp.net') || clean.endsWith('@lid')) return clean;
+    if (clean.endsWith('@s.whatsapp.net')) return clean;
+
+    if (clean.endsWith('@lid')) {
+        // Try cache
+        try {
+            const pn = await sock.signalRepository?.lidMapping?.getPNForLID?.(clean);
+            if (pn) return pn;
+        } catch {}
+        if (typeof sock.getPNForLID === 'function') {
+            try { const pn = await sock.getPNForLID(clean); if (pn) return pn; } catch {}
+        }
+        // Group metadata fallback
+        if (groupJid) {
+            try {
+                const meta = await sock.groupMetadata(groupJid);
+                for (const p of meta.participants || []) {
+                    const pId = stripDevice(p.id || '');
+                    const pLid = stripDevice(p.lid || '');
+                    if (pId === clean || pLid === clean) {
+                        const pn = p.phoneNumber || p.pn;
+                        if (pn) return stripDevice(pn);
+                    }
+                }
+            } catch {}
+        }
+        return null;
     }
 
+    if (clean.endsWith('@g.us') || clean.endsWith('@newsletter')) return null;
+
+    // @username
+    if (clean.startsWith('@')) {
+        const username = clean.slice(1);
+        if (typeof sock.findUserByUsername === 'function') {
+            try {
+                const user = await sock.findUserByUsername(username);
+                if (user?.jid) {
+                    const jid = stripDevice(user.jid);
+                    if (jid.endsWith('@s.whatsapp.net')) return jid;
+                    if (jid.endsWith('@lid')) {
+                        try {
+                            const pn = await sock.signalRepository?.lidMapping?.getPNForLID?.(jid);
+                            if (pn) return pn;
+                        } catch {}
+                    }
+                }
+            } catch {}
+        }
+        try {
+            const wa = await sock.onWhatsApp(username);
+            if (wa?.[0]?.jid) return stripDevice(wa[0].jid);
+        } catch {}
+        return null;
+    }
+
+    // Bare number
     const digits = clean.replace(/\D/g, '');
     if (digits.length >= 7) {
         try {
-            const results = await sock.onWhatsApp(digits);
-            if (results?.[0]?.jid) return results[0].jid;
-            return digits + '@s.whatsapp.net';
+            const wa = await sock.onWhatsApp(digits);
+            if (wa?.[0]?.jid) {
+                const jid = stripDevice(wa[0].jid);
+                if (jid.endsWith('@s.whatsapp.net')) return jid;
+                if (jid.endsWith('@lid')) {
+                    try {
+                        const pn = await sock.signalRepository?.lidMapping?.getPNForLID?.(jid);
+                        if (pn) return pn;
+                    } catch {}
+                }
+            }
         } catch {}
+        return digits + '@s.whatsapp.net';
     }
 
-    try {
-        const results = await sock.onWhatsApp(clean.replace('@', ''));
-        if (results?.[0]?.jid) return results[0].jid;
-    } catch {}
-
     return null;
-}
-
-// ─────────────────────────────────────────────
-//  Admin checks
-// ─────────────────────────────────────────────
-async function isBotAdmin(sock, groupJid) {
-    try {
-        const meta = await sock.groupMetadata(groupJid);
-        const botJid = sock.user?.id;
-        if (!botJid) return false;
-        return meta.participants.some(p =>
-            p.id === botJid && (p.admin === 'admin' || p.admin === 'superadmin')
-        );
-    } catch { return false; }
 }
 
 // ─────────────────────────────────────────────
@@ -100,44 +134,68 @@ export async function adminAction(sock, chat, msg, args, action) {
         return sock.sendMessage(chat, { text: '❌ This command only works in groups.' }, { quoted: msg });
     }
 
-    // Resolve target: replied user or first arg
     const ctx = msg.message?.extendedTextMessage?.contextInfo;
-    let targetJid = null;
+    let targetRaw = null;
 
     if (ctx?.participant) {
-        targetJid = ctx.participant;
+        targetRaw = ctx.participant;
     } else if (args?.[0]) {
-        targetJid = await resolveTarget(sock, args[0]);
+        targetRaw = args[0];
     }
 
-    if (!targetJid) {
+    if (!targetRaw) {
         return sock.sendMessage(chat, {
-            text: `❌ No target found. Reply to a message or provide a number/username/JID.`
+            text: `❌ No target. Reply to a message or provide a number/username/JID.`
         }, { quoted: msg });
     }
 
+    const targetJid = await resolveToPnJid(sock, targetRaw, chat);
+
+    if (!targetJid) {
+        return sock.sendMessage(chat, {
+            text: `❌ Could not resolve \`${targetRaw}\` to a phone-number JID.\n\n` +
+                  `Try replying to their message, or use their full number (e.g. \`923001234567\`).`
+        }, { quoted: msg });
+    }
+
+    if (DEBUG) console.log(`[admin] ${action} → ${targetJid}`);
+
     try {
-        if (action === 'remove') {
-            await sock.groupParticipantsUpdate(chat, [targetJid], 'remove');
-            return sock.sendMessage(chat, { text: `✅ Removed \`${targetJid.split('@')[0]}\`.` }, { quoted: msg });
+        const result = await sock.groupParticipantsUpdate(chat, [targetJid], action);
+        const status = result?.[0]?.status;
+        const targetNum = targetJid.split('@')[0];
+
+        if (status === '200') {
+            const labels = { remove: 'Removed', add: 'Added', promote: 'Promoted', demote: 'Demoted' };
+            return sock.sendMessage(chat, {
+                text: `✅ ${labels[action] || action} \`${targetNum}\`.`
+            }, { quoted: msg });
         }
 
-        if (action === 'add') {
-            await sock.groupParticipantsUpdate(chat, [targetJid], 'add');
-            return sock.sendMessage(chat, { text: `✅ Added \`${targetJid.split('@')[0]}\`.` }, { quoted: msg });
-        }
+        const errorMap = {
+            '403': 'Forbidden — user privacy settings may prevent this.',
+            '404': 'User not found on WhatsApp.',
+            '408': 'Request timed out.',
+            '409': 'Conflict — user may already be in/out of the group.'
+        };
+        const reason = errorMap[status] || `Status: ${status}`;
+        return sock.sendMessage(chat, {
+            text: `❌ Failed to ${action} \`${targetNum}\`: ${reason}`
+        }, { quoted: msg });
 
-        if (action === 'promote') {
-            await sock.groupParticipantsUpdate(chat, [targetJid], 'promote');
-            return sock.sendMessage(chat, { text: `✅ Promoted \`${targetJid.split('@')[0]}\` to admin.` }, { quoted: msg });
-        }
-
-        if (action === 'demote') {
-            await sock.groupParticipantsUpdate(chat, [targetJid], 'demote');
-            return sock.sendMessage(chat, { text: `✅ Demoted \`${targetJid.split('@')[0]}\` from admin.` }, { quoted: msg });
-        }
     } catch (e) {
-        return sock.sendMessage(chat, { text: `❌ Action failed: ${e.message}` }, { quoted: msg });
+        const msgText = e?.message || String(e);
+        if (msgText.includes('internal-server-error') || msgText.includes('Internal Server Error')) {
+            return sock.sendMessage(chat, {
+                text: `❌ WhatsApp rejected the \`${action}\` request.\n\n` +
+                      `Common causes:\n` +
+                      `• Bot is not admin in this group\n` +
+                      `• Target's privacy settings block this\n` +
+                      `• Target is the group owner\n` +
+                      `• User recently left — try adding them manually first`
+            }, { quoted: msg });
+        }
+        return sock.sendMessage(chat, { text: `❌ Action failed: ${msgText}` }, { quoted: msg });
     }
 }
 
@@ -175,7 +233,7 @@ export async function toggleProtection(sock, chat, msg, args, key) {
 }
 
 // ─────────────────────────────────────────────
-//  Protection handler — called by router
+//  Protection handler
 // ─────────────────────────────────────────────
 export async function handleProtection(sock, chat, msg, text) {
     if (!chat.endsWith('@g.us')) return false;
@@ -183,50 +241,52 @@ export async function handleProtection(sock, chat, msg, text) {
     const settings = getGroupSettings(chat);
     if (!settings.antilink && !settings.antispam && !settings.antisticker) return false;
 
-    // Skip owner
     const from = msg.key.participant || msg.key.remoteJid;
     if (isOwner(from)) return false;
 
-    const sender = msg.key.participant || msg.key.remoteJid;
+    const senderRaw = msg.key.participant || msg.key.remoteJid;
+    let senderPn = senderRaw;
+    if (senderRaw?.endsWith('@lid')) {
+        try {
+            const pn = await sock.signalRepository?.lidMapping?.getPNForLID?.(senderRaw);
+            if (pn) senderPn = pn;
+        } catch {}
+    }
 
-    // Antilink
     if (settings.antilink) {
         const linkPattern = /(https?:\/\/|www\.)\S+/i;
         if (linkPattern.test(text)) {
             try {
                 await sock.sendMessage(chat, { delete: msg.key });
                 await sock.sendMessage(chat, {
-                    text: `🔗 Links are not allowed here, @${sender.split('@')[0]}.`,
-                    mentions: [sender]
+                    text: `🔗 Links not allowed here, @${senderPn.split('@')[0]}.`,
+                    mentions: [senderPn]
                 });
             } catch {}
             return true;
         }
     }
 
-    // Antispam (crude: >5 messages in 10s from same sender)
     if (settings.antispam) {
-        // Simple heuristic: message length > 2000 or excessive caps
         if (text.length > 2000) {
             try {
                 await sock.sendMessage(chat, { delete: msg.key });
                 await sock.sendMessage(chat, {
-                    text: `🚫 That message was too long, @${sender.split('@')[0]}.`,
-                    mentions: [sender]
+                    text: `🚫 Message too long, @${senderPn.split('@')[0]}.`,
+                    mentions: [senderPn]
                 });
             } catch {}
             return true;
         }
     }
 
-    // Antisticker
     if (settings.antisticker) {
         if (msg.message?.stickerMessage) {
             try {
                 await sock.sendMessage(chat, { delete: msg.key });
                 await sock.sendMessage(chat, {
-                    text: `🎨 Stickers are not allowed here, @${sender.split('@')[0]}.`,
-                    mentions: [sender]
+                    text: `🎨 Stickers not allowed here, @${senderPn.split('@')[0]}.`,
+                    mentions: [senderPn]
                 });
             } catch {}
             return true;
