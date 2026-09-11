@@ -1,4 +1,19 @@
-# 👻 WRAITH
+<div align="center">
+
+<!-- ANIMATED TYPING SVG HEADER -->
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&size=40&duration=3000&pause=1000&color=00E5FF&center=true&vCenter=true&width=800&height=80&lines=🤖+𝙒𝙍𝘼𝙄𝙏𝙃+𝙒𝘼+𝘽𝙊𝙏;⚡+𝙏𝙝𝙚+𝙐𝙡𝙩𝙞𝙢𝙖𝙩𝙚+𝙒𝙝𝙖𝙩𝙨𝘼𝙥𝙥+𝘽𝙤𝙏;🚀+𝙋𝙤𝙬𝙚𝙧𝙚𝙙+𝙗𝙮+𝘽𝙖𝙞𝙡𝙚𝙮𝙨;🔥+24%2F7+𝙎𝙩𝙖𝙗𝙡𝙚+%26+𝙁𝙖𝙨𝙩" alt="Typing SVG" />
+
+<!-- VIBRANT ELECTRIC OCEAN HEADER -->
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0052D4,50:1E88E5,100:00E5FF&height=200&section=header&text=MALIK%20MD&fontSize=70&fontColor=ffffff&animation=twinkling&fontAlignY=35" width="100%"/>
+
+<!-- BADGES -->
+<p>
+  <img src="https://img.shields.io/badge/Version-2.0.0-0D47A1?style=for-the-badge&logo=github&logoColor=white&labelColor=000000"/>
+  <img src="https://img.shields.io/badge/Node.js-18%2B-DC2626?style=for-the-badge&logo=node.js&logoColor=white&labelColor=000000"/>
+  <img src="https://img.shields.io/badge/WhiskeySockets-baileys-Latest-0D47A1?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=000000"/>
+  <img src="https://img.shields.io/badge/License-MIT-DC2626?style=for-the-badge&logo=opensourceinitiative&logoColor=white&labelColor=000000"/>
+  <img src="https://img.shields.io/badge/Platform-WhatsApp-25D366?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=000000"/>
+</p>
 
 > A silent watcher for WhatsApp — remembers what was deleted, peeks at what was hidden, lurks on statuses, schedules messages, and manages groups.
 
@@ -159,3 +174,16 @@ MIT
 
 - [Baileys](https://github.com/WhiskeySockets/Baileys) — WhatsApp Web API
 - Built by [@themalik-g](https://github.com/themalik-g)
+
+---
+<!-- VIBRANT ELECTRIC OCEAN FOOTER -->
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:00E5FF,50:1E88E5,100:0052D4&height=150&section=footer&text=Thanks%20For%20Visiting!&fontSize=40&fontColor=ffffff&animation=twinkling&fontAlignY=65" width="100%"/>
+
+<img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=16&duration=3000&pause=1000&color=00E5FF&center=true&vCenter=true&width=600&lines=⭐+Star+this+repo+if+you+like+it!;🍴+Fork+to+contribute!;💬+Issues+and+PRs+are+welcome!" alt="Footer"/>
+
+<br>
+
+**Made with ❤️ by MALIK MEHTAB**
+
+</div>
+
