@@ -1,13 +1,12 @@
 // ─────────────────────────────────────────────
 //  WRAITH · modules/schedule.js
-//  Schedule messages to be sent at a future time.
-//  Format: .schedule <message> <target> dd,mm,yy hour minute am/pm
-//  Or:     .schedule <target> dd,mm,yy hour minute am/pm  (replied message)
+//  Scan-based date/time parser — works with LIDs.
 // ─────────────────────────────────────────────
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { isOwner, ownerJid } from '../core/identity.js';
+import { isOwner } from '../core/identity.js';
+import { stripDevice } from '../core/jid-resolver.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const STATE = path.join(here, '..', 'state', 'schedule.json');
@@ -15,9 +14,6 @@ const DEBUG = process.env.WRAITH_DEBUG === '1';
 
 fs.mkdirSync(path.dirname(STATE), { recursive: true });
 
-// ─────────────────────────────────────────────
-//  State
-// ─────────────────────────────────────────────
 function read() {
     try {
         if (!fs.existsSync(STATE)) return [];
@@ -26,15 +22,82 @@ function read() {
 }
 
 function write(arr) {
-    try {
-        fs.writeFileSync(STATE, JSON.stringify(arr, null, 2));
-    } catch (e) {
-        if (DEBUG) console.log('[schedule] write failed:', e.message);
-    }
+    try { fs.writeFileSync(STATE, JSON.stringify(arr, null, 2)); } catch {}
 }
 
 // ─────────────────────────────────────────────
-//  Resolve target
+//  Scan-based date/time parser
+// ─────────────────────────────────────────────
+function parseDateTime(tokens) {
+    if (tokens.length < 4) {
+        return { ok: false, error: 'Missing date/time. Need: `dd,mm,yy hour minute am/pm`' };
+    }
+
+    let dateIdx = -1;
+    let day, month, year;
+    let dateTokensUsed = 0;
+
+    // Scan for combined date token (e.g. "11,09,26" or "11/09/26" or "11-09-26")
+    for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (/^\d{1,2}[,\/\-]\d{1,2}[,\/\-]\d{2,4}$/.test(t)) {
+            const parts = t.split(/[,\/\-]/).map(Number);
+            [day, month, year] = parts;
+            dateIdx = i;
+            dateTokensUsed = 1;
+            break;
+        }
+    }
+
+    // Fallback: 3 consecutive numeric tokens
+    if (dateIdx === -1) {
+        for (let i = 0; i < tokens.length - 2; i++) {
+            const a = tokens[i], b = tokens[i + 1], c = tokens[i + 2];
+            if (/^\d{1,2}$/.test(a) && /^\d{1,2}$/.test(b) && /^\d{2,4}$/.test(c)) {
+                day = Number(a); month = Number(b); year = Number(c);
+                dateIdx = i;
+                dateTokensUsed = 3;
+                break;
+            }
+        }
+    }
+
+    if (dateIdx === -1) {
+        return { ok: false, error: 'Could not find a date. Use `dd,mm,yy` (e.g. `25,12,26`).' };
+    }
+
+    if (day < 1 || day > 31) return { ok: false, error: `Invalid day: ${day}. Must be 1–31.` };
+    if (month < 1 || month > 12) return { ok: false, error: `Invalid month: ${month}. Must be 1–12.` };
+    if (year < 2026 || year > 2100) return { ok: false, error: `Invalid year: ${year}. Must be 2026–2100.` };
+
+    const timeIdx = dateIdx + dateTokensUsed;
+    const timeTokens = tokens.slice(timeIdx, timeIdx + 3);
+
+    if (timeTokens.length < 3) {
+        return { ok: false, error: 'Missing time. Need: `hour minute am/pm` after the date.' };
+    }
+
+    const [hStr, mStr, ap] = timeTokens;
+    const hour = Number(hStr);
+    const minute = Number(mStr);
+    const ampm = (ap || '').toLowerCase();
+
+    if (isNaN(hour) || hour < 1 || hour > 12) return { ok: false, error: `Invalid hour: ${hStr}. Must be 1–12.` };
+    if (isNaN(minute) || minute < 0 || minute > 59) return { ok: false, error: `Invalid minute: ${mStr}. Must be 0–59.` };
+    if (ampm !== 'am' && ampm !== 'pm') return { ok: false, error: `Invalid am/pm: "${ap}". Must be "am" or "pm".` };
+
+    let h24 = hour % 12;
+    if (ampm === 'pm') h24 += 12;
+
+    const date = new Date(year, month - 1, day, h24, minute, 0);
+    if (isNaN(date.getTime())) return { ok: false, error: 'Could not construct a valid date.' };
+    if (date.getTime() <= Date.now()) return { ok: false, error: 'That time is in the past. Pick a future date/time.' };
+
+    return { ok: true, date, dateIdx, dateTokensUsed };
+}
+
+// ─────────────────────────────────────────────
+//  Target resolver
 // ─────────────────────────────────────────────
 async function resolveTarget(sock, raw) {
     if (!raw) return null;
@@ -43,107 +106,56 @@ async function resolveTarget(sock, raw) {
     if (clean.includes('@')) {
         if (clean.endsWith('@newsletter')) return { jid: clean, type: 'newsletter' };
         if (clean.endsWith('@g.us')) return { jid: clean, type: 'group' };
-        if (clean.endsWith('@s.whatsapp.net') || clean.endsWith('@lid')) return { jid: clean, type: 'user' };
+        if (clean.endsWith('@s.whatsapp.net')) return { jid: stripDevice(clean), type: 'user' };
+        if (clean.endsWith('@lid')) {
+            try {
+                const pn = await sock.signalRepository?.lidMapping?.getPNForLID?.(stripDevice(clean));
+                if (pn) return { jid: pn, type: 'user' };
+            } catch {}
+            return { jid: stripDevice(clean), type: 'lid' };
+        }
+        if (clean.startsWith('@')) {
+            const username = clean.slice(1);
+            if (typeof sock.findUserByUsername === 'function') {
+                try {
+                    const user = await sock.findUserByUsername(username);
+                    if (user?.jid) return { jid: user.jid, type: 'user' };
+                } catch {}
+            }
+            try {
+                const wa = await sock.onWhatsApp(username);
+                if (wa?.[0]?.jid) return { jid: wa[0].jid, type: 'user' };
+            } catch {}
+            return null;
+        }
+        return { jid: clean, type: 'unknown' };
+    }
 
+    if (clean.startsWith('@')) {
+        const username = clean.slice(1);
+        if (typeof sock.findUserByUsername === 'function') {
+            try {
+                const user = await sock.findUserByUsername(username);
+                if (user?.jid) return { jid: user.jid, type: 'user' };
+            } catch {}
+        }
         try {
-            const results = await sock.onWhatsApp(clean.replace('@', ''));
-            if (results?.[0]?.jid) return { jid: results[0].jid, type: 'user' };
+            const wa = await sock.onWhatsApp(username);
+            if (wa?.[0]?.jid) return { jid: wa[0].jid, type: 'user' };
         } catch {}
+        return null;
     }
 
     const digits = clean.replace(/\D/g, '');
     if (digits.length >= 7) {
         try {
-            const results = await sock.onWhatsApp(digits);
-            if (results?.[0]?.jid) return { jid: results[0].jid, type: 'user' };
-            return { jid: digits + '@s.whatsapp.net', type: 'user' };
+            const wa = await sock.onWhatsApp(digits);
+            if (wa?.[0]?.jid) return { jid: wa[0].jid, type: 'user' };
         } catch {}
+        return { jid: digits + '@s.whatsapp.net', type: 'user' };
     }
-
-    try {
-        const results = await sock.onWhatsApp(clean);
-        if (results?.[0]?.jid) return { jid: results[0].jid, type: 'user' };
-    } catch {}
 
     return null;
-}
-
-// ─────────────────────────────────────────────
-//  Parse date/time
-// ─────────────────────────────────────────────
-function parseDateTime(args) {
-    // Expected: dd,mm,yy hour minute ampm  (6 tokens)
-    // Or:       dd mm yy hour minute ampm  (6 tokens)
-    if (args.length < 6) {
-        return { ok: false, error: 'Missing date/time. Need: `dd,mm,yy hour minute am/pm`' };
-    }
-
-    let day, month, year;
-
-    // Handle "dd,mm,yy" as one token or "dd mm yy" as three
-    const datePart = args[0].replace(/,/g, ' ').split(/\s+/).filter(Boolean);
-
-    if (datePart.length === 3) {
-        [day, month, year] = datePart.map(Number);
-    } else if (args.length >= 6 && args[1].includes(',')) {
-        // Maybe "dd,mm" and "yy" split
-        const parts = (args[0] + ' ' + args[1]).replace(/,/g, ' ').split(/\s+/).filter(Boolean);
-        if (parts.length === 3) {
-            [day, month, year] = parts.map(Number);
-            args = args.slice(1); // consume extra token
-        }
-    } else {
-        day = Number(args[0]);
-        month = Number(args[1]);
-        year = Number(args[2]);
-    }
-
-    if (!day || !month || !year || isNaN(day) || isNaN(month) || isNaN(year)) {
-        return { ok: false, error: 'Invalid date. Use `dd,mm,yy` (e.g. `25,12,26`)' };
-    }
-
-    // Validate ranges
-    if (day < 1 || day > 31) return { ok: false, error: `Invalid day: ${day}. Must be 1–31.` };
-    if (month < 1 || month > 12) return { ok: false, error: `Invalid month: ${month}. Must be 1–12.` };
-    if (year < 2026 || year > 2100) return { ok: false, error: `Invalid year: ${year}. Must be 2026–2100.` };
-
-    // Time parsing — find the numeric tokens after the date
-    const timeStartIdx = datePart.length === 3 ? 1 : 3;
-    const timeArgs = args.slice(timeStartIdx);
-
-    if (timeArgs.length < 3) {
-        return { ok: false, error: 'Missing time. Need: `hour minute am/pm`' };
-    }
-
-    const hour = Number(timeArgs[0]);
-    const minute = Number(timeArgs[1]);
-    const ampm = (timeArgs[2] || '').toLowerCase();
-
-    if (isNaN(hour) || hour < 1 || hour > 12) {
-        return { ok: false, error: `Invalid hour: ${timeArgs[0]}. Must be 1–12.` };
-    }
-    if (isNaN(minute) || minute < 0 || minute > 59) {
-        return { ok: false, error: `Invalid minute: ${timeArgs[1]}. Must be 0–59.` };
-    }
-    if (ampm !== 'am' && ampm !== 'pm') {
-        return { ok: false, error: `Invalid am/pm: "${timeArgs[2]}". Must be "am" or "pm".` };
-    }
-
-    // Convert to 24-hour
-    let h24 = hour % 12;
-    if (ampm === 'pm') h24 += 12;
-
-    const date = new Date(year, month - 1, day, h24, minute, 0);
-
-    if (isNaN(date.getTime())) {
-        return { ok: false, error: 'Could not construct a valid date from the given values.' };
-    }
-
-    if (date.getTime() <= Date.now()) {
-        return { ok: false, error: 'That time is in the past. Pick a future date/time.' };
-    }
-
-    return { ok: true, date };
 }
 
 // ─────────────────────────────────────────────
@@ -156,7 +168,6 @@ export async function scheduleCommand(sock, chat, msg, args) {
         return sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
     }
 
-    // No args → show help
     if (!args || args.length === 0) {
         return sock.sendMessage(chat, {
             text:
@@ -164,62 +175,23 @@ export async function scheduleCommand(sock, chat, msg, args) {
                 `*Usage:*\n` +
                 `  _.schedule <message> <target> dd,mm,yy hour minute am/pm_\n` +
                 `  _.schedule <target> dd,mm,yy hour minute am/pm_  (replied message)\n\n` +
-                `*Target can be:*\n` +
-                `  • phone number (923001234567)\n` +
-                `  • WhatsApp username (@ali)\n` +
-                `  • JID (923001234567@s.whatsapp.net)\n` +
-                `  • newsletter JID (...@newsletter)\n\n` +
+                `*Target:* phone number · @username · JID · newsletter JID\n\n` +
                 `*Examples:*\n` +
                 `  _.schedule Hey! 923001234567 25,12,26 10 30 am_\n` +
                 `  _.schedule 25,12,26 10 30 am_  (reply to a message)`
         }, { quoted: msg });
     }
 
-    // Detect if the last 6 tokens look like a date/time block
-    const last6 = args.slice(-6);
-    const hasDateTime = last6.length === 6 && /[,\/]/.test(last6[0] || '') === true ||
-                        (last6.length === 6 && /\d/.test(last6[0]) && /\d/.test(last6[1]));
+    const dt = parseDateTime(args);
 
-    // More robust: check if any token contains a comma or if we have enough numeric tokens
-    let dateTimeOk = false;
-    let dtArgs = null;
-
-    // Try last 6 tokens
-    if (args.length >= 6) {
-        const candidate = args.slice(-6);
-        const dt = parseDateTime(candidate);
-        if (dt.ok) {
-            dateTimeOk = true;
-            dtArgs = dt;
-        }
-    }
-
-    // Try last 7 tokens (in case message has a space)
-    if (!dateTimeOk && args.length >= 7) {
-        const candidate = args.slice(-7);
-        const dt = parseDateTime(candidate);
-        if (dt.ok) {
-            dateTimeOk = true;
-            dtArgs = dt;
-        }
-    }
-
-    if (!dateTimeOk) {
-        // Figure out what's missing
-        if (args.length < 6) {
-            return sock.sendMessage(chat, {
-                text: `❌ Not enough arguments.\n\nYou gave: \`${args.join(' ')}\`\n\nNeed at least 6 tokens for date/time: \`dd,mm,yy hour minute am/pm\`\n\nType _.schedule_ for full help.`
-            }, { quoted: msg });
-        }
+    if (!dt.ok) {
         return sock.sendMessage(chat, {
-            text: `❌ Could not parse date/time from: \`${args.slice(-6).join(' ')}\`\n\nFormat: \`dd,mm,yy hour minute am/pm\`\nExample: \`25,12,26 10 30 am\`\n\nType _.schedule_ for full help.`
+            text: `❌ ${dt.error}\n\nYou gave: \`${args.join(' ')}\`\n\nType _.schedule_ for full help.`
         }, { quoted: msg });
     }
 
-    // Everything before the date-time block is message + target
-    const beforeDateTime = args.slice(0, args.length - (args.length >= 7 && !parseDateTime(args.slice(-6)).ok ? 7 : 6));
+    const beforeDateTime = args.slice(0, dt.dateIdx);
 
-    // Check for replied message
     const ctx = msg.message?.extendedTextMessage?.contextInfo;
     const hasQuote = !!ctx?.quotedMessage;
 
@@ -227,7 +199,6 @@ export async function scheduleCommand(sock, chat, msg, args) {
     let targetRaw = '';
 
     if (hasQuote) {
-        // Replied message + target from beforeDateTime
         messageText = ctx.quotedMessage?.conversation ||
                       ctx.quotedMessage?.extendedTextMessage?.text ||
                       ctx.quotedMessage?.imageMessage?.caption ||
@@ -235,46 +206,41 @@ export async function scheduleCommand(sock, chat, msg, args) {
                       '[media message]';
         targetRaw = beforeDateTime.join(' ').trim();
     } else {
-        // Message + target from beforeDateTime
-        // The target is the LAST token before the date-time block
         if (beforeDateTime.length < 2) {
             return sock.sendMessage(chat, {
-                text: `❌ Missing message and/or target.\n\nYou need: _.schedule <message> <target> dd,mm,yy hour minute am/pm_\nOr reply to a message: _.schedule <target> dd,mm,yy hour minute am/pm_\n\nType _.schedule_ for full help.`
+                text: `❌ Missing message and/or target.\n\nUse: _.schedule <message> <target> dd,mm,yy hour minute am/pm_\nOr reply: _.schedule <target> dd,mm,yy hour minute am/pm_`
             }, { quoted: msg });
         }
-
         targetRaw = beforeDateTime[beforeDateTime.length - 1];
         messageText = beforeDateTime.slice(0, -1).join(' ');
     }
 
     if (!targetRaw) {
         return sock.sendMessage(chat, {
-            text: `❌ Missing target. Who should receive this?\n\nYou can use: phone number, @username, JID, or newsletter JID.\n\nType _.schedule_ for full help.`
+            text: `❌ Missing target. Use: phone number, @username, JID, or newsletter JID.`
         }, { quoted: msg });
     }
 
     if (!messageText || messageText.trim() === '') {
         return sock.sendMessage(chat, {
-            text: `❌ Missing message text.\n\nProvide a message before the target, or reply to a message.\n\nType _.schedule_ for full help.`
+            text: `❌ Missing message text. Provide a message before the target, or reply to a message.`
         }, { quoted: msg });
     }
 
-    // Resolve target
     const target = await resolveTarget(sock, targetRaw);
     if (!target) {
         return sock.sendMessage(chat, {
-            text: `❌ Could not resolve target: \`${targetRaw}\`\n\nMake sure it's a valid phone number, @username, or JID.`
+            text: `❌ Could not resolve target: \`${targetRaw}\``
         }, { quoted: msg });
     }
 
-    // Save schedule
     const schedules = read();
     const entry = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         message: messageText.trim(),
         targetJid: target.jid,
         targetType: target.type,
-        sendAt: dtArgs.date.getTime(),
+        sendAt: dt.date.getTime(),
         createdAt: Date.now(),
         createdBy: from
     };
@@ -282,13 +248,9 @@ export async function scheduleCommand(sock, chat, msg, args) {
     schedules.push(entry);
     write(schedules);
 
-    const stamp = dtArgs.date.toLocaleString('en-GB', {
-        hour12: true,
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
+    const stamp = dt.date.toLocaleString('en-GB', {
+        hour12: true, day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
     });
 
     await sock.sendMessage(chat, {
@@ -302,7 +264,7 @@ export async function scheduleCommand(sock, chat, msg, args) {
 }
 
 // ─────────────────────────────────────────────
-//  Scheduler loop — checks every 30 seconds
+//  Scheduler loop
 // ─────────────────────────────────────────────
 let schedulerTimer = null;
 
@@ -330,11 +292,9 @@ export function startScheduler(sock) {
                 }
             }
 
-            if (remaining.length !== schedules.length) {
-                write(remaining);
-            }
+            if (remaining.length !== schedules.length) write(remaining);
         } catch (e) {
             console.error('[schedule] loop error:', e.message);
         }
     }, 30_000);
-}
+        }
