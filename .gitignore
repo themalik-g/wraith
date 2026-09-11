@@ -1,40 +1,73 @@
-# Dependencies
+# ─────────────────────────────────────────────
+#  Dependencies — reinstall with `npm install`
+# ─────────────────────────────────────────────
 node_modules/
+.npm/
+.cache/
+.yarn/
+package-lock.json.bak
 
-# Runtime
+# ─────────────────────────────────────────────
+#  WhatsApp session — NEVER commit (login hijack risk)
+# ─────────────────────────────────────────────
 session/
+
+# ─────────────────────────────────────────────
+#  Runtime folders
+# ─────────────────────────────────────────────
 vault/
 logs/
+pids/
+.pm2/
 
-# Secrets
+# ─────────────────────────────────────────────
+#  Secrets — NEVER commit
+# ─────────────────────────────────────────────
 .env
 .env.*
+!.env.example
 
-# OS
-.DS_Store
-Thumbs.db
+# ─────────────────────────────────────────────
+#  Runtime state — auto-generated, huge, or personal
+# ─────────────────────────────────────────────
+state/owner.json
+state/ghost-ledger.json
+state/activity.json
+state/channel-cache.json
+state/schedule.json
 
-# Editor
-.vscode/
-.idea/
-*.swp
-
-# Auth session — NEVER commit this
-session/
-
-# Logs
+# ─────────────────────────────────────────────
+#  Logs
+# ─────────────────────────────────────────────
 *.log
-logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
-# PM2
-.pm2/
-pids/
+# ─────────────────────────────────────────────
+#  OS junk
+# ─────────────────────────────────────────────
+.DS_Store
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# Environment
-.env
-.env.local
-.env.*.local
+# ─────────────────────────────────────────────
+#  Editor / IDE
+# ─────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
+# ─────────────────────────────────────────────
+#  Archives / temp
+# ─────────────────────────────────────────────
+*.tgz
+*.tar.gz
+*.zip
+*.bak
+*.tmp
