@@ -1,11 +1,26 @@
 # Dependencies
 node_modules/
 
+# Runtime
+session/
+vault/
+logs/
+
+# Secrets
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
 # Auth session — NEVER commit this
 session/
-
-# Captured media (temporary)
-vault/
 
 # Logs
 *.log
@@ -23,13 +38,3 @@ pids/
 .env.local
 .env.*.local
 
-# OS junk
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Editor
-.vscode/
-.idea/
-*.swp
-*.swo
