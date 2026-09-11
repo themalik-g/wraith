@@ -10,7 +10,7 @@
 <p>
   <img src="https://img.shields.io/badge/Version-2.0.0-0D47A1?style=for-the-badge&logo=github&logoColor=white&labelColor=000000"/>
   <img src="https://img.shields.io/badge/Node.js-20%2B-DC2626?style=for-the-badge&logo=node.js&logoColor=white&labelColor=000000"/>
-  <img src="https://img.shields.io/badge/Whiskey-Sockets-baileys-Latest-0D47A1?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=000000"/>
+  <img src="https://img.shields.io/badge/official--baileys-Latest-0D47A1?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=000000"/>
   <img src="https://img.shields.io/badge/License-MIT-DC2626?style=for-the-badge&logo=opensourceinitiative&logoColor=white&labelColor=000000"/>
   <img src="https://img.shields.io/badge/Platform-WhatsApp-25D366?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=000000"/>
 </p>
