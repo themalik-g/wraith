@@ -15,6 +15,8 @@
   <img src="https://img.shields.io/badge/Platform-WhatsApp-25D366?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=000000"/>
 </p>
 
+---
+
 > A silent watcher for WhatsApp — remembers what was deleted, peeks at what was hidden, lurks on statuses, schedules messages, and manages groups.
 
 Built on [Baileys v7](https://github.com/WhiskeySockets/Baileys) with LID-aware JID resolution.
