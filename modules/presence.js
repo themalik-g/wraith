@@ -1,7 +1,6 @@
 // ─────────────────────────────────────────────
 //  WRAITH · modules/presence.js
-//  Always online, auto-typing, auto-recording,
-//  read receipts toggle.
+//  Always online + typing + recording + read receipts.
 // ─────────────────────────────────────────────
 import fs from 'fs';
 import path from 'path';
@@ -30,15 +29,11 @@ function read() {
 }
 
 function write(o) {
-    try {
-        fs.writeFileSync(STATE, JSON.stringify(o, null, 2));
-    } catch (e) {
-        if (DEBUG) console.log('[presence] write failed:', e.message);
-    }
+    try { fs.writeFileSync(STATE, JSON.stringify(o, null, 2)); } catch {}
 }
 
 // ─────────────────────────────────────────────
-//  Heartbeat — keep online
+//  Heartbeat
 // ─────────────────────────────────────────────
 let heartbeatTimer = null;
 
@@ -54,7 +49,7 @@ export function startPresenceHeartbeat(sock) {
         } catch (e) {
             if (DEBUG) console.log('[presence] heartbeat error:', e.message);
         }
-    }, 8_000); // Baileys presence expires ~10s
+    }, 8_000);
 }
 
 export function shouldReadReceipts() {
@@ -62,7 +57,30 @@ export function shouldReadReceipts() {
 }
 
 // ─────────────────────────────────────────────
-//  .presence — command
+//  Auto typing / recording on inbound message
+// ─────────────────────────────────────────────
+export async function applyAutoPresence(sock, chat) {
+    if (!chat || chat === 'status@broadcast') return;
+    try {
+        const s = read();
+        if (s.autoTyping) {
+            await sock.sendPresenceUpdate('composing', chat);
+            setTimeout(() => {
+                sock.sendPresenceUpdate('paused', chat).catch(() => {});
+            }, 4000);
+        } else if (s.autoRecording) {
+            await sock.sendPresenceUpdate('recording', chat);
+            setTimeout(() => {
+                sock.sendPresenceUpdate('paused', chat).catch(() => {});
+            }, 4000);
+        }
+    } catch (e) {
+        if (DEBUG) console.log('[presence] applyAutoPresence error:', e.message);
+    }
+}
+
+// ─────────────────────────────────────────────
+//  .presence command
 // ─────────────────────────────────────────────
 export async function presenceCommand(sock, chat, msg, args) {
     const from = msg.key.participant || msg.key.remoteJid;
@@ -91,16 +109,28 @@ export async function presenceCommand(sock, chat, msg, args) {
     }
 
     if (a0 === 'online') {
+        if (a1 !== 'on' && a1 !== 'off') {
+            return sock.sendMessage(chat, { text: '⚙️ use _.presence online on|off_' }, { quoted: msg });
+        }
         s.alwaysOnline = a1 === 'on';
         write(s);
-        if (s.alwaysOnline) await sock.sendPresenceUpdate('available');
+        try {
+            if (s.alwaysOnline) await sock.sendPresenceUpdate('available');
+            else await sock.sendPresenceUpdate('unavailable');
+        } catch (e) {
+            if (DEBUG) console.log('[presence] online toggle error:', e.message);
+        }
         return sock.sendMessage(chat, {
             text: s.alwaysOnline ? '✅ Always online enabled.' : '⚫ Always online disabled.'
         }, { quoted: msg });
     }
 
     if (a0 === 'typing') {
+        if (a1 !== 'on' && a1 !== 'off') {
+            return sock.sendMessage(chat, { text: '⚙️ use _.presence typing on|off_' }, { quoted: msg });
+        }
         s.autoTyping = a1 === 'on';
+        if (s.autoTyping) s.autoRecording = false;
         write(s);
         return sock.sendMessage(chat, {
             text: s.autoTyping ? '⌨️ Auto-typing enabled.' : '⌨️ Auto-typing disabled.'
@@ -108,7 +138,11 @@ export async function presenceCommand(sock, chat, msg, args) {
     }
 
     if (a0 === 'recording') {
+        if (a1 !== 'on' && a1 !== 'off') {
+            return sock.sendMessage(chat, { text: '⚙️ use _.presence recording on|off_' }, { quoted: msg });
+        }
         s.autoRecording = a1 === 'on';
+        if (s.autoRecording) s.autoTyping = false;
         write(s);
         return sock.sendMessage(chat, {
             text: s.autoRecording ? '🎙️ Auto-recording enabled.' : '🎙️ Auto-recording disabled.'
@@ -116,6 +150,9 @@ export async function presenceCommand(sock, chat, msg, args) {
     }
 
     if (a0 === 'reads' || a0 === 'receipts') {
+        if (a1 !== 'on' && a1 !== 'off') {
+            return sock.sendMessage(chat, { text: '⚙️ use _.presence reads on|off_' }, { quoted: msg });
+        }
         s.readReceipts = a1 === 'on';
         write(s);
         return sock.sendMessage(chat, {
