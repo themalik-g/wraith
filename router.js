@@ -18,8 +18,9 @@ import { scheduleCommand } from './modules/schedule.js';
 import { adminAction, toggleProtection, handleProtection } from './modules/admin.js';
 import { getppCommand } from './modules/profile.js';
 import { getjidCommand } from './modules/jid.js';
-import { presenceCommand, shouldReadReceipts } from './modules/presence.js';
+import { presenceCommand, shouldReadReceipts, applyAutoPresence } from './modules/presence.js';
 import { activityCommand, trackActivity } from './modules/activity.js';
+import { cacheChannelFromMessage } from './core/jid-resolver.js';
 
 // ─────────────────────────────────────────────
 //  Plain text extractor
@@ -54,6 +55,11 @@ export async function dispatch(sock, update) {
                 console.error('[router] trackActivity', e.message);
             }
 
+            // ── Channel cache ──
+            try { cacheChannelFromMessage(msg); } catch (e) {
+                console.error('[router] cacheChannelFromMessage', e.message);
+            }
+
             // ── Read receipts ──
             try {
                 if (shouldReadReceipts() && !msg.key.fromMe && chat !== 'status@broadcast') {
@@ -70,12 +76,10 @@ export async function dispatch(sock, update) {
                 await revealDelete(sock, msg);
                 continue;
             }
-
             if (kind === 'edit') {
                 await revealEdit(sock, msg);
                 continue;
             }
-
             if (kind === 'secret_edit') {
                 await revealSecretEdit(sock, msg);
                 continue;
@@ -95,6 +99,11 @@ export async function dispatch(sock, update) {
             // ── Statuses handled separately ──
             if (chat === 'status@broadcast') continue;
 
+            // ── Auto presence ──
+            try { await applyAutoPresence(sock, chat); } catch (e) {
+                console.error('[router] applyAutoPresence', e.message);
+            }
+
             // ── Group protection ──
             try {
                 const blocked = await handleProtection(sock, chat, msg, plainText(msg));
@@ -112,7 +121,6 @@ export async function dispatch(sock, update) {
             const rest = firstSpace === -1 ? [] : text.slice(firstSpace + 1).trim().split(/\s+/);
 
             switch (verb) {
-                // ── Existing ──
                 case 'ghost': await ghostCommand(sock, chat, msg, rest); break;
                 case 'peek':  await peekCommand(sock, chat, msg, rest);  break;
                 case 'lurk':  await lurkCommand(sock, chat, msg, rest);  break;
@@ -120,7 +128,6 @@ export async function dispatch(sock, update) {
                 case 'help':
                 case 'menu':  await helpCommand(sock, chat, msg, rest);  break;
 
-                // ── New features ──
                 case 'schedule':   await scheduleCommand(sock, chat, msg, rest); break;
                 case 'kick':       await adminAction(sock, chat, msg, rest, 'remove');   break;
                 case 'add':        await adminAction(sock, chat, msg, rest, 'add');     break;
