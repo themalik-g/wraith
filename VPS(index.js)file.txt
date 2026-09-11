@@ -1,0 +1,233 @@
+#!/usr/bin/env node
+/**
+ * ┌──────────────────────────────────────────────┐
+ * │  👻  wraith · vps ignition                   │
+ * │  drop this file alone into the container     │
+ * │  root and it will handle the rest.           │
+ * └──────────────────────────────────────────────┘
+ *
+ *   node ignition.cjs
+ */
+
+const { spawn, spawnSync } = require('node:child_process');
+const { existsSync, rmSync }  = require('node:fs');
+const path                    = require('node:path');
+
+// ══════════════════════════════════════════════════
+//  constants
+// ══════════════════════════════════════════════════
+
+const SOURCE      = 'https://github.com/themalik-g/wraith.git';
+const HOME_DIR    = 'wraith';
+const ENTRY_FILE  = 'start.js';
+const RUNTIME     = 'node';
+
+// crash envelope — sliding window + exponential backoff
+const WINDOW_MS      = 30_000;
+const MAX_CRASHES    = 6;
+const BACKOFF_START  = 1_500;
+const BACKOFF_CEIL   = 30_000;
+
+const CLONE_TIMEOUT   = 180_000;
+const INSTALL_TIMEOUT = 300_000;
+
+// ══════════════════════════════════════════════════
+//  terminal dye
+// ══════════════════════════════════════════════════
+
+const dye    = (code, s) => `\x1b[${code}m${s}\x1b[0m`;
+const grey   = s => dye(90, s);
+const cyan   = s => dye(36, s);
+const violet = s => dye(35, s);
+const green  = s => dye(32, s);
+const yellow = s => dye(33, s);
+const red    = s => dye(31, s);
+
+const clock = () => grey(new Date().toTimeString().slice(0, 8));
+const say   = (...parts) => console.log(clock(), violet('❯'), ...parts);
+
+const veil = () => {
+    console.log();
+    console.log(violet('     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·'));
+    console.log(violet('           w r a i t h'));
+    console.log(violet('     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·'));
+    console.log();
+};
+
+// ══════════════════════════════════════════════════
+//  state
+// ══════════════════════════════════════════════════
+
+const crashes = [];
+let backoff   = BACKOFF_START;
+let child     = null;
+let exiting   = false;
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function recentCrashes() {
+    const cutoff = Date.now() - WINDOW_MS;
+    while (crashes.length && crashes[0] < cutoff) crashes.shift();
+    return crashes.length;
+}
+
+// ══════════════════════════════════════════════════
+//  steps — fetch · install · prepare
+// ══════════════════════════════════════════════════
+
+function fetchSource() {
+    say(yellow('fetching wraith from origin'));
+    say(grey('   this can take a minute or two…'));
+
+    const res = spawnSync('git', ['clone', '--depth', '1', SOURCE, HOME_DIR], {
+        stdio:   'inherit',
+        timeout: CLONE_TIMEOUT
+    });
+
+    if (res.error || res.status !== 0) {
+        console.error(clock(), red('✖ clone failed'));
+        console.error(clock(), grey('   is git installed? is the URL reachable?'));
+        process.exit(1);
+    }
+
+    say(green('✓ source acquired'));
+}
+
+function installDeps() {
+    say(yellow('resolving dependencies'));
+    say(grey('   npm install inside ') + cyan(HOME_DIR));
+
+    const res = spawnSync('npm', ['install', '--no-audit', '--no-fund'], {
+        cwd:     HOME_DIR,
+        stdio:   'inherit',
+        timeout: INSTALL_TIMEOUT
+    });
+
+    if (res.error || res.status !== 0) {
+        console.error(clock(), red('✖ npm install failed'));
+        process.exit(1);
+    }
+
+    say(green('✓ dependencies locked in'));
+}
+
+function prepare() {
+    const dir = HOME_DIR;
+    const pkg = path.join(dir, 'package.json');
+    const mod = path.join(dir, 'node_modules');
+
+    if (!existsSync(dir)) {
+        say(yellow('no local copy found — fresh drop'));
+        fetchSource();
+        installDeps();
+        return;
+    }
+
+    if (!existsSync(pkg)) {
+        say(yellow('folder present but incomplete — rebuilding'));
+        rmSync(dir, { recursive: true, force: true });
+        fetchSource();
+        installDeps();
+        return;
+    }
+
+    if (!existsSync(mod)) {
+        say(yellow('source present but node_modules missing'));
+        installDeps();
+        return;
+    }
+
+    say(green('✓ existing installation detected — skipping fetch'));
+}
+
+// ══════════════════════════════════════════════════
+//  runtime
+// ══════════════════════════════════════════════════
+
+function wake() {
+    say(cyan('wraith is waking'));
+
+    child = spawn(RUNTIME, [ENTRY_FILE], {
+        cwd:   HOME_DIR,
+        stdio: 'inherit'
+    });
+
+    child.on('error', err => {
+        console.error(clock(), red('spawn error:'), err.message);
+    });
+
+    child.on('exit', (code, signal) => {
+        child = null;
+
+        // user-initiated shutdown
+        if (exiting) {
+            process.exit(0);
+        }
+
+        if (signal === 'SIGINT' || signal === 'SIGTERM') {
+            say(grey('wraith fell silent on purpose'));
+            process.exit(0);
+        }
+
+        if (code === 0) {
+            say(grey('wraith exited cleanly'));
+            process.exit(0);
+        }
+
+        // crash bookkeeping
+        crashes.push(Date.now());
+        const recent = recentCrashes();
+
+        if (recent > MAX_CRASHES) {
+            console.error(clock(), red('✖ too many crashes — wraith will not continue'));
+            console.error(clock(), grey(`   ${recent} exits inside ${WINDOW_MS / 1000}s`));
+            process.exit(1);
+        }
+
+        const wait = Math.min(backoff, BACKOFF_CEIL);
+        say(
+            yellow(`exit code ${code} · retrying in ${(wait / 1000).toFixed(1)}s`) +
+            grey(`  (${recent}/${MAX_CRASHES})`)
+        );
+
+        backoff = Math.min(backoff * 2, BACKOFF_CEIL);
+        setTimeout(wake, wait);
+    });
+
+    // once it survives a little while, forget the backoff debt
+    setTimeout(() => { backoff = BACKOFF_START; }, 20_000);
+}
+
+// ══════════════════════════════════════════════════
+//  signals — graceful shutdown
+// ══════════════════════════════════════════════════
+
+function quiet(sig) {
+    if (exiting) return;
+    exiting = true;
+
+    say(grey(`${sig} received — wrapping up`));
+    if (child) {
+        try { child.kill('SIGTERM'); } catch {}
+    }
+    setTimeout(() => process.exit(0), 800);
+}
+
+process.on('SIGINT',  () => quiet('SIGINT'));
+process.on('SIGTERM', () => quiet('SIGTERM'));
+
+// ══════════════════════════════════════════════════
+//  go
+// ══════════════════════════════════════════════════
+
+(async () => {
+    veil();
+    try {
+        prepare();
+        console.log();
+        wake();
+    } catch (e) {
+        console.error(clock(), red('fatal:'), e.message);
+        process.exit(1);
+    }
+})();

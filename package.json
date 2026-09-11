@@ -1,0 +1,27 @@
+{
+  "name": "wraith",
+  "version": "1.0.0",
+  "description": "A silent watcher for WhatsApp — remembers what was deleted, peeks at what was hidden.",
+  "type": "module",
+  "main": "start.js",
+  "scripts": {
+    "start": "node start.js",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop wraith",
+    "pm2:restart": "pm2 restart wraith",
+    "pm2:delete": "pm2 delete wraith",
+    "pm2:logs": "pm2 logs wraith",
+    "pm2:save": "pm2 save",
+    "pm2:status": "pm2 status"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc.14",
+    "@hapi/boom": "^10.0.1",
+    "awesome-phonenumber": "^7.5.0",
+    "pino": "^8.21.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}
