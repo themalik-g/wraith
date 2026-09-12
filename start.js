@@ -6,7 +6,6 @@ import makeWASocket, {
     useMultiFileAuthState,
     DisconnectReason,
     fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore,
     delay
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
@@ -30,6 +29,23 @@ const OWNER_FILE = path.join(here, 'state', 'owner.json');
 fs.mkdirSync(AUTH_DIR, { recursive: true });
 
 const log = pino({ level: 'silent' });
+
+// ─────────────────────────────────────────────
+//  Outgoing message store
+//  Required so Baileys can answer retry receipts
+//  (otherwise recipient shows "Waiting for this message")
+// ─────────────────────────────────────────────
+const MESSAGE_STORE = new Map();
+const MESSAGE_STORE_MAX = 500;
+
+function rememberMessage(msg) {
+    if (!msg?.key?.id || !msg?.message) return;
+    MESSAGE_STORE.set(msg.key.id, msg.message);
+    if (MESSAGE_STORE.size > MESSAGE_STORE_MAX) {
+        const oldest = MESSAGE_STORE.keys().next().value;
+        MESSAGE_STORE.delete(oldest);
+    }
+}
 
 // ─────────────────────────────────────────────
 //  Terminal dye
@@ -140,10 +156,26 @@ async function showPairingCode(sock, number, attempt = 0) {
 //  Boot
 // ─────────────────────────────────────────────
 let isStarting = false;
+let currentSock = null;
+
+function teardownSock() {
+    if (!currentSock) return;
+    const s = currentSock;
+    currentSock = null;
+    try { s.ev.removeAllListeners('connection.update'); } catch {}
+    try { s.ev.removeAllListeners('creds.update'); } catch {}
+    try { s.ev.removeAllListeners('messages.upsert'); } catch {}
+    try { s.ev.removeAllListeners('messages.update'); } catch {}
+    try { s.ev.removeAllListeners('messages.reaction'); } catch {}
+    try { s.end(undefined); } catch {}
+}
 
 async function ignite() {
     if (isStarting) return;
     isStarting = true;
+
+    // Ensure no leftover socket from a previous attempt is still alive.
+    teardownSock();
 
     try {
         const { version } = await fetchLatestBaileysVersion();
@@ -155,17 +187,32 @@ async function ignite() {
             printQRInTerminal: false,
             auth: {
                 creds: state.creds,
-                keys: makeCacheableSignalKeyStore(state.keys, log)
+                keys: state.keys
             },
             browser: ['Ubuntu', 'Chrome', '20.0.04'],
             markOnlineOnConnect: false,
             generateHighQualityLinkPreview: false,
             syncFullHistory: false,
-            getMessage: async () => undefined,
+            // ── FIX: answer retry receipts from our message store ──
+            getMessage: async (key) => MESSAGE_STORE.get(key.id) || undefined,
             defaultQueryTimeoutMs: 60000,
             connectTimeoutMs: 60000,
             keepAliveIntervalMs: 10000
         });
+
+        currentSock = sock;
+
+        // ── FIX: store every outgoing message so retries can be answered ──
+        const _origSendMessage = sock.sendMessage.bind(sock);
+        sock.sendMessage = async (jid, content, options) => {
+            const sent = await _origSendMessage(jid, content, options);
+            try {
+                if (sent?.key?.id && sent?.message) {
+                    rememberMessage(sent);
+                }
+            } catch {}
+            return sent;
+        };
 
         // ── PAIRING ──
         if (!sock.authState.creds.registered) {
@@ -182,34 +229,34 @@ async function ignite() {
             if (connection === 'open') {
                 isStarting = false;
                 console.log(green(`\n👻 ${CONFIG.botName} online as ${sock.user?.id?.split(':')[0]}\n`));
-                // Background services (presence heartbeat is the SINGLE
-                // presence keep-alive — no duplicates)
                 startScheduler(sock);
                 startPresenceHeartbeat(sock);
             }
 
             if (connection === 'close') {
-                isStarting = false;
-
                 const statusCode =
                     lastDisconnect?.error instanceof Boom
                         ? lastDisconnect.error.output?.statusCode
                         : 0;
 
-                // ── FIX #1: logged out → wipe session and restart
-                //     straight into the pairing flow automatically ──
+                // logged out → wipe session and restart into pairing flow
                 if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
                     console.log(red('👻 logged out · wiping session'));
+                    teardownSock();
                     try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch {}
                     try { fs.mkdirSync(AUTH_DIR, { recursive: true }); } catch {}
                     console.log(yellow('👻 restarting into pairing mode…'));
+                    isStarting = false;
                     setTimeout(ignite, 1500);
                     return;
                 }
 
                 console.log(yellow(`👻 reconnecting (${statusCode})…`));
+                teardownSock();
                 await delay(CONFIG.reconnectDelay);
-                setTimeout(ignite, 100);
+                // release the guard only when we are actually ready to restart
+                isStarting = false;
+                ignite();
             }
         });
 
@@ -227,6 +274,9 @@ async function ignite() {
                     ? Object.keys(u.messages[0].message)
                     : null
             });
+
+            // remember incoming messages too (helps retries/edits/replies)
+            for (const m of u.messages || []) rememberMessage(m);
 
             await dispatch(sock, u);
 
@@ -264,6 +314,7 @@ async function ignite() {
     } catch (err) {
         isStarting = false;
         console.error(red('boot failure ·'), err.message);
+        teardownSock();
         setTimeout(ignite, CONFIG.reconnectDelay);
     }
 }
@@ -273,6 +324,7 @@ async function ignite() {
 // ─────────────────────────────────────────────
 function shutdown(signal) {
     console.log(grey(`\n👻 ${signal} received · shutting down…`));
+    teardownSock();
     setTimeout(() => process.exit(0), 500);
 }
 
