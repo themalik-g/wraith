@@ -6,7 +6,7 @@ import {
     generateWAMessageFromContent
 } from '@whiskeysockets/baileys';
 
-import { isOwner, ownerJid, digitsOf } from '../core/identity.js';
+import { isOwner, ownerJid, digitsOf, isOwnerChat } from '../core/identity.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const STATE = path.join(here, '..', 'state', 'peek.json');
@@ -333,6 +333,9 @@ export async function peekCommand(sock, chat, msg, args) {
 export async function autoPeek(sock, msg) {
     const s = read();
     if (!s.auto) return;
+
+    // ── Skip owner DM — prevents spam loop ──
+    if (isOwnerChat(msg.key?.remoteJid)) return;
 
     if (msg.key?.isViewOnce === true && !msg.message) {
         if (DEBUG) console.log('[peek:auto] stub without content — skipped');
