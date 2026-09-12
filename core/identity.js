@@ -37,3 +37,15 @@ export function ownerJid() {
 export function digitsOf(jid) {
     return (jid || '').split(':')[0].split('@')[0].replace(/\D/g, '');
 }
+/**
+ * Returns true if the given JID is the owner's own DM chat.
+ * Used to prevent ghost/peek from tracking their own reports
+ * (which would cause an infinite report loop).
+ */
+export function isOwnerChat(jid) {
+    if (!jid || typeof jid !== 'string') return false;
+    const target = CONFIG.owner.replace(/\D/g, '');
+    if (!target) return false;
+    const bare = jid.split('@')[0].split(':')[0].replace(/\D/g, '');
+    return bare === target;
+}
