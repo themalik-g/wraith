@@ -13,11 +13,11 @@ const REGISTRY = [
         icon: '👻',
         title: 'ɢʜᴏꜱᴛ',
         commands: [
-            { cmd: '.ghost',          desc: 'watcher status' },
-            { cmd: '.ghost on',       desc: 'arm antidelete' },
-            { cmd: '.ghost off',      desc: 'disarm antidelete' },
-            { cmd: '.ghost edit on',  desc: 'arm antiedit' },
-            { cmd: '.ghost edit off', desc: 'disarm antiedit' }
+            { cmd: '.ghost',          desc: 'check status' },
+            { cmd: '.ghost on',       desc: 'to enable' },
+            { cmd: '.ghost off',      desc: 'to disable' },
+            { cmd: '.ghost edit on',  desc: 'to enable' },
+            { cmd: '.ghost edit off', desc: 'to. disable' }
         ]
     },
     {
@@ -25,12 +25,12 @@ const REGISTRY = [
         icon: '👁️',
         title: 'ᴘᴇᴇᴋ',
         commands: [
-            { cmd: '.peek',             desc: 'reply to a view-once to reveal' },
-            { cmd: '.peek auto on',     desc: 'auto-forward incoming view-onces' },
-            { cmd: '.peek auto off',    desc: 'disable auto-peek' },
-            { cmd: '.peek dest owner',  desc: 'reveals to owner DM' },
-            { cmd: '.peek dest same',   desc: 'reveals to same chat' },
-            { cmd: '.peek dest both',   desc: 'reveals to both' }
+            { cmd: '.peek',             desc: 'reveals view-once' },
+            { cmd: '.peek auto on',     desc: 'auto-save vv' },
+            { cmd: '.peek auto off',    desc: 'disable avv' },
+            { cmd: '.peek dest owner',  desc: 'owner DM' },
+            { cmd: '.peek dest same',   desc: 'chat itself' },
+            { cmd: '.peek dest both',   desc: 'both' }
         ]
     },
     {
@@ -39,23 +39,24 @@ const REGISTRY = [
         title: 'ʟᴜʀᴋ',
         commands: [
             { cmd: '.lurk',                desc: 'status watcher status' },
-            { cmd: '.lurk on',             desc: 'auto-view every status' },
+            { cmd: '.lurk on',             desc: 'auto-view status' },
             { cmd: '.lurk off',            desc: 'stop auto-viewing' },
-            { cmd: '.lurk react on',       desc: 'react to statuses' },
-            { cmd: '.lurk download on',    desc: 'save statuses to DM' },
-            { cmd: '.lurk download off',   desc: 'stop saving statuses' },
-            { cmd: '.lurk emoji ❤️',       desc: 'set reaction emoji' },
-            { cmd: '.lurk emoji random',   desc: 'random emoji per status' }
+            { cmd: '.lurk react on',       desc: 'status-react' },
+            { cmd: '.lurk download on',    desc: 'save-status' },
+            { cmd: '.lurk download off',   desc: 'stop s-saving' },
+            { cmd: '.lurk emoji ',       desc: 'reaction emoji' },
+            { cmd: '.lurk emoji random',   desc: 'random-react' }
         ]
     },
     {
+    
         id: 'schedule',
         icon: '📅',
         title: 'ꜱᴄʜᴇᴅᴜʟᴇ',
         commands: [
             { cmd: '.schedule',                     desc: 'schedule help' },
-            { cmd: '.schedule <msg> <target> date', desc: 'schedule a message' },
-            { cmd: '.schedule list',                desc: 'show pending schedules' },
+            { cmd: '.schedule <msg> <target> │ date', desc: 'schedule a message' },
+            { cmd: '.schedule list',                desc: 'show pending' },
             { cmd: '.schedule cancel <id>',         desc: 'cancel a schedule' }
         ]
     },
