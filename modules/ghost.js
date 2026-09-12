@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { writeFile } from 'fs/promises';
 import { downloadContentFromMessage, proto } from '@whiskeysockets/baileys';
 
-import { isOwner, ownerJid, digitsOf } from '../core/identity.js';
+import { isOwner, ownerJid, digitsOf, isOwnerChat } from '../core/identity.js';
 import { vaultPath, dropFromVault } from '../core/vault.js';
 import { CONFIG } from '../config.js';
 import { readJson, writeJsonAtomic } from '../core/state-io.js';
