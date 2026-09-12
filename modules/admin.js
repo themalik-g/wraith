@@ -135,19 +135,41 @@ export async function adminAction(sock, chat, msg, args, action) {
     }
 
     const ctx = msg.message?.extendedTextMessage?.contextInfo;
-    let targetRaw = null;
+let targetRaw = null;
+let targetSource = null;
 
-    if (ctx?.participant) {
-        targetRaw = ctx.participant;
-    } else if (args?.[0]) {
-        targetRaw = args[0];
-    }
+// ── Priority 1: replied message ──
+if (ctx?.participant) {
+    targetRaw = ctx.participant;
+    targetSource = 'reply';
+}
+// ── Priority 2: @mention (WhatsApp puts the real JID here) ──
+else if (Array.isArray(ctx?.mentionedJid) && ctx.mentionedJid.length > 0) {
+    targetRaw = ctx.mentionedJid[0];
+    targetSource = 'mention';
+}
+// ── Priority 3: raw arg (number / @username / JID) ──
+else if (args?.[0]) {
+    let raw = args[0];
 
-    if (!targetRaw) {
-        return sock.sendMessage(chat, {
-            text: `❌ No target. Reply to a message or provide a number/username/JID.`
-        }, { quoted: msg });
+    // If it looks like "@1234567890" (digits after @), treat as LID digits
+    if (/^@\d{7,}$/.test(raw)) {
+        const digits = raw.slice(1);
+        targetRaw = digits + '@lid';   // 👈 the key fix
+        targetSource = 'mention-digits';
+    } else {
+        targetRaw = raw;
+        targetSource = 'arg';
     }
+}
+
+if (!targetRaw) {
+    return sock.sendMessage(chat, {
+        text: `❌ No target found. Reply to a message, @mention someone, or provide a number/username/JID.`
+    }, { quoted: msg });
+}
+
+if (DEBUG) console.log(`[admin] target resolved from ${targetSource}: ${targetRaw}`);
 
     const targetJid = await resolveToPnJid(sock, targetRaw, chat);
 
