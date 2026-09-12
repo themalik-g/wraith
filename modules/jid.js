@@ -77,7 +77,22 @@ function formatGroupMembers(members, subject) {
 
 export async function getjidCommand(sock, chat, msg, args) {
     const from = msg.key.participant || msg.key.remoteJid;
-    if (!msg.key.fromMe && !isOwner(from)) {
+    const isChannel = chat?.endsWith('@newsletter');
+
+    // ── In channels, allow through: only channel admins can post,
+    //    and WhatsApp delivers channel posts with an ambiguous sender.
+    //    Also accept remoteJidAlt as a fallback owner signal for DMs.
+    const isOwnerFromAlt = msg.key?.remoteJidAlt
+        ? isOwner(msg.key.remoteJidAlt)
+        : false;
+
+    const allowed =
+        msg.key.fromMe ||
+        isChannel ||
+        isOwner(from) ||
+        isOwnerFromAlt;
+
+    if (!allowed) {
         return sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
     }
 
