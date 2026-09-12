@@ -149,16 +149,16 @@ function renderAll() {
     );
 
     return [
-        `┌──❮ 👤 ${CONFIG.botName} ❯`,
+        `┌──❮ 🤖 ${CONFIG.botName} ❯`,
         '│',
-        `│ 🤖 ᴀʟʟ ᴄᴏᴍᴍᴀɴᴅꜱ ᴀʀᴇ ᴏᴡɴᴇʀ-ᴏɴʟʏ`,
+        `│  ᴄᴏᴍᴍᴀɴᴅꜱ ᴀʀᴇ ᴏᴡɴᴇʀ-ᴏɴʟʏ`,
         `│ 🔑 ᴘʀᴇꜰɪx · .`,
         '│',
         TAIL,
         '',
         ...sections,
         '',
-        `_Specific help: .menu <group> _`
+        `ⓌⓇⒶⒾⓉⒽ`
     ].join('\n');
 }
 
@@ -167,7 +167,7 @@ function renderGroup(name) {
     if (!g) return null;
     return renderBox(
         `${g.icon} ${g.title}`,
-        g.commands.map(c => `${c.cmd} — ${c.desc}`)
+        g.commands.map(c => `${c.cmd}`)
     );
 }
 
