@@ -20,12 +20,12 @@ const DEBUG = process.env.WRAITH_DEBUG === '1';
 
 function formatResult(res, inputLabel) {
     const lines = [];
-    lines.push(`📌 *JID lookup* · \`${inputLabel}\``);
+    lines.push(`📌 *JID lookup* · *${inputLabel}*`);
     lines.push('');
 
     if (res.pn) {
         lines.push(`✅ *PN JID*`);
-        lines.push(`\`${res.pn}\``);
+        lines.push(`*${res.pn}*`);
     } else {
         lines.push(`❌ *PN JID* — not found`);
         if (res.reason) lines.push(`_${res.reason}_`);
@@ -33,7 +33,7 @@ function formatResult(res, inputLabel) {
     lines.push('');
     if (res.lid) {
         lines.push(`✅ *LID JID*`);
-        lines.push(`\`${res.lid}\``);
+        lines.push(`*${res.lid}*`);
     } else {
         lines.push(`❌ *LID JID* — not found`);
         if (res.reason) lines.push(`_${res.reason}_`);
@@ -53,7 +53,7 @@ function formatChannels(channels, source, note) {
     const lines = ['📡 *joined channels*', ''];
     for (const c of channels) {
         lines.push(`• ${c.name}`);
-        lines.push(`  \`${c.jid}\``);
+        lines.push(`  *${c.jid}*`);
         if (c.subscribers) lines.push(`  _${c.subscribers} subscribers_`);
     }
     if (source) lines.push(`\n_source: ${source}_`);
@@ -69,8 +69,8 @@ function formatGroupMembers(members, subject) {
         const label = m.pn ? m.pn.split('@')[0] : (m.lid ? m.lid.split('@')[0] : 'unknown');
         const adminTag = m.admin ? ` [${m.admin}]` : '';
         lines.push(`• ${label}${adminTag}`);
-        if (m.pn) lines.push(`  PN: \`${m.pn}\``);
-        if (m.lid) lines.push(`  LID: \`${m.lid}\``);
+        if (m.pn) lines.push(`  PN: *${m.pn}*`);
+        if (m.lid) lines.push(`  LID: *${m.lid}*`);
     }
     return lines.join('\n');
 }
@@ -116,7 +116,7 @@ export async function getjidCommand(sock, chat, msg, args) {
 
         if (chatType === 'newsletter') {
             const meta = await fetchNewsletterMeta(sock, chat);
-            const lines = ['📌 *Current channel*', '', '*JID*', `\`${chat}\``];
+            const lines = ['📌 *Current channel*', '', '*JID*', `*${chat}*`];
             if (meta?.name) {
                 lines.push('');
                 lines.push(`📛 *Name:* ${meta.name}`);
@@ -131,7 +131,7 @@ export async function getjidCommand(sock, chat, msg, args) {
 
         if (chatType === 'group') {
             return sock.sendMessage(chat, {
-                text: `📌 *Current chat JID*\n\`${chat}\`\n\n_Group — use \`.getjid members\` to list participants._`
+                text: `📌 *Current chat JID*\n*${chat}*\n\n_Group — use .getjid members to list participants._`
             }, { quoted: msg });
         }
 
@@ -164,7 +164,7 @@ export async function getjidCommand(sock, chat, msg, args) {
     if (sub === 'owner') {
         const targetRaw = args?.slice(1).join(' ');
         if (!targetRaw) {
-            return sock.sendMessage(chat, { text: '❌ Usage: `.getjid owner <number|@username|jid>`' }, { quoted: msg });
+            return sock.sendMessage(chat, { text: '❌ Usage: .getjid owner <number|@username|jid>' }, { quoted: msg });
         }
         const res = await resolveBoth(sock, targetRaw);
         return sock.sendMessage(chat, { text: formatResult(res, targetRaw) }, { quoted: msg });
@@ -175,7 +175,7 @@ export async function getjidCommand(sock, chat, msg, args) {
         const groupJid = args?.[1] || chat;
         const targetRaw = args?.slice(2).join(' ') || ctx?.participant;
         if (!groupJid.endsWith('@g.us')) {
-            return sock.sendMessage(chat, { text: '❌ Usage: `.getjid group <groupJid> <targetJid>` or reply in a group.' }, { quoted: msg });
+            return sock.sendMessage(chat, { text: '❌ Usage: .getjid group <groupJid> <targetJid> or reply in a group.' }, { quoted: msg });
         }
         if (!targetRaw) {
             return sock.sendMessage(chat, { text: '❌ Provide a target JID or reply to a message.' }, { quoted: msg });
@@ -220,16 +220,16 @@ export async function getjidCommand(sock, chat, msg, args) {
     const chatType = jidType(chat);
     if (chatType === 'group') {
         return sock.sendMessage(chat, {
-            text: `📌 *Current chat JID*\n\`${chat}\`\n\n_Use \`.getjid members\` to list all participants._`
+            text: `📌 *Current chat JID*\n*${chat}*\n\n_Use .getjid members to list all participants._`
         }, { quoted: msg });
     }
     if (chatType === 'newsletter') {
         const meta = await fetchNewsletterMeta(sock, chat);
-        const lines = [`📌 *Current channel*`, '', `\`${chat}\``];
+        const lines = [`📌 *Current channel*`, '', `*${chat}*`];
         if (meta?.name) lines.push(`\n📛 *${meta.name}*`);
         return sock.sendMessage(chat, { text: lines.join('\n') }, { quoted: msg });
     }
     return sock.sendMessage(chat, {
-        text: `📌 *Current chat JID*\n\`${chat}\`\n\n_Reply to a message or provide a number/username/JID for full lookup._`
+        text: `📌 *Current chat JID*\n*${chat}*\n\n_Reply to a message or provide a number/username/JID for full lookup._`
     }, { quoted: msg });
 }
