@@ -188,10 +188,54 @@ if (DEBUG) console.log(`[admin] target resolved from ${targetSource}: ${targetRa
         const targetNum = targetJid.split('@')[0];
 
         if (status === '200') {
-            const labels = { remove: 'Removed', add: 'Added', promote: 'Promoted', demote: 'Demoted' };
-            return sock.sendMessage(chat, {
-                text: `✅ ${labels[action] || action} \`${targetNum}\`.`
-            }, { quoted: msg });
+    const labels = { remove: 'Removed', add: 'Added', promote: 'Promoted', demote: 'Demoted' };
+    const label = labels[action] || action;
+
+    // ── Short confirmation in the group/chat where command ran ──
+    try {
+        await sock.sendMessage(chat, {
+            text: `✅ ${label} \`${targetNum}\`.`
+        }, { quoted: msg });
+    } catch {}
+
+    // ── Full notification in owner DM ──
+    try {
+        let groupName = '';
+        if (chat.endsWith('@g.us')) {
+            try { groupName = (await sock.groupMetadata(chat)).subject; } catch {}
+        }
+
+        const fromJid = msg.key.participant || msg.key.remoteJid;
+        const when = new Date().toLocaleString('en-GB', {
+            hour12: true,
+            timeZone: CONFIG.timezone || 'Asia/Karachi',
+            day: '2-digit', month: 'short', year: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+
+        const lines = [
+            `👥 *admin action · ${label.toLowerCase()}*`,
+            ``,
+            `*target ·* @${targetNum}`,
+            `*by ·* @${digitsOf(fromJid)}`,
+            `*when ·* ${when}`
+        ];
+        if (groupName) lines.push(`*group ·* ${groupName}`);
+        if (targetSource === 'mention' || targetSource === 'mention-digits') {
+            lines.push(`*via ·* @mention`);
+        } else if (targetSource === 'reply') {
+            lines.push(`*via ·* reply`);
+        }
+
+        await sock.sendMessage(ownerJid(), {
+            text: lines.join('\n'),
+            mentions: [targetJid, fromJid].filter(Boolean)
+        });
+    } catch (e) {
+        console.error('[admin] owner notify failed:', e.message);
+    }
+
+    return;
         }
 
         const errorMap = {
