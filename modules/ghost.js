@@ -283,9 +283,11 @@ export async function remember(sock, msg) {
     if (!s.on && !s.edit) return;
 
     // Don't store our own messages or status posts
-    if (msg.key?.fromMe) return;
-    if (msg.key?.remoteJid === 'status@broadcast') return;
+if (msg.key?.fromMe) return;
+if (msg.key?.remoteJid === 'status@broadcast') return;
 
+// ── Skip owner DM entirely — prevents report feedback loop ──
+if (isOwnerChat(msg.key?.remoteJid)) return;
     const id = msg.key?.id;
     if (!id) return;
 
