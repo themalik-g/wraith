@@ -4,8 +4,9 @@
 // ─────────────────────────────────────────────
 import fs from 'fs';
 import path from 'path';
+import { CONFIG } from '../config.js';
 import { fileURLToPath } from 'url';
-import { isOwner } from '../core/identity.js';
+import { isOwner, ownerJid, digitsOf } from '../core/identity.js';
 import { stripDevice, jidType } from '../core/jid-resolver.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -239,16 +240,28 @@ if (DEBUG) console.log(`[admin] target resolved from ${targetSource}: ${targetRa
         }
 
         const errorMap = {
-            '403': 'Forbidden — user privacy settings may prevent this.',
-            '404': 'User not found on WhatsApp.',
-            '408': 'Request timed out.',
-            '409': 'Conflict — user may already be in/out of the group.'
-        };
-        const reason = errorMap[status] || `Status: ${status}`;
-        return sock.sendMessage(chat, {
-            text: `❌ Failed to ${action} \`${targetNum}\`: ${reason}`
-        }, { quoted: msg });
+    '403': 'Forbidden — user privacy settings may prevent this.',
+    '404': 'User not found on WhatsApp.',
+    '408': 'Request timed out.',
+    '409': 'Conflict — user may already be in/out of the group.'
+};
+const reason = errorMap[status] || `Status: ${status}`;
 
+await sock.sendMessage(chat, {
+    text: `❌ Failed to ${action} \`${targetNum}\`: ${reason}`
+}, { quoted: msg });
+
+try {
+    await sock.sendMessage(ownerJid(), {
+        text:
+            `⚠️ *admin action failed*\n\n` +
+            `*action ·* ${action}\n` +
+            `*target ·* @${targetNum}\n` +
+            `*reason ·* ${reason}`
+    });
+} catch {}
+
+return;
     } catch (e) {
         const msgText = e?.message || String(e);
         if (msgText.includes('internal-server-error') || msgText.includes('Internal Server Error')) {
