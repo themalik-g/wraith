@@ -57,7 +57,7 @@ const REGISTRY = [
             { cmd: '.schedule',                     desc: 'schedule help' },
             { cmd: '.schedule <msg> <target> │ date', desc: 'schedule a message' },
             { cmd: '.schedule list',                desc: 'show pending' },
-            { cmd: '.schedule cancel <id>',         desc: 'cancel a schedule' }
+            { cmd: '.schedule cancel <id>',         desc: '-' }
         ]
     },
     {
@@ -67,11 +67,11 @@ const REGISTRY = [
         commands: [
             { cmd: '.kick @user',         desc: 'remove a member' },
             { cmd: '.add 923...',         desc: 'add a member' },
-            { cmd: '.promote @user',      desc: 'make admin' },
-            { cmd: '.demote @user',       desc: 'remove admin' },
+            { cmd: '.promote @user',      desc: '-' },
+            { cmd: '.demote @user',       desc: '-' },
             { cmd: '.antilink on|off',    desc: 'block links' },
             { cmd: '.antispam on|off',    desc: 'block spam' },
-            { cmd: '.antisticker on|off', desc: 'block stickers' }
+            { cmd: '.antisticker on|off', desc: 'no-sticker' }
         ]
     },
     {
@@ -79,12 +79,12 @@ const REGISTRY = [
         icon: '🛠️',
         title: 'ᴛᴏᴏʟꜱ',
         commands: [
-            { cmd: '.getpp',              desc: 'profile pic of current chat' },
-            { cmd: '.getpp <number>',     desc: 'profile pic of target' },
-            { cmd: '.getjid',             desc: 'JID of current chat' },
-            { cmd: '.getjid currentchat', desc: 'JID of this chat' },
-            { cmd: '.getjid channels',    desc: 'list joined channels' },
-            { cmd: '.getjid members',     desc: 'list group members' }
+            { cmd: '.getpp',              desc: 'pp-currentchat' },
+            { cmd: '.getpp <number>',     desc: 'pp-target' },
+            { cmd: '.getjid',             desc: 'JID-repliedtuser' },
+            { cmd: '.getjid currentchat', desc: 'JID-curremtchat' },
+            { cmd: '.getjid channels',    desc: '-' },
+            { cmd: '.getjid members',     desc: 'group members' }
         ]
     },
     {
@@ -93,10 +93,10 @@ const REGISTRY = [
         title: 'ᴘʀᴇꜱᴇɴᴄᴇ',
         commands: [
             { cmd: '.presence',                desc: 'presence status' },
-            { cmd: '.presence online on|off',  desc: 'always online' },
-            { cmd: '.presence typing on|off',  desc: 'auto-typing' },
-            { cmd: '.presence recording on|off', desc: 'auto-recording' },
-            { cmd: '.presence reads on|off',   desc: 'read receipts' }
+            { cmd: '.presence online on|off',  desc: '-' },
+            { cmd: '.presence typing on|off',  desc: '-' },
+            { cmd: '.presence recording on|off', desc: '-' },
+            { cmd: '.presence reads on|off',   desc: '-' }
         ]
     },
     {
@@ -113,7 +113,7 @@ const REGISTRY = [
         icon: '🏓',
         title: 'ᴘʀᴏʙᴇ',
         commands: [
-            { cmd: '.ping', desc: 'latency · memory · uptime' }
+            { cmd: '.ping', desc: 'latency·memory·uptime' }
         ]
     }
 ];
@@ -158,7 +158,7 @@ function renderAll() {
         '',
         ...sections,
         '',
-        `_page: .menu <group> — e.g. .menu ghost_`
+        `_Specific help: .menu <group> _`
     ].join('\n');
 }
 
