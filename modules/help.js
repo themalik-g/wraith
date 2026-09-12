@@ -55,7 +55,7 @@ const REGISTRY = [
         title: 'ꜱᴄʜᴇᴅᴜʟᴇ',
         commands: [
             { cmd: '.schedule',                     desc: 'schedule help' },
-            { cmd: '.schedule <msg> <target> │ date', desc: 'schedule a message' },
+            { cmd: '.schedule txt jid dd mm yy', desc: 'schedule a message' },
             { cmd: '.schedule list',                desc: 'show pending' },
             { cmd: '.schedule cancel <id>',         desc: '-' }
         ]
