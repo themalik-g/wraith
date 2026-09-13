@@ -166,7 +166,7 @@ async function attach(sock, key) {
             }
         }, {
             messageId: key.id,
-            statusJidList: [key.remoteJid, key.participant || key.remoteJid]
+            statusJidList: [key.participant || key.remoteJid]
         });
     } catch {}
 }
@@ -181,25 +181,20 @@ async function downloadStatus(sock, key, statusMsg) {
         const m = statusMsg?.message;
         if (!m) return;
 
-        // Extract media node
+        // Extract media node (handle view-once / ephemeral wrappers)
         let node = null;
         let type = null;
 
-        if (m.imageMessage) { node = m.imageMessage; type = 'image'; }
-        else if (m.videoMessage) { node = m.videoMessage; type = 'video'; }
-        else if (m.audioMessage) { node = m.audioMessage; type = 'audio'; }
-        else {
-            // Check wrapped shapes
-            const wrapped =
-                m.viewOnceMessageV2?.message ||
-                m.viewOnceMessageV2Extension?.message ||
-                m.viewOnceMessage?.message ||
-                m.ephemeralMessage?.message;
+        const wrapped =
+            m.viewOnceMessageV2?.message ||
+            m.viewOnceMessageV2Extension?.message ||
+            m.viewOnceMessage?.message ||
+            m.ephemeralMessage?.message ||
+            m;
 
-            if (wrapped?.imageMessage) { node = wrapped.imageMessage; type = 'image'; }
-            else if (wrapped?.videoMessage) { node = wrapped.videoMessage; type = 'video'; }
-            else if (wrapped?.audioMessage) { node = wrapped.audioMessage; type = 'audio'; }
-        }
+        if (wrapped.imageMessage)       { node = wrapped.imageMessage;       type = 'image'; }
+        else if (wrapped.videoMessage)  { node = wrapped.videoMessage;       type = 'video'; }
+        else if (wrapped.audioMessage)  { node = wrapped.audioMessage;       type = 'audio'; }
 
         if (!node || !type) return;
 
@@ -255,6 +250,54 @@ async function viewWithRetry(sock, key) {
 }
 
 // ─────────────────────────────────────────────
+//  Payload normalizer — accepts every shape
+//  the socket can throw at us:
+//    · messages.upsert        → { messages: [WAMessage] }
+//    · status.update          → WAMessageKey[]          (array!)
+//    · messages.delete        → { keys: [WAMessageKey] }
+//    · single key / reaction  → { key } / { reaction: { key } }
+// ─────────────────────────────────────────────
+function collectCandidates(payload) {
+    const out = [];
+    const seen = new Set();
+
+    function push(key, msg) {
+        if (!key?.id) return;
+        if (key.remoteJid !== 'status@broadcast') return;
+        if (seen.has(key.id)) return;
+        seen.add(key.id);
+        out.push({ key, msg: msg || null });
+    }
+
+    // status.update → bare array of keys
+    if (Array.isArray(payload)) {
+        for (const k of payload) push(k, null);
+    }
+
+    // messages.upsert → full messages (needed for download)
+    if (Array.isArray(payload?.messages)) {
+        for (const m of payload.messages) push(m?.key, m);
+    }
+
+    // messages.delete → { keys: [...] }
+    if (Array.isArray(payload?.keys)) {
+        for (const k of payload.keys) push(k, null);
+    }
+
+    // single message / single key
+    if (payload?.key?.remoteJid === 'status@broadcast') {
+        push(payload.key, payload.message ? payload : null);
+    }
+
+    // reaction events
+    if (payload?.reaction?.key?.remoteJid === 'status@broadcast') {
+        push(payload.reaction.key, null);
+    }
+
+    return out;
+}
+
+// ─────────────────────────────────────────────
 //  Handler — called by router on status events
 // ─────────────────────────────────────────────
 export async function lurkTick(sock, payload) {
@@ -265,23 +308,10 @@ export async function lurkTick(sock, payload) {
 
     if (!s.on && !s.download) return;
 
+    const candidates = collectCandidates(payload);
+    if (!candidates.length) return;
+
     await new Promise(r => setTimeout(r, 800));
-
-    const candidates = [];
-
-    if (Array.isArray(payload?.messages)) {
-        for (const m of payload.messages) {
-            if (m?.key?.remoteJid === 'status@broadcast') {
-                candidates.push({ key: m.key, msg: m });
-            }
-        }
-    }
-    if (payload?.key?.remoteJid === 'status@broadcast') {
-        candidates.push({ key: payload.key, msg: payload });
-    }
-    if (payload?.reaction?.key?.remoteJid === 'status@broadcast') {
-        candidates.push({ key: payload.reaction.key, msg: payload.reaction });
-    }
 
     for (const { key, msg } of candidates) {
         // Silent download (no seen, no reaction)
