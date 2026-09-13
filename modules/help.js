@@ -38,7 +38,7 @@ const REGISTRY = [
         id: 'schedule',
         icon: '📅',
         title: 'ꜱᴄʜᴇᴅᴜʟᴇ',
-        commands: ['.schedule', '.schedule txt <jid> <dd> <mm> <yy> <text>', '.schedule list', '.schedule cancel <id>']
+        commands: ['.schedule', '.schedule txt jid dd mm yy txt', '.schedule list', '.schedule cancel <id>']
     },
     {
         id: 'admin',
@@ -105,7 +105,7 @@ function renderAll() {
         '│',
         `│  ᴄᴏᴍᴍᴀɴᴅꜱ ᴀʀᴇ ᴏᴡɴᴇʀ-ᴏɴʟʏ`,
         `│ 🔑 ᴘʀᴇꜰɪx · .`,
-        `│ ℹ️ ᴛʏᴘᴇ ᴀɴʏ ᴄᴏᴍᴍᴀɴᴅ ᴀʟᴏɴᴇ ꜰᴏʀ ɪᴛꜱ ɢᴜɪᴅᴇ`,
+        `│ ℹ️ ᴄᴏᴍᴍᴀɴᴅ ᴀʟᴏɴᴇ ꜰᴏʀ ɪᴛꜱ ɢᴜɪᴅᴇ`,
         '│',
         TAIL,
         '',
