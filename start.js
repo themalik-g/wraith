@@ -1,402 +1,295 @@
-// ─────────────────────────────────────────────
-//  WRAITH · start.js (bulletproof · multi-session)
-//  Entry point · interactive or CLI pairing-code auth
-//  Launched per-session by index.js:
-//    node --preserve-symlinks --preserve-symlinks-main start.js --session <id> [--number <digits>]
-// ─────────────────────────────────────────────
+// start.js — WRAITH per-session bot bootstrap
 import makeWASocket, {
-    useMultiFileAuthState,
-    DisconnectReason,
-    fetchLatestBaileysVersion,
-    Browsers,
-    delay
+  useMultiFileAuthState,
+  makeCacheableSignalKeyStore,
+  fetchLatestBaileysVersion,
+  DisconnectReason,
+  Browsers,
+  delay
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import NodeCache from '@cacheable/node-cache';
 import pino from 'pino';
 import fs from 'fs';
 import path from 'path';
-import readline from 'readline';
-import parsePhoneNumber from 'awesome-phonenumber';
 import { fileURLToPath } from 'url';
+import parsePhoneNumber from 'awesome-phonenumber';
 
 import { CONFIG } from './config.js';
 import { dispatch, dispatchStatus, dispatchUpdate } from './router.js';
 import { trace } from './modules/debug.js';
-import { startScheduler, stopScheduler } from './modules/schedule.js';
-import { startPresenceHeartbeat, stopPresenceHeartbeat } from './modules/presence.js';
-
-// ── CLI args ──
-const ARGS = {};
-for (let i = 2; i < process.argv.length; i++) {
-    const a = process.argv[i];
-    if (a === '--number')  ARGS.number  = process.argv[++i];
-    if (a === '--session') ARGS.session = process.argv[++i];
-}
-const SESSION = ARGS.session || 'main';
+import { startScheduler } from './modules/schedule.js';
+import { startPresenceHeartbeat } from './modules/presence.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const log  = pino({ level: 'silent' });
 
-// Per-session folders — the launcher chdir()'d us into instances/<id>/
-const SESSION_DIR = process.cwd();
-const AUTH_DIR    = path.join(SESSION_DIR, 'session');
-const STATE_DIR   = path.join(SESSION_DIR, 'state');
-const OWNER_FILE  = path.join(STATE_DIR, 'owner.json');
-
-fs.mkdirSync(AUTH_DIR,  { recursive: true });
-fs.mkdirSync(STATE_DIR, { recursive: true });
-
-const log = pino({ level: 'silent' });
-
-// ─────────────────────────────────────────────
-//  [FIX 1] Outgoing message store
-// ─────────────────────────────────────────────
-const MESSAGE_STORE = new Map();
-const MESSAGE_STORE_MAX = 1000;
-
-function rememberMessage(msg) {
-    if (!msg?.key?.id || !msg?.message) return;
-    MESSAGE_STORE.set(msg.key.id, msg.message);
-    if (MESSAGE_STORE.size > MESSAGE_STORE_MAX) {
-        const oldest = MESSAGE_STORE.keys().next().value;
-        MESSAGE_STORE.delete(oldest);
-    }
-}
-
-// ─────────────────────────────────────────────
-//  [FIX 2] msgRetryCounterCache — TTL bumped to 300s
-//  (was 100s — too short for slow networks; retries
-//  looped and produced "Waiting for this message…")
-// ─────────────────────────────────────────────
-const msgRetryCounterCache = new NodeCache({
-    stdTTL: 300,
-    checkperiod: 360
-});
-
-// ─────────────────────────────────────────────
-//  Terminal dye
-// ─────────────────────────────────────────────
-const dye    = (c, s) => `\x1b[${c}m${s}\x1b[0m`;
+// ── terminal colors ──
+const dye = (c, s) => `\x1b[${c}m${s}\x1b[0m`;
 const grey   = s => dye(90, s);
 const cyan   = s => dye(36, s);
-const violet = s => dye(35, s);
 const green  = s => dye(32, s);
 const yellow = s => dye(33, s);
 const red    = s => dye(31, s);
+const violet = s => dye(35, s);
 const bold   = s => dye(1,  s);
 
-const TAG = grey(`[${SESSION}]`);
-
-const banner = (code, number) => `
-${violet('     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·')}
-${violet(`            ${CONFIG.botName || CONFIG.codename}`)}
-${violet('     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·')}
-
-   ${grey('pairing code →')}  ${bold(cyan(code))}
-
-   ${grey('number ·')} ${cyan('+' + number)}
-   ${grey('session ·')} ${cyan(SESSION)}
-   ${grey('WhatsApp → Linked Devices → Link a Device')}
-   ${grey('Then tap "Link with phone number instead" and enter the code.')}
-`;
-
-// ─────────────────────────────────────────────
-//  Owner persistence (per-session)
-// ─────────────────────────────────────────────
-function saveOwner(digits) {
-    try {
-        fs.mkdirSync(path.dirname(OWNER_FILE), { recursive: true });
-        fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: digits }, null, 2));
-    } catch {}
+// ── outgoing message cache (needed for retry receipts) ──
+const MESSAGE_STORE = new Map();
+const MESSAGE_STORE_MAX = 1000;
+function rememberMessage(msg) {
+  if (!msg?.key?.id || !msg?.message) return;
+  MESSAGE_STORE.set(msg.key.id, msg.message);
+  if (MESSAGE_STORE.size > MESSAGE_STORE_MAX) {
+    MESSAGE_STORE.delete(MESSAGE_STORE.keys().next().value);
+  }
 }
 
-function readOwner() {
-    try {
-        const raw = JSON.parse(fs.readFileSync(OWNER_FILE, 'utf-8'));
-        return String(raw.owner || '').replace(/\D/g, '');
-    } catch { return ''; }
+// ── msgRetryCounterCache ──
+const msgRetryCounterCache = new NodeCache({ stdTTL: 100, checkperiod: 120 });
+
+// ── pairing banner ──
+function printPairBanner(sessionId, code, number) {
+  console.log();
+  console.log(violet(` ╭─ ${sessionId} · pairing code ─────────────`));
+  console.log(violet(' │ ') + grey('number  ') + cyan('+' + number));
+  console.log(violet(' │ ') + grey('code    ') + bold(green(code)));
+  console.log(violet(' │ ') + grey('how     ') + 'WhatsApp → Linked Devices → Link a Device');
+  console.log(violet(' │ ') + grey('        ') + '→ "Link with phone number instead"');
+  console.log(violet(' ╰───────────────────────────────────────'));
+  console.log();
 }
 
-// ─────────────────────────────────────────────
-//  Interactive number prompt
-// ─────────────────────────────────────────────
-function ask(question) {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    return new Promise(resolve => {
-        rl.question(question, answer => { rl.close(); resolve(answer.trim()); });
-    });
+// ── pairing request (retries on 428 / not-ready errors) ──
+async function requestPairingCode(sock, sessionId, number, attempt = 0) {
+  try {
+    let code = await sock.requestPairingCode(number);
+    code = code?.match(/.{1,4}/g)?.join('-') || code;
+    printPairBanner(sessionId, code, number);
+  } catch (err) {
+    if (attempt < 4) {
+      console.log(yellow(` ${sessionId}: pairing not ready (${err.message}) · retry ${attempt + 1}/4 in 5s`));
+      setTimeout(
+        () => requestPairingCode(sock, sessionId, number, attempt + 1),
+        5000
+      );
+    } else {
+      console.log(red(` ${sessionId}: pairing failed after retries — delete instances/${sessionId}/session and restart`));
+    }
+  }
 }
 
-async function resolveNumber() {
-    if (ARGS.number && /^\d{10,15}$/.test(ARGS.number.replace(/\D/g, ''))) {
-        const digits = ARGS.number.replace(/\D/g, '');
-        saveOwner(digits);
-        CONFIG.owner = digits;
-        console.log(TAG, green('✓ number accepted via launcher'));
-        return digits;
+/**
+ * Start one WhatsApp session.
+ *
+ * @param {string} sessionId     – folder name under ./instances
+ * @param {string|null} phoneNumber – digits only; required if not yet registered,
+ *                                    ignored if already paired (use null on restart)
+ * @returns {Promise<import('@whiskeysockets/baileys').WASocket>}
+ *          resolves as soon as the session reaches connection === 'open'
+ */
+export function startSession(sessionId, phoneNumber) {
+  return new Promise(async (resolve) => {
+    const instanceDir = path.join(here, 'instances', sessionId);
+    const AUTH_DIR    = path.join(instanceDir, 'session');
+    const STATE_DIR   = path.join(instanceDir, 'state');
+    const OWNER_FILE  = path.join(STATE_DIR, 'owner.json');
+
+    fs.mkdirSync(AUTH_DIR,  { recursive: true });
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+
+    if (phoneNumber) {
+      const digits = phoneNumber.replace(/\D/g, '');
+      const pn = parsePhoneNumber('+' + digits);
+      if (!pn?.valid) {
+        console.log(red(` ${sessionId}: invalid number "${phoneNumber}"`));
+        return; // never resolve → wizard stops here (fix the number and re-run)
+      }
+      fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: digits }, null, 2));
     }
 
-    const saved = readOwner();
-    if (saved && !process.stdin.isTTY) {
-        console.log(TAG, grey(`[non-interactive] using saved owner: ${saved}`));
-        CONFIG.owner = saved;
-        return saved;
+    let resolved   = false;
+    let isStarting = false;
+    let currentSock = null;
+    let reconnectAttempts = 0;
+    let pairingRequested  = false;
+
+    function teardownSock() {
+      if (!currentSock) return;
+      const s = currentSock;
+      currentSock = null;
+      try { s.ev.removeAllListeners('connection.update'); } catch {}
+      try { s.ev.removeAllListeners('creds.update');      } catch {}
+      try { s.ev.removeAllListeners('messages.upsert');   } catch {}
+      try { s.ev.removeAllListeners('messages.update');   } catch {}
+      try { s.ev.removeAllListeners('messages.delete');   } catch {}
+      try { s.end(new Error('teardown'));                 } catch {}
     }
 
-    if (!process.stdin.isTTY) {
-        const fallback = CONFIG.owner.replace(/\D/g, '');
-        console.log(TAG, grey(`[non-interactive] using number from config: ${fallback}`));
-        return fallback;
-    }
+    async function ignite() {
+      if (isStarting) return;
+      isStarting = true;
 
-    console.log();
-    console.log(violet('  ╭─ first-time setup ────────────────────╮'));
-    console.log(violet('  │') + `  session · ${SESSION}`.padEnd(39) + violet('│'));
-    console.log(violet('  │') + '  Enter your WhatsApp number           ' + violet('│'));
-    console.log(violet('  │') + grey('  country code + number, digits only  ') + violet('│'));
-    console.log(violet('  │') + grey('  example: 923001234567                ') + violet('│'));
-    console.log(violet('  ╰───────────────────────────────────────╯'));
-    console.log();
+      const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+      const { version } = await fetchLatestBaileysVersion();
 
-    while (true) {
-        const raw = await ask(violet('  ❯ ') + cyan('number: '));
-        const digits = raw.replace(/\D/g, '');
+      const sock = makeWASocket({
+        version,
+        logger: log,
+        printQRInTerminal: false,
+        browser: Browsers.ubuntu('Chrome'),
+        auth: {
+          creds: state.creds,
+          keys: makeCacheableSignalKeyStore(state.keys, log)
+        },
+        markOnlineOnConnect: true,
+        generateHighQualityLinkPreview: true,
+        syncFullHistory: false,
+        msgRetryCounterCache,
+        defaultQueryTimeoutMs: 60000,
+        connectTimeoutMs: 60000,
+        keepAliveIntervalMs: 10000
+      });
 
-        if (!/^\d{10,15}$/.test(digits)) {
-            console.log(red('  ✖ must be 10–15 digits, no + or spaces'));
-            continue;
+      currentSock = sock;
+
+      // wrap sendMessage so our outgoing messages get cached
+      const _origSend = sock.sendMessage.bind(sock);
+      sock.sendMessage = async (jid, content, options) => {
+        const sent = await _origSend(jid, content, options);
+        try { rememberMessage(sent); } catch {}
+        return sent;
+      };
+
+      // ── connection.update ──
+      sock.ev.on('connection.update', async (u) => {
+        const { connection, lastDisconnect, qr } = u;
+
+        // ★ THIS is where the pairing code must be requested.
+        //   qr fires only when the socket is ready → no more 428 errors.
+        if (qr && !sock.authState.creds.registered && !pairingRequested) {
+          pairingRequested = true;
+          const number = phoneNumber
+            ? phoneNumber.replace(/\D/g, '')
+            : (fs.existsSync(OWNER_FILE)
+                ? JSON.parse(fs.readFileSync(OWNER_FILE, 'utf-8')).owner
+                : null);
+          if (number) {
+            // tiny grace period lets the socket settle before we hit the API
+            setTimeout(() => requestPairingCode(sock, sessionId, number), 800);
+          } else {
+            console.log(red(` ${sessionId}: no phone number available for pairing`));
+          }
         }
 
-        const pn = parsePhoneNumber('+' + digits);
-        if (!pn?.valid) {
-            console.log(red('  ✖ not a valid international number'));
-            continue;
+        if (connection === 'connecting') {
+          console.log(grey(` ${sessionId}: connecting…`));
         }
 
-        saveOwner(digits);
-        console.log(green('  ✓ saved to state/owner.json'));
-        CONFIG.owner = digits;
-        console.log();
-        return digits;
-    }
-}
+        if (connection === 'open') {
+          isStarting = false;
+          reconnectAttempts = 0;
+          console.log(green(` ✓ ${sessionId} online as +${sock.user?.id?.split(':')[0]}`));
+          try { startScheduler(sock); }        catch {}
+          try { startPresenceHeartbeat(sock);} catch {}
 
-// ─────────────────────────────────────────────
-//  Pairing code with retry
-// ─────────────────────────────────────────────
-async function showPairingCode(sock, number, attempt = 0) {
-    try {
-        let code = await sock.requestPairingCode(number);
-        code = code?.match(/.{1,4}/g)?.join('-') || code;
-        console.log(banner(code, number));
-    } catch (err) {
-        if (attempt < 3) {
-            console.error(TAG, yellow(`pairing not ready · retry ${attempt + 1}/3 in 8s ·`), err.message);
-            setTimeout(() => showPairingCode(sock, number, attempt + 1), 8000);
-        } else {
-            console.error(TAG, red('pairing failed ·'), err.message);
-            console.error(grey('   try deleting ./session and restarting'));
-        }
-    }
-}
-
-// ─────────────────────────────────────────────
-//  Boot
-// ─────────────────────────────────────────────
-let isStarting = false;
-let currentSock = null;
-let reconnectAttempts = 0;
-
-// [FIX 3] Fully tear down the old socket AND its timers
-function teardownSock() {
-    // stop module-level timers BEFORE clearing the socket
-    try { stopScheduler(); } catch {}
-    try { stopPresenceHeartbeat(); } catch {}
-
-    if (!currentSock) return;
-    const s = currentSock;
-    currentSock = null;
-    try { s.ev.removeAllListeners('connection.update'); } catch {}
-    try { s.ev.removeAllListeners('creds.update'); } catch {}
-    try { s.ev.removeAllListeners('messages.upsert'); } catch {}
-    try { s.ev.removeAllListeners('messages.update'); } catch {}
-    try { s.ev.removeAllListeners('messages.reaction'); } catch {}
-    try { s.end(undefined); } catch {}
-}
-
-async function ignite() {
-    if (isStarting) return;
-    isStarting = true;
-
-    teardownSock();
-
-    try {
-        const { version } = await fetchLatestBaileysVersion();
-        const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-
-        const sock = makeWASocket({
-            version,
-            logger: log,
-            printQRInTerminal: false,
-            auth: {
-                creds: state.creds,
-                keys: state.keys
-            },
-            browser: Browsers.appropriate('Desktop'),
-            markOnlineOnConnect: false,
-            generateHighQualityLinkPreview: false,
-            syncFullHistory: false,
-            getMessage: async (key) => MESSAGE_STORE.get(key.id) || undefined,
-            msgRetryCounterCache,
-            defaultQueryTimeoutMs: 60000,
-            connectTimeoutMs: 60000,
-            keepAliveIntervalMs: 10000
-        });
-
-        currentSock = sock;
-
-        if (!state.creds?.registered && !sock.authState.creds.registered) {
-            const number = await resolveNumber();
-            setTimeout(() => showPairingCode(sock, number), 3000);
-        } else {
-            const saved = readOwner();
-            if (saved) CONFIG.owner = saved;
-            console.log(TAG, grey('registered credentials found — reconnecting…'));
+          if (!resolved) {
+            resolved = true;
+            resolve(sock);          // ← wizard advances to next step
+          }
         }
 
-        // ═════════════════════════════════════════
-        //  CONNECTION.UPDATE
-        // ═════════════════════════════════════════
-        sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect } = update;
+        if (connection === 'close') {
+          const statusCode =
+            lastDisconnect?.error instanceof Boom
+              ? lastDisconnect.error.output?.statusCode
+              : 0;
 
-            trace('connection.update', { session: SESSION, connection });
+          // logged out → wipe session, restart into pairing mode
+          if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+            console.log(red(` ${sessionId}: logged out · wiping session`));
+            teardownSock();
+            try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch {}
+            try { fs.mkdirSync(AUTH_DIR, { recursive: true }); }          catch {}
+            pairingRequested = false;
+            isStarting = false;
+            reconnectAttempts = 0;
+            setTimeout(ignite, 1500);
+            return;
+          }
 
-            if (connection === 'connecting') console.log(TAG, grey('…connecting'));
+          // everything else → exponential backoff reconnect
+          reconnectAttempts++;
+          const base   = CONFIG.reconnectDelay || 2000;
+          const waitMs = Math.min(base * Math.pow(2, reconnectAttempts - 1), 60000);
+          console.log(yellow(` ${sessionId}: reconnecting (${statusCode}) in ${waitMs/1000}s · attempt ${reconnectAttempts}`));
+          teardownSock();
+          await delay(waitMs);
+          isStarting = false;
+          ignite();
+        }
+      });
 
-            if (connection === 'open') {
-                isStarting = false;
-                reconnectAttempts = 0;
-                console.log(green(`\n👻 ${CONFIG.botName || CONFIG.codename} online as ${sock.user?.id?.split(':')[0]}  · session ${bold(SESSION)}\n`));
-                try { process.send?.({ type: 'wraith:linked', session: SESSION }); } catch {}
-                startScheduler(sock);
-                startPresenceHeartbeat(sock);
-            }
+      sock.ev.on('creds.update', saveCreds);
 
-            if (connection === 'close') {
-                const statusCode =
-                    lastDisconnect?.error instanceof Boom
-                        ? lastDisconnect.error.output?.statusCode
-                        : 0;
-
-                if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
-                    console.log(TAG, red('👻 logged out · wiping this session'));
-                    teardownSock();
-                    try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch {}
-                    try { fs.mkdirSync(AUTH_DIR, { recursive: true }); } catch {}
-                    console.log(TAG, yellow('👻 restarting into pairing mode…'));
-                    isStarting = false;
-                    reconnectAttempts = 0;
-                    setTimeout(ignite, 1500);
-                    return;
-                }
-
-                reconnectAttempts++;
-                const baseDelay = CONFIG.reconnectDelay || 2000;
-                const backoffDelay = Math.min(
-                    baseDelay * Math.pow(2, reconnectAttempts - 1),
-                    60000
-                );
-
-                console.log(TAG, yellow(`👻 reconnecting (${statusCode}) in ${backoffDelay/1000}s · attempt ${reconnectAttempts}`));
-                teardownSock();
-                await delay(backoffDelay);
-                isStarting = false;
-                ignite();
-            }
+      // ── messages ──
+      sock.ev.on('messages.upsert', async (u) => {
+        trace('messages.upsert', {
+          session: sessionId,
+          type: u.type,
+          count: u.messages?.length
         });
+        for (const m of u.messages || []) rememberMessage(m);
+        await dispatch(sock, u, sessionId);
+      });
 
-        sock.ev.on('creds.update', saveCreds);
+      sock.ev.on('messages.update', (upd) => dispatchUpdate(sock, upd));
+      sock.ev.on('messages.delete', (del) => dispatchStatus(sock, del));
 
-        // ═════════════════════════════════════════
-        //  MESSAGES.UPSERT
-        // ═════════════════════════════════════════
-        sock.ev.on('messages.upsert', async (u) => {
-            trace('messages.upsert', {
-                session: SESSION,
-                type: u.type,
-                count: u.messages?.length,
-                firstKey: u.messages?.[0]?.key,
-                firstMessageKeys: u.messages?.[0]?.message
-                    ? Object.keys(u.messages[0].message)
-                    : null
-            });
+      // ── group participants ──
+      sock.ev.on('group-participants.update', async (update) => {
+        const mod = await import('./core/groupEvents.js').catch(() => null);
+        if (mod?.handleGroupParticipantUpdate) {
+          mod.handleGroupParticipantUpdate(sock, update);
+        }
+      });
 
-            for (const m of u.messages || []) rememberMessage(m);
+      // ── status ──
+      sock.ev.on('status.update', async (st) => {
+        try { dispatchStatus(sock, st); } catch {}
+      });
 
-            for (const m of u.messages || []) {
-                if (!m.message && !m.messageStubParameters) {
-                    console.log(TAG, yellow(`[WRAITH] Incomplete message ${m.key?.id}, scheduling retry…`));
-                    continue;
-                }
+      // ── anti-call ──
+      const antiCallNotified = new Set();
+      sock.ev.on('call', async (calls) => {
+        try {
+          const { readState } = await import('./commands/anticall.js').catch(() => ({}));
+          if (!readState || !readState().enabled) return;
+          for (const call of calls) {
+            const caller = call.from || call.peerJid || call.chatId;
+            if (!caller) continue;
+            try {
+              if (typeof sock.rejectCall === 'function' && call.id) {
+                await sock.rejectCall(call.id, caller);
+              }
+            } catch {}
+            if (!antiCallNotified.has(caller)) {
+              antiCallNotified.add(caller);
+              setTimeout(() => antiCallNotified.delete(caller), 60000);
+              try {
+                await sock.sendMessage(caller, {
+                  text: '📵 Anticall is enabled. Your call was rejected and you will be blocked.'
+                });
+              } catch {}
             }
-
-            await dispatch(sock, u);
-
-            for (const m of u.messages || []) {
-                if (m.key?.remoteJid === 'status@broadcast') {
-                    await dispatchStatus(sock, { messages: [m] });
-                }
-            }
-        });
-
-        // ═════════════════════════════════════════
-        //  MESSAGES.UPDATE
-        // ═════════════════════════════════════════
-        sock.ev.on('messages.update', async (updates) => {
-            trace('messages.update', updates);
-
-            for (const u of updates || []) {
-                await dispatchUpdate(sock, u);
-
-                if (u.key?.remoteJid === 'status@broadcast') {
-                    await dispatchStatus(sock, { key: u.key });
-                }
-            }
-        });
-
-        sock.ev.on('messages.reaction', async (reactions) => {
-            for (const r of reactions) {
-                if (r.key?.remoteJid === 'status@broadcast') {
-                    await dispatchStatus(sock, { reaction: r });
-                }
-            }
-        });
-
-    } catch (err) {
-        isStarting = false;
-        console.error(TAG, red('boot failure ·'), err.message);
-        teardownSock();
-        setTimeout(ignite, CONFIG.reconnectDelay);
+            setTimeout(async () => {
+              try { await sock.updateBlockStatus(caller, 'block'); } catch {}
+            }, 800);
+          }
+        } catch {}
+      });
     }
+
+    await ignite();
+  });
 }
-
-// ─────────────────────────────────────────────
-//  Graceful shutdown
-// ─────────────────────────────────────────────
-function shutdown(signal) {
-    console.log(grey(`\n👻 [${SESSION}] ${signal} received · shutting down…`));
-    teardownSock();
-    setTimeout(() => process.exit(0), 500);
-}
-
-process.on('SIGINT',  () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('uncaughtException',  (e) => console.error(`[${SESSION}] uncaught ·`, e));
-process.on('unhandledRejection', (e) => console.error(`[${SESSION}] unhandled ·`, e));
-
-// ─────────────────────────────────────────────
-//  Launch
-// ─────────────────────────────────────────────
-console.log(violet(`\n👻  ${CONFIG.codename} · booting…  session ${SESSION}\n`));
-ignite();
