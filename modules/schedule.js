@@ -298,15 +298,6 @@ let schedulerTimer = null;
 
 export function startScheduler(sock) {
     if (schedulerTimer) clearInterval(schedulerTimer);
-    // ─────────────────────────────────────────────
-//  Stop scheduler — called by start.js on socket teardown
-// ─────────────────────────────────────────────
-export function stopScheduler() {
-    if (schedulerTimer) {
-        clearInterval(schedulerTimer);
-        schedulerTimer = null;
-    }
-}
 
     schedulerTimer = setInterval(async () => {
         try {
@@ -359,4 +350,15 @@ export function stopScheduler() {
             console.error('[schedule] loop error:', e.message);
         }
     }, 30_000);
+}
+
+// ─────────────────────────────────────────────
+//  Stop scheduler — called by start.js on socket teardown
+//  Prevents duplicate timers stacking on every reconnect
+// ─────────────────────────────────────────────
+export function stopScheduler() {
+    if (schedulerTimer) {
+        clearInterval(schedulerTimer);
+        schedulerTimer = null;
+    }
 }
