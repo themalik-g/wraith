@@ -1,6 +1,8 @@
 // ─────────────────────────────────────────────
-//  WRAITH · start.js (Bulletproof)
-//  Entry point · interactive pairing-code auth
+//  WRAITH · start.js (bulletproof · multi-session)
+//  Entry point · interactive or CLI pairing-code auth
+//  Launched per-session by index.js:
+//    node --preserve-symlinks --preserve-symlinks-main start.js --session <id> [--number <digits>]
 // ─────────────────────────────────────────────
 import makeWASocket, {
     useMultiFileAuthState,
@@ -10,7 +12,7 @@ import makeWASocket, {
     delay
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
-import NodeCache from '@cacheable/node-cache'; // Required for msgRetryCounterCache
+import NodeCache from '@cacheable/node-cache';
 import pino from 'pino';
 import fs from 'fs';
 import path from 'path';
@@ -21,22 +23,33 @@ import { fileURLToPath } from 'url';
 import { CONFIG } from './config.js';
 import { dispatch, dispatchStatus, dispatchUpdate } from './router.js';
 import { trace } from './modules/debug.js';
-import { startScheduler } from './modules/schedule.js';
-import { startPresenceHeartbeat } from './modules/presence.js';
+import { startScheduler, stopScheduler } from './modules/schedule.js';
+import { startPresenceHeartbeat, stopPresenceHeartbeat } from './modules/presence.js';
+
+// ── CLI args ──
+const ARGS = {};
+for (let i = 2; i < process.argv.length; i++) {
+    const a = process.argv[i];
+    if (a === '--number')  ARGS.number  = process.argv[++i];
+    if (a === '--session') ARGS.session = process.argv[++i];
+}
+const SESSION = ARGS.session || 'main';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const AUTH_DIR = path.join(here, 'session');
-const OWNER_FILE = path.join(here, 'state', 'owner.json');
 
-fs.mkdirSync(AUTH_DIR, { recursive: true });
+// Per-session folders — the launcher chdir()'d us into instances/<id>/
+const SESSION_DIR = process.cwd();
+const AUTH_DIR    = path.join(SESSION_DIR, 'session');
+const STATE_DIR   = path.join(SESSION_DIR, 'state');
+const OWNER_FILE  = path.join(STATE_DIR, 'owner.json');
+
+fs.mkdirSync(AUTH_DIR,  { recursive: true });
+fs.mkdirSync(STATE_DIR, { recursive: true });
 
 const log = pino({ level: 'silent' });
 
 // ─────────────────────────────────────────────
-//  [FIX 1] Outgoing message store (REQUIRED for retry receipts)
-//  The #1 cause of "Waiting for this message" is a missing
-//  getMessage implementation. WhatsApp's retry protocol needs
-//  to fetch the original message to re-encrypt and resend.
+//  [FIX 1] Outgoing message store
 // ─────────────────────────────────────────────
 const MESSAGE_STORE = new Map();
 const MESSAGE_STORE_MAX = 1000;
@@ -51,13 +64,13 @@ function rememberMessage(msg) {
 }
 
 // ─────────────────────────────────────────────
-//  [FIX 2] msgRetryCounterCache (REQUIRED for retry system)
-//  Without this, retries run indefinitely without control.
-//  TTL is set to prevent old messages from being retried.
+//  [FIX 2] msgRetryCounterCache — TTL bumped to 300s
+//  (was 100s — too short for slow networks; retries
+//  looped and produced "Waiting for this message…")
 // ─────────────────────────────────────────────
 const msgRetryCounterCache = new NodeCache({
-    stdTTL: 100,      // 100 seconds — retries should happen quickly
-    checkperiod: 120  // Check for expired entries every 2 minutes
+    stdTTL: 300,
+    checkperiod: 360
 });
 
 // ─────────────────────────────────────────────
@@ -72,46 +85,73 @@ const yellow = s => dye(33, s);
 const red    = s => dye(31, s);
 const bold   = s => dye(1,  s);
 
-// ─────────────────────────────────────────────
-//  Banner
-// ─────────────────────────────────────────────
+const TAG = grey(`[${SESSION}]`);
+
 const banner = (code, number) => `
 ${violet('     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·')}
-${violet(`            ${CONFIG.botName}`)}
+${violet(`            ${CONFIG.botName || CONFIG.codename}`)}
 ${violet('     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·')}
 
    ${grey('pairing code →')}  ${bold(cyan(code))}
 
    ${grey('number ·')} ${cyan('+' + number)}
+   ${grey('session ·')} ${cyan(SESSION)}
    ${grey('WhatsApp → Linked Devices → Link a Device')}
    ${grey('Then tap "Link with phone number instead" and enter the code.')}
 `;
 
 // ─────────────────────────────────────────────
+//  Owner persistence (per-session)
+// ─────────────────────────────────────────────
+function saveOwner(digits) {
+    try {
+        fs.mkdirSync(path.dirname(OWNER_FILE), { recursive: true });
+        fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: digits }, null, 2));
+    } catch {}
+}
+
+function readOwner() {
+    try {
+        const raw = JSON.parse(fs.readFileSync(OWNER_FILE, 'utf-8'));
+        return String(raw.owner || '').replace(/\D/g, '');
+    } catch { return ''; }
+}
+
+// ─────────────────────────────────────────────
 //  Interactive number prompt
 // ─────────────────────────────────────────────
 function ask(question) {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     return new Promise(resolve => {
-        rl.question(question, answer => {
-            rl.close();
-            resolve(answer.trim());
-        });
+        rl.question(question, answer => { rl.close(); resolve(answer.trim()); });
     });
 }
 
 async function resolveNumber() {
+    if (ARGS.number && /^\d{10,15}$/.test(ARGS.number.replace(/\D/g, ''))) {
+        const digits = ARGS.number.replace(/\D/g, '');
+        saveOwner(digits);
+        CONFIG.owner = digits;
+        console.log(TAG, green('✓ number accepted via launcher'));
+        return digits;
+    }
+
+    const saved = readOwner();
+    if (saved && !process.stdin.isTTY) {
+        console.log(TAG, grey(`[non-interactive] using saved owner: ${saved}`));
+        CONFIG.owner = saved;
+        return saved;
+    }
+
     if (!process.stdin.isTTY) {
         const fallback = CONFIG.owner.replace(/\D/g, '');
-        console.log(grey(`[non-interactive] using number from config: ${fallback}`));
+        console.log(TAG, grey(`[non-interactive] using number from config: ${fallback}`));
         return fallback;
     }
 
     console.log();
     console.log(violet('  ╭─ first-time setup ────────────────────╮'));
+    console.log(violet('  │') + `  session · ${SESSION}`.padEnd(39) + violet('│'));
     console.log(violet('  │') + '  Enter your WhatsApp number           ' + violet('│'));
     console.log(violet('  │') + grey('  country code + number, digits only  ') + violet('│'));
     console.log(violet('  │') + grey('  example: 923001234567                ') + violet('│'));
@@ -133,12 +173,8 @@ async function resolveNumber() {
             continue;
         }
 
-        try {
-            fs.mkdirSync(path.dirname(OWNER_FILE), { recursive: true });
-            fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: digits }, null, 2));
-            console.log(green('  ✓ saved to state/owner.json'));
-        } catch {}
-
+        saveOwner(digits);
+        console.log(green('  ✓ saved to state/owner.json'));
         CONFIG.owner = digits;
         console.log();
         return digits;
@@ -155,10 +191,10 @@ async function showPairingCode(sock, number, attempt = 0) {
         console.log(banner(code, number));
     } catch (err) {
         if (attempt < 3) {
-            console.error(yellow(`pairing not ready · retry ${attempt + 1}/3 in 8s ·`), err.message);
+            console.error(TAG, yellow(`pairing not ready · retry ${attempt + 1}/3 in 8s ·`), err.message);
             setTimeout(() => showPairingCode(sock, number, attempt + 1), 8000);
         } else {
-            console.error(red('pairing failed ·'), err.message);
+            console.error(TAG, red('pairing failed ·'), err.message);
             console.error(grey('   try deleting ./session and restarting'));
         }
     }
@@ -171,10 +207,12 @@ let isStarting = false;
 let currentSock = null;
 let reconnectAttempts = 0;
 
-// [FIX 3] Fully tear down the old socket before creating a new one.
-// This prevents two sockets from sharing the same auth state files,
-// which causes "Closing stale open session" and corrupted keys.
+// [FIX 3] Fully tear down the old socket AND its timers
 function teardownSock() {
+    // stop module-level timers BEFORE clearing the socket
+    try { stopScheduler(); } catch {}
+    try { stopPresenceHeartbeat(); } catch {}
+
     if (!currentSock) return;
     const s = currentSock;
     currentSock = null;
@@ -190,32 +228,25 @@ async function ignite() {
     if (isStarting) return;
     isStarting = true;
 
-    // Ensure no leftover socket from a previous attempt is still alive.
     teardownSock();
 
     try {
         const { version } = await fetchLatestBaileysVersion();
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-        // [FIX 4] Use Browsers.appropriate() instead of a hardcoded
-        // browser tuple. This reduces the chance of WhatsApp rejecting
-        // the connection due to an outdated browser string.
         const sock = makeWASocket({
             version,
             logger: log,
             printQRInTerminal: false,
             auth: {
                 creds: state.creds,
-                keys: state.keys // Do NOT use makeCacheableSignalKeyStore here
+                keys: state.keys
             },
             browser: Browsers.appropriate('Desktop'),
             markOnlineOnConnect: false,
             generateHighQualityLinkPreview: false,
             syncFullHistory: false,
-            // [FIX 5] getMessage MUST return the original message so
-            // WhatsApp's retry protocol can re-encrypt and resend it.
             getMessage: async (key) => MESSAGE_STORE.get(key.id) || undefined,
-            // [FIX 6] msgRetryCounterCache controls retry behavior.
             msgRetryCounterCache,
             defaultQueryTimeoutMs: 60000,
             connectTimeoutMs: 60000,
@@ -224,35 +255,30 @@ async function ignite() {
 
         currentSock = sock;
 
-        // [FIX 7] Wrap sendMessage to store every outgoing message.
-        // Without this, getMessage has nothing to return.
-        const _origSendMessage = sock.sendMessage.bind(sock);
-        sock.sendMessage = async (jid, content, options) => {
-            const sent = await _origSendMessage(jid, content, options);
-            try {
-                if (sent?.key?.id && sent?.message) {
-                    rememberMessage(sent);
-                }
-            } catch {}
-            return sent;
-        };
-
-        // ── PAIRING ──
-        if (!sock.authState.creds.registered) {
+        if (!state.creds?.registered && !sock.authState.creds.registered) {
             const number = await resolveNumber();
             setTimeout(() => showPairingCode(sock, number), 3000);
+        } else {
+            const saved = readOwner();
+            if (saved) CONFIG.owner = saved;
+            console.log(TAG, grey('registered credentials found — reconnecting…'));
         }
 
-        // ── connection lifecycle ──
-        sock.ev.on('connection.update', async (u) => {
-            const { connection, lastDisconnect } = u;
+        // ═════════════════════════════════════════
+        //  CONNECTION.UPDATE
+        // ═════════════════════════════════════════
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect } = update;
 
-            if (connection === 'connecting') console.log(grey('  …connecting'));
+            trace('connection.update', { session: SESSION, connection });
+
+            if (connection === 'connecting') console.log(TAG, grey('…connecting'));
 
             if (connection === 'open') {
                 isStarting = false;
-                reconnectAttempts = 0; // Reset backoff on successful connection
-                console.log(green(`\n👻 ${CONFIG.botName} online as ${sock.user?.id?.split(':')[0]}\n`));
+                reconnectAttempts = 0;
+                console.log(green(`\n👻 ${CONFIG.botName || CONFIG.codename} online as ${sock.user?.id?.split(':')[0]}  · session ${bold(SESSION)}\n`));
+                try { process.send?.({ type: 'wraith:linked', session: SESSION }); } catch {}
                 startScheduler(sock);
                 startPresenceHeartbeat(sock);
             }
@@ -263,30 +289,26 @@ async function ignite() {
                         ? lastDisconnect.error.output?.statusCode
                         : 0;
 
-                // Logged out → wipe session and restart into pairing flow
                 if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
-                    console.log(red('👻 logged out · wiping session'));
+                    console.log(TAG, red('👻 logged out · wiping this session'));
                     teardownSock();
                     try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch {}
                     try { fs.mkdirSync(AUTH_DIR, { recursive: true }); } catch {}
-                    console.log(yellow('👻 restarting into pairing mode…'));
+                    console.log(TAG, yellow('👻 restarting into pairing mode…'));
                     isStarting = false;
                     reconnectAttempts = 0;
                     setTimeout(ignite, 1500);
                     return;
                 }
 
-                // [FIX 8] Exponential backoff for reconnects.
-                // This prevents rapid reconnect loops that can corrupt
-                // the session and cause "Waiting for this message".
                 reconnectAttempts++;
                 const baseDelay = CONFIG.reconnectDelay || 2000;
                 const backoffDelay = Math.min(
                     baseDelay * Math.pow(2, reconnectAttempts - 1),
-                    60000 // Max 60 seconds
+                    60000
                 );
 
-                console.log(yellow(`👻 reconnecting (${statusCode}) in ${backoffDelay/1000}s · attempt ${reconnectAttempts}`));
+                console.log(TAG, yellow(`👻 reconnecting (${statusCode}) in ${backoffDelay/1000}s · attempt ${reconnectAttempts}`));
                 teardownSock();
                 await delay(backoffDelay);
                 isStarting = false;
@@ -297,10 +319,11 @@ async function ignite() {
         sock.ev.on('creds.update', saveCreds);
 
         // ═════════════════════════════════════════
-        //  MESSAGES.UPSERT — new messages + edits
+        //  MESSAGES.UPSERT
         // ═════════════════════════════════════════
         sock.ev.on('messages.upsert', async (u) => {
             trace('messages.upsert', {
+                session: SESSION,
                 type: u.type,
                 count: u.messages?.length,
                 firstKey: u.messages?.[0]?.key,
@@ -309,16 +332,11 @@ async function ignite() {
                     : null
             });
 
-            // [FIX 9] Remember incoming messages too (helps retries/edits/replies)
             for (const m of u.messages || []) rememberMessage(m);
 
-            // [FIX 10] Treat incomplete messages as retryable, not fatal.
-            // If a message arrives with missing encryption material,
-            // schedule a retry instead of dropping it.
             for (const m of u.messages || []) {
                 if (!m.message && !m.messageStubParameters) {
-                    console.log(yellow(`[WRAITH] Incomplete message ${m.key?.id}, scheduling retry…`));
-                    // Baileys will handle the retry via the retry receipt mechanism
+                    console.log(TAG, yellow(`[WRAITH] Incomplete message ${m.key?.id}, scheduling retry…`));
                     continue;
                 }
             }
@@ -333,7 +351,7 @@ async function ignite() {
         });
 
         // ═════════════════════════════════════════
-        //  MESSAGES.UPDATE — edits + delivery receipts
+        //  MESSAGES.UPDATE
         // ═════════════════════════════════════════
         sock.ev.on('messages.update', async (updates) => {
             trace('messages.update', updates);
@@ -347,7 +365,6 @@ async function ignite() {
             }
         });
 
-        // ── status reactions ──
         sock.ev.on('messages.reaction', async (reactions) => {
             for (const r of reactions) {
                 if (r.key?.remoteJid === 'status@broadcast') {
@@ -358,7 +375,7 @@ async function ignite() {
 
     } catch (err) {
         isStarting = false;
-        console.error(red('boot failure ·'), err.message);
+        console.error(TAG, red('boot failure ·'), err.message);
         teardownSock();
         setTimeout(ignite, CONFIG.reconnectDelay);
     }
@@ -368,18 +385,18 @@ async function ignite() {
 //  Graceful shutdown
 // ─────────────────────────────────────────────
 function shutdown(signal) {
-    console.log(grey(`\n👻 ${signal} received · shutting down…`));
+    console.log(grey(`\n👻 [${SESSION}] ${signal} received · shutting down…`));
     teardownSock();
     setTimeout(() => process.exit(0), 500);
 }
 
 process.on('SIGINT',  () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('uncaughtException',  (e) => console.error('uncaught ·', e));
-process.on('unhandledRejection', (e) => console.error('unhandled ·', e));
+process.on('uncaughtException',  (e) => console.error(`[${SESSION}] uncaught ·`, e));
+process.on('unhandledRejection', (e) => console.error(`[${SESSION}] unhandled ·`, e));
 
 // ─────────────────────────────────────────────
 //  Launch
 // ─────────────────────────────────────────────
-console.log(violet(`\n👻  ${CONFIG.botName} · booting…\n`));
+console.log(violet(`\n👻  ${CONFIG.codename} · booting…  session ${SESSION}\n`));
 ignite();
