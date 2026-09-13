@@ -1,8 +1,10 @@
 // ─────────────────────────────────────────────
 //  WRAITH · modules/help.js
-//  Styled boxed menu for 𝙒𝙍𝘼𝙄𝙏𝙃-𝘽𝙊𝙏.
-//  .menu           → full menu
-//  .menu <group>   → one section only
+//  Styled boxed menu — command list ONLY.
+//  Typing a command bare (e.g. ".ghost") shows its
+//  dedicated usage guide (handled in each module).
+//  .menu / .help        → full menu
+//  .menu <group>        → one section only
 // ─────────────────────────────────────────────
 import { isOwner } from '../core/identity.js';
 import { CONFIG } from '../config.js';
@@ -12,119 +14,72 @@ const REGISTRY = [
         id: 'ghost',
         icon: '👻',
         title: 'ɢʜᴏꜱᴛ',
-        commands: [
-            { cmd: '.ghost',          desc: 'check status' },
-            { cmd: '.ghost on',       desc: 'to enable' },
-            { cmd: '.ghost off',      desc: 'to disable' },
-            { cmd: '.ghost edit on',  desc: 'to enable' },
-            { cmd: '.ghost edit off', desc: 'to. disable' }
-        ]
+        commands: ['.ghost', '.ghost on', '.ghost off', '.ghost edit on', '.ghost edit off']
     },
     {
         id: 'peek',
         icon: '👁️',
         title: 'ᴘᴇᴇᴋ',
-        commands: [
-            { cmd: '.peek',             desc: 'reveals view-once' },
-            { cmd: '.peek auto on',     desc: 'auto-save vv' },
-            { cmd: '.peek auto off',    desc: 'disable avv' },
-            { cmd: '.peek dest owner',  desc: 'owner DM' },
-            { cmd: '.peek dest same',   desc: 'chat itself' },
-            { cmd: '.peek dest both',   desc: 'both' }
-        ]
+        commands: ['.peek', '.peek auto on', '.peek auto off', '.peek dest owner', '.peek dest same', '.peek dest both']
     },
     {
         id: 'lurk',
         icon: '🌒',
         title: 'ʟᴜʀᴋ',
         commands: [
-            { cmd: '.lurk',                desc: 'status watcher status' },
-            { cmd: '.lurk on',             desc: 'auto-view status' },
-            { cmd: '.lurk off',            desc: 'stop auto-viewing' },
-            { cmd: '.lurk react on',       desc: 'status-react' },
-            { cmd: '.lurk download on',    desc: 'save-status' },
-            { cmd: '.lurk download off',   desc: 'stop s-saving' },
-            { cmd: '.lurk emoji ',       desc: 'reaction emoji' },
-            { cmd: '.lurk emoji random',   desc: 'random-react' }
+            '.lurk',
+            '.lurk on', '.lurk off',
+            '.lurk react on', '.lurk react off',
+            '.lurk download on', '.lurk download off',
+            '.lurk emoji ❤️', '.lurk emoji random', '.lurk emoji none'
         ]
     },
     {
-    
         id: 'schedule',
         icon: '📅',
         title: 'ꜱᴄʜᴇᴅᴜʟᴇ',
-        commands: [
-            { cmd: '.schedule',                     desc: 'schedule help' },
-            { cmd: '.schedule txt jid dd mm yy', desc: 'schedule a message' },
-            { cmd: '.schedule list',                desc: 'show pending' },
-            { cmd: '.schedule cancel <id>',         desc: '-' }
-        ]
+        commands: ['.schedule', '.schedule txt <jid> <dd> <mm> <yy> <text>', '.schedule list', '.schedule cancel <id>']
     },
     {
         id: 'admin',
         icon: '👥',
         title: 'ᴀᴅᴍɪɴ',
-        commands: [
-            { cmd: '.kick @user',         desc: 'remove a member' },
-            { cmd: '.add 923...',         desc: 'add a member' },
-            { cmd: '.promote @user',      desc: '-' },
-            { cmd: '.demote @user',       desc: '-' },
-            { cmd: '.antilink on|off',    desc: 'block links' },
-            { cmd: '.antispam on|off',    desc: 'block spam' },
-            { cmd: '.antisticker on|off', desc: 'no-sticker' }
-        ]
+        commands: ['.kick @user', '.add 923…', '.promote @user', '.demote @user', '.antilink on|off', '.antispam on|off', '.antisticker on|off']
     },
     {
         id: 'tools',
         icon: '🛠️',
         title: 'ᴛᴏᴏʟꜱ',
-        commands: [
-            { cmd: '.getpp',              desc: 'pp-currentchat' },
-            { cmd: '.getpp <number>',     desc: 'pp-target' },
-            { cmd: '.getjid',             desc: 'JID-repliedtuser' },
-            { cmd: '.getjid currentchat', desc: 'JID-curremtchat' },
-            { cmd: '.getjid channels',    desc: '-' },
-            { cmd: '.getjid members',     desc: 'group members' }
-        ]
+        commands: ['.getpp', '.getpp <number>', '.getjid', '.getjid currentchat', '.getjid channels', '.getjid members']
     },
     {
         id: 'presence',
         icon: '⚙️',
         title: 'ᴘʀᴇꜱᴇɴᴄᴇ',
-        commands: [
-            { cmd: '.presence',                desc: 'presence status' },
-            { cmd: '.presence online on|off',  desc: '-' },
-            { cmd: '.presence typing on|off',  desc: '-' },
-            { cmd: '.presence recording on|off', desc: '-' },
-            { cmd: '.presence reads on|off',   desc: '-' }
-        ]
+        commands: ['.presence', '.presence online on|off', '.presence typing on|off', '.presence recording on|off', '.presence reads on|off']
     },
     {
         id: 'activity',
         icon: '📊',
         title: 'ᴀᴄᴛɪᴠɪᴛʏ',
-        commands: [
-            { cmd: '.activity',       desc: 'global dashboard' },
-            { cmd: '.activity <jid>', desc: 'per-chat detail' }
-        ]
+        commands: ['.activity', '.activity <jid>']
     },
     {
         id: 'probe',
         icon: '🏓',
         title: 'ᴘʀᴏʙᴇ',
-        commands: [
-            { cmd: '.ping', desc: 'latency·memory·uptime' }
-        ]
+        commands: ['.ping']
+    },
+    {
+        id: 'system',
+        icon: '🔄',
+        title: 'sʏsᴛᴇᴍ',
+        commands: ['.update']
     }
 ];
 
 // ─────────────────────────────────────────────
-//  Box renderer — style:
-//    ┌──❮ 👻 ɢʜᴏꜱᴛ ❯
-//    │
-//    │ ◈ .ghost — watcher status
-//    │
-//    └─────────────┈⚝
+//  Box renderer
 // ─────────────────────────────────────────────
 const TAIL = '└─────────────┈⚝';
 
@@ -142,17 +97,15 @@ function renderBox(title, rows) {
 
 function renderAll() {
     const sections = REGISTRY.map(g =>
-        renderBox(
-            `${g.icon} ${g.title}`,
-            g.commands.map(c => `${c.cmd} — ${c.desc}`)
-        )
+        renderBox(`${g.icon} ${g.title}`, g.commands)
     );
 
     return [
-        `┌──❮ 🤖 ${CONFIG.botName} ❯`,
+        `┌──❮ 🤖 ${CONFIG.botName || CONFIG.codename} ❯`,
         '│',
         `│  ᴄᴏᴍᴍᴀɴᴅꜱ ᴀʀᴇ ᴏᴡɴᴇʀ-ᴏɴʟʏ`,
         `│ 🔑 ᴘʀᴇꜰɪx · .`,
+        `│ ℹ️ ᴛʏᴘᴇ ᴀɴʏ ᴄᴏᴍᴍᴀɴᴅ ᴀʟᴏɴᴇ ꜰᴏʀ ɪᴛꜱ ɢᴜɪᴅᴇ`,
         '│',
         TAIL,
         '',
@@ -165,10 +118,7 @@ function renderAll() {
 function renderGroup(name) {
     const g = REGISTRY.find(x => x.id === name || x.title.replace(/[^a-z]/gi, '') === name);
     if (!g) return null;
-    return renderBox(
-        `${g.icon} ${g.title}`,
-        g.commands.map(c => `${c.cmd}`)
-    );
+    return renderBox(`${g.icon} ${g.title}`, g.commands);
 }
 
 export async function helpCommand(sock, chat, msg, args) {
