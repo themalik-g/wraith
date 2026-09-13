@@ -49,7 +49,15 @@ export function startPresenceHeartbeat(sock) {
         }
     }, 30_000);
 }
-
+// ─────────────────────────────────────────────
+//  Stop heartbeat — called by start.js on socket teardown
+// ─────────────────────────────────────────────
+export function stopPresenceHeartbeat() {
+    if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+    }
+}
 export function shouldReadReceipts() {
     return read().readReceipts === true;
 }
