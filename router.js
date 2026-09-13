@@ -1,6 +1,8 @@
 // ─────────────────────────────────────────────
 //  WRAITH · router.js
 //  Unified message dispatcher.
+//  · reacts 🫡 to every command
+//  · routes the new .update command
 // ─────────────────────────────────────────────
 import {
     remember,
@@ -20,6 +22,7 @@ import { getppCommand } from './modules/profile.js';
 import { getjidCommand } from './modules/jid.js';
 import { presenceCommand, shouldReadReceipts, applyAutoPresence } from './modules/presence.js';
 import { activityCommand, trackActivity } from './modules/activity.js';
+import { updateCommand } from './modules/update.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 
 // ─────────────────────────────────────────────
@@ -120,6 +123,13 @@ export async function dispatch(sock, update) {
             const verb = (firstSpace === -1 ? text.slice(1) : text.slice(1, firstSpace)).toLowerCase();
             const rest = firstSpace === -1 ? [] : text.slice(firstSpace + 1).trim().split(/\s+/);
 
+            // ── 🫡 acknowledge EVERY command ──
+            try {
+                await sock.sendMessage(chat, { react: { text: '🫡', key: msg.key } });
+            } catch (e) {
+                console.error('[router] react', e.message);
+            }
+
             switch (verb) {
                 case 'ghost': await ghostCommand(sock, chat, msg, rest); break;
                 case 'peek':  await peekCommand(sock, chat, msg, rest);  break;
@@ -140,6 +150,7 @@ export async function dispatch(sock, update) {
                 case 'getjid':     await getjidCommand(sock, chat, msg, rest); break;
                 case 'presence':   await presenceCommand(sock, chat, msg, rest); break;
                 case 'activity':   await activityCommand(sock, chat, msg, rest); break;
+                case 'update':     await updateCommand(sock, chat, msg, rest);   break;
 
                 default: break;
             }
