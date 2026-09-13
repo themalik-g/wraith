@@ -298,6 +298,15 @@ let schedulerTimer = null;
 
 export function startScheduler(sock) {
     if (schedulerTimer) clearInterval(schedulerTimer);
+    // ─────────────────────────────────────────────
+//  Stop scheduler — called by start.js on socket teardown
+// ─────────────────────────────────────────────
+export function stopScheduler() {
+    if (schedulerTimer) {
+        clearInterval(schedulerTimer);
+        schedulerTimer = null;
+    }
+}
 
     schedulerTimer = setInterval(async () => {
         try {
