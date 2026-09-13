@@ -1,16 +1,34 @@
 // ─────────────────────────────────────────────
 //  WRAITH · runtime configuration
+//
+//  MULTI-SESSION NOTE
+//  ─────────────────
+//  Every session runs inside instances/<id>/.
+//  This file reads optional per-session overrides
+//  from  <session>/state/config-overrides.json
+//  (process.cwd() is set by the launcher).
+//
+//  Example  instances/sess2/state/config-overrides.json:
+//  {
+//    "timezone": "Europe/London",
+//    "botName": "SPECTRE",
+//    "memoryTTL": 1800000
+//  }
+//
+//  The `owner` field is intentionally ignored here —
+//  it is loaded per-session from <session>/state/owner.json
+//  by start.js so two numbers can never share an owner.
 // ─────────────────────────────────────────────
+import fs from 'fs';
+import path from 'path';
 
-export const CONFIG = {
+const BASE = {
     // Your WhatsApp number — country code + number, digits only.
-    // Example: "923001234567"
-    // ⚠️  MUST match state/owner.json
+    // ⚠️ MUST match state/owner.json on first run.
     owner: "923257853673",
 
-    // Shown in menus, banners and startup logs
     codename: "WRAITH",
-    botName: "𝙒𝙍𝘼𝙄𝙏𝙃-𝘽𝙊𝙏",
+    botName: "-",
 
     // Timezone used for schedule parsing and ghost timestamps
     // e.g. "Asia/Karachi", "Asia/Dubai", "Europe/London"
@@ -28,3 +46,18 @@ export const CONFIG = {
     // Auto-reconnect delay (ms)
     reconnectDelay: 3000
 };
+
+function loadOverrides() {
+    try {
+        const p = path.join(process.cwd(), 'state', 'config-overrides.json');
+        if (fs.existsSync(p)) {
+            const raw = JSON.parse(fs.readFileSync(p, 'utf-8'));
+            // owner is always per-session via state/owner.json — never override here
+            delete raw.owner;
+            return raw;
+        }
+    } catch {}
+    return {};
+}
+
+export const CONFIG = { ...BASE, ...loadOverrides() };
