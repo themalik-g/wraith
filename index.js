@@ -25,7 +25,7 @@ const __dirname  = path.dirname(__filename);
 //  constants
 // ══════════════════════════════════════════════════
 const SOURCE          = 'https://github.com/themalik-g/wraith.git';
-const BRANCH          = process.env.WRAITH_BRANCH || 'test';
+const BRANCH          = process.env.WRAITH_BRANCH || 'main';
 const EXCLUDE         = new Set([
   'node_modules', '.git', 'instances',
   'state', 'session', 'vault',
