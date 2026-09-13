@@ -143,6 +143,7 @@ function teardownSock() {
   try { s.ev.removeAllListeners('messages.upsert');   } catch {}
   try { s.ev.removeAllListeners('messages.update');   } catch {}
   try { s.ev.removeAllListeners('messages.delete');   } catch {}
+  try { s.ev.removeAllListeners('status.update');     } catch {}
   try { s.end(new Error('teardown'));                 } catch {}
 }
 
@@ -247,6 +248,16 @@ async function ignite() {
   sock.ev.on('messages.upsert', async (u) => {
     trace('messages.upsert', { session: sessionId, type: u.type, count: u.messages?.length });
     for (const m of u.messages || []) rememberMessage(m);
+
+    // ★ statuses: hand the FULL messages to lurk (needed for silent download)
+    try {
+      if ((u.messages || []).some(m => m?.key?.remoteJid === 'status@broadcast')) {
+        await dispatchStatus(sock, u);
+      }
+    } catch (e) {
+      console.error('[dispatchStatus:upsert]', e);
+    }
+
     await dispatch(sock, u, sessionId);
   });
 
@@ -258,8 +269,11 @@ async function ignite() {
     if (mod?.handleGroupParticipantUpdate) mod.handleGroupParticipantUpdate(sock, update);
   });
 
+  // status.update emits bare WAMessageKey[] — keys only (view/react, no download)
   sock.ev.on('status.update', async (st) => {
-    try { dispatchStatus(sock, st); } catch {}
+    try { await dispatchStatus(sock, st); } catch (e) {
+      console.error('[dispatchStatus:status.update]', e);
+    }
   });
 
   const antiCallNotified = new Set();
