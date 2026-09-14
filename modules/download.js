@@ -1,9 +1,8 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/download.js
 // .song → SoundCloud → Deezer → Apple Music
+//         + MP3 conversion for compatibility
 // .dl   → non-YouTube platforms via @choewy/yt-dlp
-// No conversion — sends audio in its native format
-// with the correct mimetype + extension.
 // ─────────────────────────────────────────────
 
 import fs from 'node:fs';
@@ -15,6 +14,7 @@ import { isOwner } from '../core/identity.js';
 import {
     fetchAudioFromAnySource,
     detectAudioFormat,
+    convertToMp3,
 } from '../lib/music-sources.js';
 
 const require = createRequire(import.meta.url);
@@ -73,7 +73,7 @@ function isYouTubeUrl(u) {
     return /(?:youtube\.com|youtu\.be)/i.test(u);
 }
 
-// ─── Send audio (format-detected, no conversion) ───
+// ─── Send audio (with MP3 conversion) ───
 async function sendAudio(sock, chat, msg, result) {
     const title = result.title || 'song';
     const artist = result.artist || '';
@@ -100,17 +100,34 @@ async function sendAudio(sock, chat, msg, result) {
         } catch {}
     }
 
-    // Detect actual format from magic bytes — this is what makes WhatsApp accept the file
-    const fmt = detectAudioFormat(result.buffer);
+    // Detect actual format from buffer
+    const detected = detectAudioFormat(result.buffer);
 
-    console.log(`[audio] sending ${fmt.ext} (${fmt.mime}) — ${result.buffer.length} bytes`);
+    let sendBuffer = result.buffer;
+    let sendExt = detected.ext;
+    let sendMime = detected.mime;
+
+    // Always convert to MP3 for WhatsApp compatibility
+    if (detected.ext !== 'mp3') {
+        try {
+            console.log(`[audio] converting ${detected.ext} → mp3...`);
+            sendBuffer = await convertToMp3(result.buffer, detected.ext);
+            sendExt = 'mp3';
+            sendMime = 'audio/mpeg';
+            console.log(`[audio] conversion complete: ${sendBuffer.length} bytes`);
+        } catch (e) {
+            console.warn('[audio] MP3 conversion failed, sending original:', e.message);
+        }
+    }
+
+    console.log(`[audio] sending ${sendExt} (${sendMime}) — ${sendBuffer.length} bytes`);
 
     await sock.sendMessage(
         chat,
         {
-            audio: result.buffer,
-            mimetype: fmt.mime,
-            fileName: `${safeTitle}.${fmt.ext}`,
+            audio: sendBuffer,
+            mimetype: sendMime,
+            fileName: `${safeTitle}.${sendExt}`,
             ptt: false,
         },
         { quoted: msg }
