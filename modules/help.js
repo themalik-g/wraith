@@ -6,28 +6,62 @@ import { isOwner } from '../core/identity.js';
 
 const REGISTRY = [
   {
-    id: 'ghost', icon: '👻', title: 'ɢʜᴏꜱᴛ',
-    commands: ['.ghost', '.ghost on', '.ghost off', '.ghost edit on', '.ghost edit off'],
-  },
-  {
-    id: 'peek', icon: '👀', title: 'ᴘᴇᴇᴋ',
-    commands: ['.peek', '.peek auto on', '.peek auto off', '.peek dest owner', '.peek dest same', '.peek dest both'],
-  },
-  {
-    id: 'lurk', icon: '🕵️', title: 'ʟᴜʀᴋ',
+    id: 'ghost',
+    icon: '👻',
+    title: 'ɢʜᴏꜱᴛ',
     commands: [
-      '.lurk', '.lurk on', '.lurk off',
-      '.lurk react on', '.lurk react off',
-      '.lurk download on', '.lurk download off',
-      '.lurk emoji ❤️', '.lurk emoji random', '.lurk emoji none',
+      '.ghost',
+      '.ghost on',
+      '.ghost off',
+      '.ghost edit on',
+      '.ghost edit off',
     ],
   },
   {
-    id: 'schedule', icon: '⏰', title: 'ꜱᴄʜᴇᴅᴜʟᴇ',
-    commands: ['.schedule', '.schedule txt date am/pm', '.schedule list', '.schedule cancel <id>'],
+    id: 'peek',
+    icon: '👀',
+    title: 'ᴘᴇᴇᴋ',
+    commands: [
+      '.peek',
+      '.peek auto on',
+      '.peek auto off',
+      '.peek dest owner',
+      '.peek dest same',
+      '.peek dest both',
+    ],
   },
   {
-    id: 'download', icon: '⬇️', title: 'ᴅᴏᴡɴʟᴏᴀᴅ',
+    id: 'lurk',
+    icon: '🕵️',
+    title: 'ʟᴜʀᴋ',
+    commands: [
+      '.lurk',
+      '.lurk on',
+      '.lurk off',
+      '.lurk react on',
+      '.lurk react off',
+      '.lurk download on',
+      '.lurk download off',
+      '.lurk emoji ❤️',
+      '.lurk emoji random',
+      '.lurk emoji none',
+    ],
+  },
+  {
+    id: 'schedule',
+    icon: '⏰',
+    title: 'ꜱᴄʜᴇᴅᴜʟᴇ',
+    commands: [
+      '.schedule',
+      '.schedule txt date am/pm',
+      '.schedule list',
+      '.schedule cancel <id>',
+    ],
+  },
+  {
+    id: 'download',
+    icon: '⬇️',
+    title: 'ᴅᴏᴡɴʟᴏᴀᴅ',
     commands: [
       '.dl <url>',
       '.dl 1080|720|480|360 <url>',
@@ -35,30 +69,64 @@ const REGISTRY = [
       '.dl audio 128 <url>',
       '.dl mp3 <url>',
       '.dl mp3 192 <url>',
+      '.song <query>',
     ],
   },
   {
-    id: 'admin', icon: '🛡️', title: 'ᴀᴅᴍɪɴ',
-    commands: ['.kick @user', '.add 923…', '.promote @user', '.demote @user', '.antilink on|off', '.antispam on|off', '.antisticker on|off'],
+    id: 'admin',
+    icon: '🛡️',
+    title: 'ᴀᴅᴍɪɴ',
+    commands: [
+      '.kick @user',
+      '.add 923…',
+      '.promote @user',
+      '.demote @user',
+      '.antilink on|off',
+      '.antispam on|off',
+      '.antisticker on|off',
+    ],
   },
   {
-    id: 'tools', icon: '🔧', title: 'ᴛᴏᴏʟꜱ',
-    commands: ['.getpp', '.getpp <number>', '.getjid', '.getjid currentchat', '.getjid channels', '.getjid members'],
+    id: 'tools',
+    icon: '🔧',
+    title: 'ᴛᴏᴏʟꜱ',
+    commands: [
+      '.getpp',
+      '.getpp <number>',
+      '.getjid',
+      '.getjid currentchat',
+      '.getjid channels',
+      '.getjid members',
+    ],
   },
   {
-    id: 'presence', icon: '⚙️', title: 'ᴘʀᴇꜱᴇɴᴄᴇ',
-    commands: ['.presence', '.presence online on|off', '.presence typing on|off', '.presence recording on|off', '.presence reads on|off'],
+    id: 'presence',
+    icon: '⚙️',
+    title: 'ᴘʀᴇꜱᴇɴᴄᴇ',
+    commands: [
+      '.presence',
+      '.presence online on|off',
+      '.presence typing on|off',
+      '.presence recording on|off',
+      '.presence reads on|off',
+    ],
   },
   {
-    id: 'activity', icon: '📊', title: 'ᴀᴄᴛɪᴠɪᴛʏ',
-    commands: ['.activity', '.activity <n>'],
+    id: 'activity',
+    icon: '📊',
+    title: 'ᴀᴄᴛɪᴠɪᴛʏ',
+    commands: ['.activity', '.activity <chat>'],
   },
   {
-    id: 'probe', icon: '📡', title: 'ᴘʀᴏʙᴇ',
+    id: 'probe',
+    icon: '📡',
+    title: 'ᴘʀᴏʙᴇ',
     commands: ['.ping'],
   },
   {
-    id: 'system', icon: '⚡', title: 'sʏsᴛᴇᴍ',
+    id: 'system',
+    icon: '⚡',
+    title: 'sʏsᴛᴇᴍ',
     commands: ['.update'],
   },
 ];
@@ -76,7 +144,9 @@ function renderBox(title, rows) {
 }
 
 function renderAll() {
-  const sections = REGISTRY.map((g) => renderBox(`${g.icon} ${g.title}`, g.commands));
+  const sections = REGISTRY.map((g) =>
+    renderBox(`${g.icon} ${g.title}`, g.commands)
+  );
   return [
     '┌──❮ ⓌⓇⒶⒾⓉⒽ ❯',
     '│',
@@ -103,23 +173,41 @@ function renderGroup(name) {
 export async function helpCommand(sock, chat, msg, args) {
   const from = msg.key.participant || msg.key.remoteJid;
   if (!msg.key.fromMe && !isOwner(from)) {
-    return sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
+    return sock.sendMessage(
+      chat,
+      { text: '⛔ Owner only.' },
+      { quoted: msg }
+    );
   }
 
   const target = (args?.[0] || '').toLowerCase().trim();
 
   if (!target) {
-    return sock.sendMessage(chat, { text: renderAll() }, { quoted: msg });
+    return sock.sendMessage(
+      chat,
+      { text: renderAll() },
+      { quoted: msg }
+    );
   }
 
   const wanted = target.replace(/[^a-z]/g, '');
   const rendered = renderGroup(wanted);
 
   if (!rendered) {
-    return sock.sendMessage(chat, {
-      text: ` no menu page called _${target}_.\n\n${REGISTRY.map((g) => `• ${g.id}`).join(' · ')}`,
-    }, { quoted: msg });
+    return sock.sendMessage(
+      chat,
+      {
+        text: `❓ no menu page called _${target}_.\n\n${REGISTRY.map(
+          (g) => `• ${g.id}`
+        ).join(' · ')}`,
+      },
+      { quoted: msg }
+    );
   }
 
-  return sock.sendMessage(chat, { text: rendered }, { quoted: msg });
+  return sock.sendMessage(
+    chat,
+    { text: rendered },
+    { quoted: msg }
+  );
 }
