@@ -65,11 +65,10 @@ const REGISTRY = [
     icon: '⬇️',
     title: 'ᴅᴏᴡɴʟᴏᴀᴅ',
     commands: [
+      '.song <song name>',
       '.dl <url>',
       '.dl audio <url>',
       '.dl mp3 <url>',
-      '.song <query>',
-      '.video <query>',
     ],
   },
   {
