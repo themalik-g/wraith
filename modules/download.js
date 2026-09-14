@@ -4,7 +4,7 @@
 // · Zero manual server setup (npm install handles everything)
 // · /tmp (RAM-backed) staging · auto-cleanup
 // · Quality selection · timeout · size caps · playlist-proof
-// · Binary check · crash-safe · full error reporting
+// · Crash-safe · full error reporting · uses official download() path
 // ─────────────────────────────────────────────
 import { YtDlp } from '@choewy/yt-dlp';
 import fs from 'node:fs';
@@ -33,26 +33,6 @@ function cleanupByPrefix(prefix) {
     if (!f.startsWith(prefix)) continue;
     try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
   }
-}
-
-function findLargestFile(prefix) {
-  const dir = os.tmpdir();
-  let largest = null;
-  let largestSize = 0;
-  let entries = [];
-  try { entries = fs.readdirSync(dir); } catch { return null; }
-  for (const f of entries) {
-    if (!f.startsWith(prefix)) continue;
-    const fp = path.join(dir, f);
-    try {
-      const st = fs.statSync(fp);
-      if (st.isFile() && st.size > largestSize) {
-        largestSize = st.size;
-        largest = fp;
-      }
-    } catch { /* ignore */ }
-  }
-  return largest;
 }
 
 // ─────────────────────────────────────────────
@@ -188,22 +168,25 @@ export async function downloadCommand(sock, chat, msg, args) {
     await safeReply(sock, chat, msg, '⏳ downloading…');
 
     // ── Build YtDlp instance ──
+    // Official order: .mergeFormat() → .output() → .video()
+    //                 .audioFormat() → .output() → .audio()
     let builder = new YtDlp({ url: parsed.url });
 
     if (parsed.mode === 'audio') {
       builder = builder
         .audioFormat(parsed.container)
-        .audio()
-        .output(outTemplate);
+        .output(outTemplate)
+        .audio();
       if (parsed.audioBitrate) {
-        // @choewy/yt-dlp uses audio-quality via format; fallback to format string
-        builder = builder.format(`bestaudio[abr<=${parseInt(parsed.audioBitrate, 10)}]/bestaudio`);
+        builder = builder.format(
+          `bestaudio[abr<=${parseInt(parsed.audioBitrate, 10)}]/bestaudio`
+        );
       }
     } else {
       builder = builder
         .mergeFormat('mp4')
-        .video()
-        .output(outTemplate);
+        .output(outTemplate)
+        .video();
       if (parsed.videoHeight) {
         builder = builder.format(
           `bestvideo[height<=${parsed.videoHeight}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${parsed.videoHeight}]+bestaudio/best[height<=${parsed.videoHeight}]/best`
@@ -211,20 +194,24 @@ export async function downloadCommand(sock, chat, msg, args) {
       }
     }
 
-    // ── Apply resource-saving flags ──
+    // ── Resource-saving flags (from official docs) ──
     builder = builder
       .quiet()
       .noWarnings()
       .noProgress()
+      .playlist(false)          // equivalent to --no-playlist
       .retries(3)
-      .fragmentRetries(3);
+      .fragmentRetries(3)
+      .concurrentFragments(1);  // default is 4 — set to 1 for lowest CPU
 
     // ── Execute download (with timeout) ──
-    await withTimeout(builder.download(), DOWNLOAD_TIMEOUT_MS);
+    const result = await withTimeout(builder.download(), DOWNLOAD_TIMEOUT_MS);
 
-    // ── Locate output file ──
-    const outFile = findLargestFile(prefix);
-    if (!outFile) throw new Error('Output file was not produced');
+    // ── Use the official returned path (more reliable than scanning) ──
+    const outFile = result?.path;
+    if (!outFile || !fs.existsSync(outFile)) {
+      throw new Error('Output file was not produced');
+    }
 
     const stat = fs.statSync(outFile);
     const cap = parsed.mode === 'audio' ? AUDIO_MAX_BYTES : VIDEO_MAX_BYTES;
@@ -269,7 +256,6 @@ export async function downloadCommand(sock, chat, msg, args) {
     cleanupByPrefix(prefix);
 
   } catch (err) {
-    // ── Full error report ──
     console.error('[download] command error:', err?.stack || err?.message || err);
     cleanupByPrefix(prefix);
     await safeReply(sock, chat, msg, classifyError(err?.message || err));
