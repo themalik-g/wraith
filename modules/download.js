@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/download.js
-// Diagnostic build — reports per-provider errors.
+// YouTube downloader using yt-direct (InnerTube API, no cookies)
 // ─────────────────────────────────────────────
+
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -9,22 +10,17 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { YtDlp } from '@choewy/yt-dlp';
+import ytdl from 'yt-direct';
 import { isOwner } from '../core/identity.js';
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 
-const VIDEO_MAX_BYTES = 128 * 1024 * 1024;   // bumped to 128 MB
-const AUDIO_MAX_BYTES = 15 * 1024 * 1024;
-const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;
-
-const SEARCH_TIMEOUT_MS   = 20_000;
-const API_META_TIMEOUT_MS = 15_000;
-const API_FILE_TIMEOUT_MS = 90_000;          // bumped: video files are large
-const CHAIN_TIMEOUT_MS    = 3 * 60 * 1000;
-
-const UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const VIDEO_MAX_BYTES = 128 * 1024 * 1024; // 128 MB
+const AUDIO_MAX_BYTES = 15 * 1024 * 1024;  // 15 MB
+const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const SEARCH_TIMEOUT_MS = 20_000;
+const CHAIN_TIMEOUT_MS = 3 * 60 * 1000;
 
 async function react(sock, chat, msg, emoji) {
   try {
@@ -37,20 +33,27 @@ async function react(sock, chat, msg, emoji) {
 // ─── Queue ───
 const _queue = [];
 let _running = false;
+
 function enqueue(task) {
   return new Promise((resolve, reject) => {
     _queue.push({ task, resolve, reject });
     _drain();
   });
 }
+
 async function _drain() {
   if (_running) return;
   const next = _queue.shift();
   if (!next) return;
   _running = true;
-  try { next.resolve(await next.task()); }
-  catch (e) { next.reject(e); }
-  finally { _running = false; setImmediate(_drain); }
+  try {
+    next.resolve(await next.task());
+  } catch (e) {
+    next.reject(e);
+  } finally {
+    _running = false;
+    setImmediate(_drain);
+  }
 }
 
 // ─── Converter ───
@@ -60,7 +63,9 @@ async function getConverter() {
   try {
     const m = await import('../lib/converter.js');
     _toAudio = m.toAudio || m.default?.toAudio || null;
-  } catch { _toAudio = null; }
+  } catch {
+    _toAudio = null;
+  }
   return _toAudio;
 }
 
@@ -73,7 +78,9 @@ async function fetchWithTimeout(url, opts = {}, ms = 60_000) {
   } catch (e) {
     if (e.name === 'AbortError') throw new Error(`timeout after ${ms / 1000}s`);
     throw e;
-  } finally { clearTimeout(timer); }
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function withTimeout(promise, ms, label = 'operation') {
@@ -89,8 +96,9 @@ function withTimeout(promise, ms, label = 'operation') {
 async function withRetry(fn, attempts = 2, gapMs = 800) {
   let lastErr;
   for (let i = 1; i <= attempts; i++) {
-    try { return await fn(); }
-    catch (e) {
+    try {
+      return await fn();
+    } catch (e) {
       lastErr = e;
       if (i < attempts) await new Promise((r) => setTimeout(r, gapMs));
     }
@@ -98,7 +106,7 @@ async function withRetry(fn, attempts = 2, gapMs = 800) {
   throw lastErr;
 }
 
-// ─── yt-dlp binary ───
+// ─── yt-dlp binary (for search fallback & non-YouTube) ───
 function findYtDlpBinary() {
   const candidates = [];
   try {
@@ -115,9 +123,16 @@ function findYtDlpBinary() {
       path.join(pkgDir, 'dist', 'yt-dlp.exe')
     );
   } catch {}
-  candidates.push('/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp', '/bin/yt-dlp', '/opt/yt-dlp/yt-dlp');
+  candidates.push(
+    '/usr/local/bin/yt-dlp',
+    '/usr/bin/yt-dlp',
+    '/bin/yt-dlp',
+    '/opt/yt-dlp/yt-dlp'
+  );
   for (const c of candidates) {
-    try { if (fs.statSync(c).isFile()) return c; } catch {}
+    try {
+      if (fs.statSync(c).isFile()) return c;
+    } catch {}
   }
   return null;
 }
@@ -143,9 +158,17 @@ async function ytDlpSearch(query) {
 
 async function scraperSearch(query) {
   const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAQ%253D%253D`;
-  const res = await fetchWithTimeout(url, {
-    headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9', Accept: 'text/html,application/xhtml+xml' },
-  }, SEARCH_TIMEOUT_MS);
+  const res = await fetchWithTimeout(
+    url,
+    {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        Accept: 'text/html,application/xhtml+xml',
+      },
+    },
+    SEARCH_TIMEOUT_MS
+  );
   if (!res.ok) throw new Error(`YouTube search HTTP ${res.status}`);
   const html = await res.text();
   const m = html.match(/"videoRenderer":\{"videoId":"([A-Za-z0-9_-]{11})"/);
@@ -166,119 +189,17 @@ async function searchYouTube(query) {
   return scraperSearch(query);
 }
 
-// ─── JSON + buffer fetch ───
-async function getJson(url, timeoutMs = API_META_TIMEOUT_MS) {
-  const res = await fetchWithTimeout(url, {
-    headers: { 'User-Agent': UA, Accept: 'application/json, text/plain, */*' },
-  }, timeoutMs);
-  const raw = await res.text();
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}: ${raw.slice(0, 120)}`);
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new Error(`Non-JSON response: ${raw.slice(0, 120)}`);
-  }
-}
-
-async function fetchBuffer(url, maxBytes, timeoutMs = API_FILE_TIMEOUT_MS) {
-  const res = await fetchWithTimeout(url, {
-    headers: { 'User-Agent': UA, Accept: '*/*', 'Accept-Encoding': 'identity' },
-    redirect: 'follow',
-  }, timeoutMs);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const chunks = [];
-  let total = 0;
-  for await (const chunk of res.body) {
-    total += chunk.length;
-    if (maxBytes && total > maxBytes) {
-      throw new Error(`File too large (>${(maxBytes / 1048576).toFixed(0)} MB)`);
-    }
-    chunks.push(chunk);
-  }
-  if (!total) throw new Error('Empty response');
-  return Buffer.concat(chunks);
-}
-
-// ─── AUDIO providers ───
-async function eliteProTechAudio(url) {
-  const api = `https://eliteprotech-apis.zone.id/ytdown?url=${encodeURIComponent(url)}&format=mp3`;
-  const data = await withRetry(() => getJson(api));
-  if (data?.success && data?.downloadURL) return { download: data.downloadURL, title: data.title };
-  throw new Error(`unexpected shape: ${JSON.stringify(data).slice(0, 120)}`);
-}
-async function yupraAudio(url) {
-  const api = `https://api.yupra.my.id/api/downloader/ytmp3?url=${encodeURIComponent(url)}`;
-  const data = await withRetry(() => getJson(api));
-  if (data?.success && data?.data?.download_url) {
-    return { download: data.data.download_url, title: data.data.title, thumbnail: data.data.thumbnail };
-  }
-  throw new Error(`unexpected shape: ${JSON.stringify(data).slice(0, 120)}`);
-}
-async function okatsuAudio(url) {
-  const api = `https://okatsu-rolezapiiz.vercel.app/downloader/ytmp3?url=${encodeURIComponent(url)}`;
-  const data = await withRetry(() => getJson(api));
-  if (data?.dl) return { download: data.dl, title: data.title, thumbnail: data.thumb };
-  throw new Error(`unexpected shape: ${JSON.stringify(data).slice(0, 120)}`);
-}
-
-// ─── VIDEO providers ───
-async function eliteProTechVideo(url) {
-  const api = `https://eliteprotech-apis.zone.id/ytdown?url=${encodeURIComponent(url)}&format=mp4`;
-  const data = await withRetry(() => getJson(api));
-  if (data?.success && data?.downloadURL) return { download: data.downloadURL, title: data.title };
-  throw new Error(`unexpected shape: ${JSON.stringify(data).slice(0, 120)}`);
-}
-async function yupraVideo(url) {
-  const api = `https://api.yupra.my.id/api/downloader/ytmp4?url=${encodeURIComponent(url)}`;
-  const data = await withRetry(() => getJson(api));
-  if (data?.success && data?.data?.download_url) {
-    return { download: data.data.download_url, title: data.data.title, thumbnail: data.data.thumbnail };
-  }
-  throw new Error(`unexpected shape: ${JSON.stringify(data).slice(0, 120)}`);
-}
-async function okatsuVideo(url) {
-  const api = `https://okatsu-rolezapiiz.vercel.app/downloader/ytmp4?url=${encodeURIComponent(url)}`;
-  const data = await withRetry(() => getJson(api));
-  if (data?.result?.mp4) return { download: data.result.mp4, title: data.result.title };
-  throw new Error(`unexpected shape: ${JSON.stringify(data).slice(0, 120)}`);
-}
-
-// ─── Chain ───
-async function tryApiChain(providers, url, maxBytes, onStatus) {
-  const errors = [];
-  const chainPromise = (async () => {
-    for (let i = 0; i < providers.length; i++) {
-      const p = providers[i];
-      try {
-        if (onStatus) onStatus(`[${i + 1}/${providers.length}] ${p.name}…`);
-        const meta = await withTimeout(p.fn(url), API_META_TIMEOUT_MS + 3_000, `${p.name} metadata`);
-        if (!meta?.download) throw new Error('no download URL in response');
-        const buf = await withTimeout(fetchBuffer(meta.download, maxBytes), API_FILE_TIMEOUT_MS + 5_000, `${p.name} file`);
-        if (onStatus) onStatus(`✅ ${p.name} succeeded`);
-        return { ...meta, buffer: buf, provider: p.name };
-      } catch (err) {
-        const msg = String(err?.message || err);
-        errors.push(`${p.name}: ${msg.slice(0, 100)}`);
-        console.error(`[dl] ${p.name} failed: ${msg}`);
-        if (onStatus) onStatus(`⚠️ ${p.name} failed, trying next…`);
-      }
-    }
-    const final = new Error('All providers failed');
-    final.errors = errors;
-    throw final;
-  })();
-  return withTimeout(chainPromise, CHAIN_TIMEOUT_MS, 'API chain');
-}
-
 // ─── URL helpers ───
-function isYouTubeUrl(u) { return /(?:youtube\.com|youtu\.be)/i.test(u); }
+function isYouTubeUrl(u) {
+  return /(?:youtube\.com|youtu\.be)/i.test(u);
+}
 function extractYouTubeId(u) {
   const m = u.match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([A-Za-z0-9_-]{11})/);
   return m ? m[1] : null;
 }
-function thumbFor(id) { return id ? `https://i.ytimg.com/vi/${id}/sddefault.jpg` : undefined; }
+function thumbFor(id) {
+  return id ? `https://i.ytimg.com/vi/${id}/sddefault.jpg` : undefined;
+}
 
 async function resolveVideo(input) {
   if (isYouTubeUrl(input)) {
@@ -300,6 +221,56 @@ function detectFormat(buf) {
   return { ext: 'm4a', mime: 'audio/mp4' };
 }
 
+// ─── yt-direct download helpers ───
+async function downloadWithYtDirect(url, quality, format, maxBytes, onStatus) {
+  try {
+    if (onStatus) onStatus(`⏳ fetching metadata from YouTube...`);
+    const video = await withTimeout(
+      ytdl(url, {
+        quality: quality, // 'audio' or a resolution like '720p'
+        format: format,   // 'mp3', 'm4a', 'mp4', etc.
+        timeout: 30000,
+        retries: 3,
+      }),
+      DOWNLOAD_TIMEOUT_MS,
+      'yt-direct metadata'
+    );
+
+    if (onStatus) onStatus(`⬇️ downloading ${video.title}...`);
+
+    const tmpFile = path.join(os.tmpdir(), `wraith_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${format}`);
+    const result = await withTimeout(
+      video.download(tmpFile),
+      DOWNLOAD_TIMEOUT_MS,
+      'yt-direct download'
+    );
+
+    if (!fs.existsSync(tmpFile)) throw new Error('Downloaded file not found');
+
+    const stat = fs.statSync(tmpFile);
+    if (stat.size > maxBytes) {
+      fs.unlinkSync(tmpFile);
+      throw new Error(`File too large (${(stat.size / 1048576).toFixed(1)} MB)`);
+    }
+
+    const buffer = fs.readFileSync(tmpFile);
+    fs.unlinkSync(tmpFile); // clean up immediately
+
+    if (onStatus) onStatus(`✅ download complete (${(stat.size / 1048576).toFixed(1)} MB)`);
+
+    return {
+      buffer,
+      title: video.title,
+      thumbnail: video.thumbnail || thumbFor(extractYouTubeId(url)),
+      provider: 'yt-direct',
+      size: stat.size,
+    };
+  } catch (err) {
+    console.error(`[yt-direct] failed: ${err.message}`);
+    throw err;
+  }
+}
+
 // ─── .song ───
 export async function songCommand(sock, chat, msg, args) {
   return enqueue(async () => {
@@ -309,45 +280,67 @@ export async function songCommand(sock, chat, msg, args) {
         await react(sock, chat, msg, '❌');
         return sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
       }
+
       const query = Array.isArray(args) ? args.join(' ').trim() : '';
       if (!query) {
         await react(sock, chat, msg, '❌');
-        return sock.sendMessage(chat, { text: '* WRAITH · SONG*\n\nUsage: `.song <name or YouTube link>`' }, { quoted: msg });
+        return sock.sendMessage(chat, { text: '* WRAITH · SONG*\n\nUsage: `.song <query or URL>`' }, { quoted: msg });
       }
+
       const video = await resolveVideo(query);
       if (!video) {
         await react(sock, chat, msg, '❌');
-        return sock.sendMessage(chat, { text: '❌ No results found.' }, { quoted: msg });
+        return sock.sendMessage(chat, { text: '❌ No video found.' }, { quoted: msg });
       }
+
       if (video.thumbnail) {
-        await sock.sendMessage(chat, { image: { url: video.thumbnail }, caption: `🎵 Downloading: *${video.title}*` }, { quoted: msg }).catch(() => {});
+        await sock.sendMessage(chat, {
+          image: { url: video.thumbnail },
+          caption: `Downloading: *${video.title}*`,
+        }, { quoted: msg }).catch(() => {});
       }
-      const providers = [
-        { name: 'EliteProTech', fn: eliteProTechAudio },
-        { name: 'Yupra', fn: yupraAudio },
-        { name: 'Okatsu', fn: okatsuAudio },
-      ];
-      const result = await tryApiChain(providers, video.url, AUDIO_MAX_BYTES, (s) => {
-        sock.sendMessage(chat, { text: s }, { quoted: msg }).catch(() => {});
-      });
+
+      const result = await downloadWithYtDirect(
+        video.url,
+        'audio',       // quality: best audio
+        'mp3',         // format: mp3
+        AUDIO_MAX_BYTES,
+        (s) => { sock.sendMessage(chat, { text: s }, { quoted: msg }).catch(() => {}); }
+      );
+
       let buf = result.buffer;
       let fmt = detectFormat(buf);
+
+      // If it's not MP3, try to convert
       if (fmt.ext !== 'mp3') {
         const toAudio = await getConverter();
         if (toAudio) {
           try {
             const converted = await withTimeout(toAudio(buf, fmt.ext), 30_000, 'conversion');
-            if (converted?.length) { buf = converted; fmt = { ext: 'mp3', mime: 'audio/mpeg' }; }
-          } catch (e) { console.error('[song] convert failed:', e.message); }
+            if (converted?.length) {
+              buf = converted;
+              fmt = { ext: 'mp3', mime: 'audio/mpeg' };
+            }
+          } catch (e) {
+            console.error('[song] convert failed:', e.message);
+          }
         }
       }
+
       const safeTitle = (result.title || video.title || 'song').replace(/[^\w\s-]/g, '').trim() || 'song';
-      await sock.sendMessage(chat, { audio: buf, mimetype: fmt.mime, fileName: `${safeTitle}.${fmt.ext}`, ptt: false }, { quoted: msg });
+
+      await sock.sendMessage(chat, {
+        audio: buf,
+        mimetype: fmt.mime,
+        fileName: `${safeTitle}.${fmt.ext}`,
+        ptt: false,
+      }, { quoted: msg });
+
       await react(sock, chat, msg, '✅');
     } catch (err) {
       console.error('[song] error:', err?.message);
       await react(sock, chat, msg, '❌');
-      const detail = err?.errors?.join('\n') || String(err?.message || err).slice(0, 180);
+      const detail = String(err?.message || err).slice(0, 180);
       await sock.sendMessage(chat, { text: `❌ Failed to download song.\n${detail}` }, { quoted: msg }).catch(() => {});
     }
   });
@@ -362,39 +355,49 @@ export async function videoCommand(sock, chat, msg, args) {
         await react(sock, chat, msg, '❌');
         return sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
       }
+
       const query = Array.isArray(args) ? args.join(' ').trim() : '';
       if (!query) {
         await react(sock, chat, msg, '❌');
-        return sock.sendMessage(chat, { text: '* WRAITH · VIDEO*\n\nUsage: `.video <name or YouTube link>`' }, { quoted: msg });
+        return sock.sendMessage(chat, { text: '* WRAITH · VIDEO*\n\nUsage: `.video <query or URL>`' }, { quoted: msg });
       }
+
       const video = await resolveVideo(query);
       if (!video) {
         await react(sock, chat, msg, '❌');
-        return sock.sendMessage(chat, { text: '❌ No videos found.' }, { quoted: msg });
+        return sock.sendMessage(chat, { text: '❌ No video found.' }, { quoted: msg });
       }
+
       if (video.thumbnail) {
-        await sock.sendMessage(chat, { image: { url: video.thumbnail }, caption: `🎬 Downloading: *${video.title}*` }, { quoted: msg }).catch(() => {});
+        await sock.sendMessage(chat, {
+          image: { url: video.thumbnail },
+          caption: `Downloading: *${video.title}*`,
+        }, { quoted: msg }).catch(() => {});
       }
-      const providers = [
-        { name: 'EliteProTech', fn: eliteProTechVideo },
-        { name: 'Yupra', fn: yupraVideo },
-        { name: 'Okatsu', fn: okatsuVideo },
-      ];
-      const result = await tryApiChain(providers, video.url, VIDEO_MAX_BYTES, (s) => {
-        sock.sendMessage(chat, { text: s }, { quoted: msg }).catch(() => {});
-      });
+
+      // For video, use 720p by default to keep file size manageable
+      const result = await downloadWithYtDirect(
+        video.url,
+        '720p',        // quality
+        'mp4',         // format
+        VIDEO_MAX_BYTES,
+        (s) => { sock.sendMessage(chat, { text: s }, { quoted: msg }).catch(() => {}); }
+      );
+
       const safeTitle = (result.title || video.title || 'video').replace(/[^\w\s-]/g, '').trim() || 'video';
+
       await sock.sendMessage(chat, {
         video: result.buffer,
         mimetype: 'video/mp4',
         fileName: `${safeTitle}.mp4`,
         caption: `*${result.title || video.title || 'Video'}*`,
       }, { quoted: msg });
+
       await react(sock, chat, msg, '✅');
     } catch (err) {
       console.error('[video] error:', err?.message);
       await react(sock, chat, msg, '❌');
-      const detail = err?.errors?.join('\n') || String(err?.message || err).slice(0, 180);
+      const detail = String(err?.message || err).slice(0, 180);
       await sock.sendMessage(chat, { text: `❌ Failed to download video.\n${detail}` }, { quoted: msg }).catch(() => {});
     }
   });
@@ -407,13 +410,16 @@ export async function downloadCommand(sock, chat, msg, args) {
     await react(sock, chat, msg, '❌');
     return sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
   }
+
   const arr = Array.isArray(args) ? [...args] : [];
   const urlIdx = arr.findIndex((p) => /^https?:\/\//i.test(p));
+
   if (urlIdx === -1) {
     await react(sock, chat, msg, '❌');
     return sock.sendMessage(chat, {
       text: [
-        '* WRAITH · DOWNLOAD*', '',
+        '* WRAITH · DOWNLOAD*',
+        '',
         '• `.dl <url>` — auto',
         '• `.dl audio <url>` — audio',
         '• `.dl mp3 <url>` — mp3',
@@ -422,54 +428,93 @@ export async function downloadCommand(sock, chat, msg, args) {
       ].join('\n'),
     }, { quoted: msg });
   }
+
   const url = arr.splice(urlIdx, 1)[0];
-  let mode = 'video', container = 'mp4';
+  let mode = 'video';
+  let container = 'mp4';
+
   for (const p of arr.map((x) => String(x).toLowerCase())) {
     if (p === 'audio' || p === 'a') { mode = 'audio'; container = 'm4a'; }
     else if (p === 'mp3') { mode = 'audio'; container = 'mp3'; }
     else if (p === 'm4a') { mode = 'audio'; container = 'm4a'; }
     else if (p === 'video' || p === 'v') { mode = 'video'; container = 'mp4'; }
   }
+
   if (isYouTubeUrl(url)) {
-    if (mode === 'audio') return songCommand(sock, chat, msg, [url]);
+    if (mode === 'audio') {
+      return songCommand(sock, chat, msg, [url]);
+    }
     return videoCommand(sock, chat, msg, [url]);
   }
-  await downloadViaYtDlp(sock, chat, msg, url, mode, container);
+
+  // Non-YouTube: fall back to yt-dlp (existing implementation)
+  return downloadViaYtDlp(sock, chat, msg, url, mode, container);
 }
 
-// ─── Non-YT via yt-dlp ───
+// ─── Non-YouTube via yt-dlp (unchanged) ───
 async function downloadViaYtDlp(sock, chat, msg, url, mode, container) {
   const prefix = `wraith_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   const outTemplate = path.join(os.tmpdir(), `${prefix}.%(ext)s`);
+
   try {
     await sock.sendMessage(chat, { text: '⏳ downloading…' }, { quoted: msg });
+
     const ytDlp = new YtDlp({
-      url, output: outTemplate,
+      url,
+      output: outTemplate,
       format: mode === 'audio' ? 'bestaudio/best' : 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-      quiet: true, noWarnings: true, noProgress: true, playlist: false, retries: 3,
+      quiet: true,
+      noWarnings: true,
+      noProgress: true,
+      playlist: false,
+      retries: 3,
     });
-    const builder = mode === 'audio' ? ytDlp.audioFormat(container).audio() : ytDlp.mergeFormat('mp4').video();
+
+    const builder = mode === 'audio'
+      ? ytDlp.audioFormat(container).audio()
+      : ytDlp.mergeFormat('mp4').video();
+
     const result = await withTimeout(builder.download(), DOWNLOAD_TIMEOUT_MS, 'yt-dlp download');
     const outFile = result?.path;
+
     if (!outFile || !fs.existsSync(outFile)) throw new Error('no output file');
+
     const stat = fs.statSync(outFile);
     const cap = mode === 'audio' ? AUDIO_MAX_BYTES : VIDEO_MAX_BYTES;
     if (stat.size > cap) {
       try { fs.unlinkSync(outFile); } catch {}
       throw new Error(`File too large (${(stat.size / 1048576).toFixed(1)} MB)`);
     }
+
     const stream = fs.createReadStream(outFile);
     const cleanup = () => { try { fs.unlinkSync(outFile); } catch {} };
-    stream.on('close', cleanup); stream.on('error', cleanup);
+    stream.on('close', cleanup);
+    stream.on('error', cleanup);
+
     const filename = path.basename(outFile);
-    const payload = mode === 'audio'
-      ? { audio: { stream }, mimetype: container === 'mp3' ? 'audio/mpeg' : 'audio/mp4', fileName: filename, ptt: false }
-      : { video: { stream }, mimetype: 'video/mp4', fileName: filename };
-    await sock.sendMessage(chat, payload, { quoted: msg });
+
+    if (mode === 'audio') {
+      await sock.sendMessage(chat, {
+        audio: { stream },
+        mimetype: 'audio/mpeg',
+        fileName: filename,
+        ptt: false,
+      }, { quoted: msg });
+    } else {
+      await sock.sendMessage(chat, {
+        video: { stream },
+        mimetype: 'video/mp4',
+        fileName: filename,
+        caption: filename,
+      }, { quoted: msg });
+    }
+
     await react(sock, chat, msg, '✅');
   } catch (err) {
-    console.error('[dl] yt-dlp error:', err?.message);
+    console.error('[dl] error:', err?.message);
     await react(sock, chat, msg, '❌');
-    await sock.sendMessage(chat, { text: `❌ Download failed.\n${String(err?.message || err).slice(0, 180)}` }, { quoted: msg }).catch(() => {});
+    await sock.sendMessage(chat, {
+      text: `❌ Download failed.\n${String(err?.message || err).slice(0, 180)}`,
+    }, { quoted: msg }).catch(() => {});
   }
 }
