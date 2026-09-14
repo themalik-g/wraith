@@ -1,12 +1,12 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/download.js
-// Media downloader — yt-dlp (video + audio)
-// · Zero npm dependencies (Node built-ins only)
+// Media downloader — @choewy/yt-dlp (auto-installs yt-dlp + ffmpeg)
+// · Zero manual server setup (npm install handles everything)
 // · /tmp (RAM-backed) staging · auto-cleanup
-// · Quality selection · timeout · size caps
-// · Playlist-proof · binary check · crash-safe
+// · Quality selection · timeout · size caps · playlist-proof
+// · Binary check · crash-safe · full error reporting
 // ─────────────────────────────────────────────
-import { spawn, spawnSync } from 'node:child_process';
+import { YtDlp } from '@choewy/yt-dlp';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -15,32 +15,7 @@ import { isOwner } from '../core/identity.js';
 // ── Safety caps ──
 const VIDEO_MAX_BYTES = 64 * 1024 * 1024;    // 64 MB
 const AUDIO_MAX_BYTES = 15 * 1024 * 1024;    // 15 MB
-const YTDLP_MAX_FILESIZE = 48 * 1024 * 1024; // 48 MB pre-download guard
 const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;   // 5 min hard cap
-const BINARY_CHECK_TIMEOUT_MS = 5000;
-
-// ─────────────────────────────────────────────
-// Lazy binary check (cached — runs at most once)
-// ─────────────────────────────────────────────
-let _depsChecked = false;
-let _depsStatus = { ytDlp: false, ffmpeg: false };
-
-function checkDependencies() {
-  if (_depsChecked) return _depsStatus;
-  _depsChecked = true;
-
-  try {
-    const r = spawnSync('yt-dlp', ['--version'], { timeout: BINARY_CHECK_TIMEOUT_MS });
-    _depsStatus.ytDlp = r.status === 0;
-  } catch { _depsStatus.ytDlp = false; }
-
-  try {
-    const r = spawnSync('ffmpeg', ['-version'], { timeout: BINARY_CHECK_TIMEOUT_MS });
-    _depsStatus.ffmpeg = r.status === 0;
-  } catch { _depsStatus.ffmpeg = false; }
-
-  return _depsStatus;
-}
 
 // ─────────────────────────────────────────────
 // Temp-file helpers (RAM-backed on Linux)
@@ -82,12 +57,12 @@ function findLargestFile(prefix) {
 
 // ─────────────────────────────────────────────
 // Argument parser
-//   .dl <url>                → best video (mp4)
-//   .dl 1080|720|480|360 <url> → capped resolution
-//   .dl audio <url>          → best m4a
-//   .dl audio 128 <url>      → 128 kbps m4a
-//   .dl mp3 <url>            → best mp3
-//   .dl mp3 192 <url>        → 192 kbps mp3
+//   .dl <url>                   → best video (mp4)
+//   .dl 1080|720|480|360 <url>  → capped resolution
+//   .dl audio <url>             → best m4a
+//   .dl audio 128 <url>         → 128 kbps m4a
+//   .dl mp3 <url>               → best mp3
+//   .dl mp3 192 <url>           → 192 kbps mp3
 // ─────────────────────────────────────────────
 function parseArgs(args) {
   const arr = Array.isArray(args) ? [...args] : [];
@@ -121,99 +96,12 @@ function parseArgs(args) {
 }
 
 // ─────────────────────────────────────────────
-// Build yt-dlp argument list
-// ─────────────────────────────────────────────
-function buildYtDlpArgs(parsed, outTemplate) {
-  const { url, mode, container, videoHeight, audioBitrate } = parsed;
-
-  const base = [
-    '--no-cache-dir',
-    '--no-mtime',
-    '--no-playlist',
-    '--no-warnings',
-    '--buffer-size', '1024',
-    '--socket-timeout', '30',
-    '--retries', '3',
-    '--fragment-retries', '3',
-    '--max-filesize', String(YTDLP_MAX_FILESIZE),
-    '-o', outTemplate,
-  ];
-
-  if (mode === 'audio') {
-    const extra = [
-      '-f', 'bestaudio/best',
-      '--extract-audio',
-      '--audio-format', container,
-    ];
-    if (audioBitrate) extra.push('--audio-quality', audioBitrate);
-    return [...base, ...extra, url];
-  }
-
-  const fmt = videoHeight
-    ? `bestvideo[height<=${videoHeight}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${videoHeight}]+bestaudio/best[height<=${videoHeight}]/best`
-    : `bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best`;
-
-  return [...base, '-f', fmt, '--merge-output-format', 'mp4', url];
-}
-
-// ─────────────────────────────────────────────
-// Spawn yt-dlp (safe — never throws synchronously)
-// ─────────────────────────────────────────────
-function runYtDlp(args) {
-  return new Promise((resolve, reject) => {
-    let proc;
-    try {
-      proc = spawn('yt-dlp', args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    } catch (err) {
-      return reject(new Error(`failed to start yt-dlp: ${err.message}`));
-    }
-
-    let stderr = '';
-    let settled = false;
-
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try { proc.kill('SIGKILL'); } catch { /* ignore */ }
-      reject(new Error('Download timed out (5 min)'));
-    }, DOWNLOAD_TIMEOUT_MS);
-
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
-
-    proc.on('error', (err) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(new Error(`yt-dlp spawn error: ${err.code || err.message}`));
-    });
-
-    proc.on('close', (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-
-      if (code === 0) return resolve();
-
-      const errLines = stderr
-        .split('\n')
-        .map((l) => l.trim())
-        .filter((l) => l.startsWith('ERROR:'));
-      const msg = errLines.length
-        ? errLines[errLines.length - 1].replace(/^ERROR:\s*/, '')
-        : `yt-dlp exited with code ${code}`;
-
-      reject(new Error(msg.slice(0, 250)));
-    });
-  });
-}
-
-// ─────────────────────────────────────────────
 // Error classifier → friendly chat message
 // ─────────────────────────────────────────────
 function classifyError(raw) {
   const m = String(raw).toLowerCase();
-  if (m.includes('sign in') || m.includes('login') || m.includes('confirm you\'re not a bot'))
-    return '🔐 The platform requires authentication cookies. Try another URL or ask the owner to add cookies.';
+  if (m.includes('sign in') || m.includes('login') || m.includes("confirm you're not a bot"))
+    return '🔐 The platform requires authentication cookies. Try another URL.';
   if (m.includes('private') || m.includes('unavailable') || m.includes('removed'))
     return '🔒 This content is private, removed, or unavailable.';
   if (m.includes('geo') || m.includes('not available in your country'))
@@ -224,14 +112,12 @@ function classifyError(raw) {
     return '📦 The file exceeds the size cap. Try a lower quality (e.g. `.dl 360`).';
   if (m.includes('not found') || m.includes('404') || m.includes('does not exist'))
     return '🔍 Media not found — check the URL.';
-  if (m.includes('network') || m.includes('connection') || m.includes('timed out on read'))
+  if (m.includes('network') || m.includes('connection'))
     return '🌐 Network error on the server — try again in a moment.';
   if (m.includes('unsupported url'))
     return '❌ This URL is not supported by the downloader.';
-  if (m.includes('ffmpeg') && m.includes('not found'))
-    return '⚙️ ffmpeg is not installed on the server (required for merging).';
-  if (m.includes('yt-dlp spawn error') || m.includes('yt-dlp not found'))
-    return '⚙️ yt-dlp is not installed on the server.';
+  if (m.includes('cannot find module') || m.includes('yt-dlp'))
+    return '⚙️ Downloader binary missing. Run `npm install` on the server.';
   return `❌ ${String(raw).slice(0, 180)}`;
 }
 
@@ -269,6 +155,18 @@ async function safeReply(sock, chat, msg, text) {
 }
 
 // ─────────────────────────────────────────────
+// Timeout wrapper (prevents hung downloads)
+// ─────────────────────────────────────────────
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Download timed out (5 min)')), ms)
+    ),
+  ]);
+}
+
+// ─────────────────────────────────────────────
 // Command entry
 // ─────────────────────────────────────────────
 export async function downloadCommand(sock, chat, msg, args) {
@@ -280,17 +178,6 @@ export async function downloadCommand(sock, chat, msg, args) {
       return safeReply(sock, chat, msg, '⛔ Owner only.');
     }
 
-    // ── Dependency check ──
-    const deps = checkDependencies();
-    if (!deps.ytDlp) {
-      return safeReply(sock, chat, msg,
-        '⚙️ *yt-dlp is not installed on the server.*\n\nInstall it with:\n```\npip install -U yt-dlp\n```');
-    }
-    if (!deps.ffmpeg) {
-      return safeReply(sock, chat, msg,
-        '⚙️ *ffmpeg is not installed on the server.*\n\nInstall it with:\n```\nsudo apt install -y ffmpeg\n```');
-    }
-
     // ── Parse args ──
     const parsed = parseArgs(args);
     if (!parsed) {
@@ -300,10 +187,42 @@ export async function downloadCommand(sock, chat, msg, args) {
     const outTemplate = path.join(os.tmpdir(), `${prefix}.%(ext)s`);
     await safeReply(sock, chat, msg, '⏳ downloading…');
 
-    // ── Download ──
-    const cmdArgs = buildYtDlpArgs(parsed, outTemplate);
-    await runYtDlp(cmdArgs);
+    // ── Build YtDlp instance ──
+    let builder = new YtDlp({ url: parsed.url });
 
+    if (parsed.mode === 'audio') {
+      builder = builder
+        .audioFormat(parsed.container)
+        .audio()
+        .output(outTemplate);
+      if (parsed.audioBitrate) {
+        // @choewy/yt-dlp uses audio-quality via format; fallback to format string
+        builder = builder.format(`bestaudio[abr<=${parseInt(parsed.audioBitrate, 10)}]/bestaudio`);
+      }
+    } else {
+      builder = builder
+        .mergeFormat('mp4')
+        .video()
+        .output(outTemplate);
+      if (parsed.videoHeight) {
+        builder = builder.format(
+          `bestvideo[height<=${parsed.videoHeight}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${parsed.videoHeight}]+bestaudio/best[height<=${parsed.videoHeight}]/best`
+        );
+      }
+    }
+
+    // ── Apply resource-saving flags ──
+    builder = builder
+      .quiet()
+      .noWarnings()
+      .noProgress()
+      .retries(3)
+      .fragmentRetries(3);
+
+    // ── Execute download (with timeout) ──
+    await withTimeout(builder.download(), DOWNLOAD_TIMEOUT_MS);
+
+    // ── Locate output file ──
     const outFile = findLargestFile(prefix);
     if (!outFile) throw new Error('Output file was not produced');
 
@@ -348,10 +267,11 @@ export async function downloadCommand(sock, chat, msg, args) {
     }
 
     cleanupByPrefix(prefix);
+
   } catch (err) {
     // ── Full error report ──
     console.error('[download] command error:', err?.stack || err?.message || err);
     cleanupByPrefix(prefix);
     await safeReply(sock, chat, msg, classifyError(err?.message || err));
   }
-    }
+}
