@@ -1,6 +1,6 @@
 {
   "name": "wraith",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "A silent watcher for WhatsApp — remembers what was deleted, peeks at what was hidden.",
   "type": "module",
   "main": "index.js",
@@ -21,7 +21,9 @@
     "@hapi/boom": "^10.0.1",
     "awesome-phonenumber": "^7.5.0",
     "pino": "^9.5.0",
-    "@snwfdhmp/soundcloud-downloader": "^1.0.6"
+    "@snwfdhmp/soundcloud-downloader": "^1.0.6",
+    "audio-decode": "^3.0.0",
+    "lamejs": "^1.2.1"
   },
   "engines": {
     "node": ">=20.0.0"
