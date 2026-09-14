@@ -34,7 +34,6 @@ import { prefixCommand } from './modules/prefix.js';
 import {
   downloadCommand,
   songCommand,
-  videoCommand,
 } from './modules/download.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 import { getPrefix } from './core/settings.js';
@@ -172,10 +171,6 @@ export async function dispatch(sock, update) {
           break;
         case 'song':
           await songCommand(sock, chat, msg, rest);
-          break;
-        case 'video':
-        case 'vid':
-          await videoCommand(sock, chat, msg, rest);
           break;
         case 'prefix':
           await prefixCommand(sock, chat, msg, rest);
