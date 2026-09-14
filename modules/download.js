@@ -1,15 +1,13 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/download.js
 // .song → SoundCloud → Apple Music → Deezer
-//         + ffmpeg → MP3 for WhatsApp compatibility
+//         + pure-JS MP3 conversion (lamejs + audio-decode)
 // .dl   → non-YouTube platforms via @choewy/yt-dlp
 // ─────────────────────────────────────────────
 
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { YtDlp } from '@choewy/yt-dlp';
 import { isOwner } from '../core/identity.js';
@@ -19,12 +17,10 @@ import {
 } from '../lib/music-sources.js';
 
 const require = createRequire(import.meta.url);
-const execFileAsync = promisify(execFile);
 
 const AUDIO_MAX_BYTES = 15 * 1024 * 1024;
 const VIDEO_MAX_BYTES = 128 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;
-const CONVERT_TIMEOUT_MS = 60_000;
 
 // ─── Queue ───
 const _queue = [];
@@ -76,46 +72,85 @@ function isYouTubeUrl(u) {
     return /(?:youtube\.com|youtu\.be)/i.test(u);
 }
 
-// ─── ffmpeg availability (cached) ───
-let _ffmpegOk = null;
-async function hasFfmpeg() {
-    if (_ffmpegOk !== null) return _ffmpegOk;
-    try {
-        await execFileAsync('ffmpeg', ['-version'], { timeout: 5000 });
-        _ffmpegOk = true;
-    } catch {
-        _ffmpegOk = false;
-        console.warn('[audio] ffmpeg not found — falling back to native formats');
-    }
-    return _ffmpegOk;
+// ─── Pure-JS audio conversion (no ffmpeg) ───
+let _decodeAudioPromise = null;
+let _lamejs = null;
+
+async function loadDecodeAudio() {
+    if (_decodeAudioPromise) return _decodeAudioPromise;
+    _decodeAudioPromise = import('audio-decode')
+        .then((m) => m.default)
+        .catch((e) => {
+            console.warn('[audio] audio-decode load failed:', e.message);
+            return null;
+        });
+    return _decodeAudioPromise;
 }
 
-// ─── Convert any audio buffer to MP3 via ffmpeg ───
-async function convertToMp3(buffer, inputExt) {
-    const tmpDir = os.tmpdir();
-    const tag = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const inFile = path.join(tmpDir, `wraith_in_${tag}.${inputExt}`);
-    const outFile = path.join(tmpDir, `wraith_out_${tag}.mp3`);
-
+function loadLamejs() {
+    if (_lamejs) return _lamejs;
     try {
-        fs.writeFileSync(inFile, buffer);
-        await execFileAsync(
-            'ffmpeg',
-            [
-                '-y',
-                '-i', inFile,
-                '-codec:a', 'libmp3lame',
-                '-b:a', '192k',
-                '-ac', '2',
-                outFile,
-            ],
-            { timeout: CONVERT_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }
-        );
-        return fs.readFileSync(outFile);
-    } finally {
-        try { fs.unlinkSync(inFile); } catch {}
-        try { fs.unlinkSync(outFile); } catch {}
+        _lamejs = require('lamejs');
+        return _lamejs;
+    } catch (e) {
+        console.warn('[audio] lamejs load failed:', e.message);
+        return null;
     }
+}
+
+async function convertToMp3(buffer, inputExt) {
+    const decodeAudio = await loadDecodeAudio();
+    const lamejs = loadLamejs();
+
+    if (!decodeAudio || !lamejs) {
+        throw new Error('audio conversion libraries not available');
+    }
+
+    // 1. Decode source → AudioBuffer (Float32 samples)
+    const audioBuffer = await decodeAudio(buffer);
+
+    const channels = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const length = audioBuffer.length;
+
+    if (!length) throw new Error('decoded audio is empty');
+
+    // 2. Float32 → Int16 (lamejs expects Int16 PCM)
+    const toInt16 = (f32) => {
+        const out = new Int16Array(f32.length);
+        for (let i = 0; i < f32.length; i++) {
+            const s = Math.max(-1, Math.min(1, f32[i]));
+            out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        return out;
+    };
+
+    const leftPcm = toInt16(audioBuffer.getChannelData(0));
+    const rightPcm = channels > 1 ? toInt16(audioBuffer.getChannelData(1)) : null;
+
+    // 3. Encode with lamejs
+    const kbps = 192;
+    const encoder = new lamejs.Mp3Encoder(channels, sampleRate, kbps);
+
+    const BLOCK = 1152;
+    const chunks = [];
+
+    for (let i = 0; i < length; i += BLOCK) {
+        const l = leftPcm.subarray(i, i + BLOCK);
+        const r = rightPcm ? rightPcm.subarray(i, i + BLOCK) : undefined;
+        const mp3buf = channels === 1
+            ? encoder.encodeBuffer(l)
+            : encoder.encodeBuffer(l, r);
+        if (mp3buf.length > 0) chunks.push(Buffer.from(mp3buf));
+    }
+
+    const flush = encoder.flush();
+    if (flush.length > 0) chunks.push(Buffer.from(flush));
+
+    const out = Buffer.concat(chunks);
+    if (!out.length) throw new Error('MP3 encoding produced empty output');
+
+    return out;
 }
 
 // ─── Send audio (with MP3 conversion for compatibility) ───
@@ -125,7 +160,6 @@ async function sendAudio(sock, chat, msg, result) {
     const safeTitle = title.replace(/[^\w\s-]/g, '').trim() || 'song';
     const displayName = artist ? `${artist} - ${title}` : title;
 
-    // Guard: buffer must be non-trivial
     if (!result.buffer || result.buffer.length < 2000) {
         throw new Error('downloaded audio is empty or too small');
     }
@@ -146,21 +180,22 @@ async function sendAudio(sock, chat, msg, result) {
         } catch {}
     }
 
-    // Detect actual format from the buffer (don't trust the source metadata)
+    // Detect actual format
     const detected = detectAudioFormat(result.buffer);
 
     let sendBuffer = result.buffer;
     let sendExt = detected.ext;
     let sendMime = detected.mime;
 
-    // Convert non-MP3 to MP3 for universal WhatsApp compatibility
-    if (detected.ext !== 'mp3' && (await hasFfmpeg())) {
+    // Always convert to MP3 for WhatsApp compatibility
+    if (detected.ext !== 'mp3') {
         try {
             sendBuffer = await convertToMp3(result.buffer, detected.ext);
             sendExt = 'mp3';
             sendMime = 'audio/mpeg';
+            console.log('[audio] converted to MP3:', sendBuffer.length, 'bytes');
         } catch (e) {
-            console.warn('[audio] ffmpeg conversion failed, sending original:', e.message);
+            console.warn('[audio] MP3 conversion failed, sending original:', e.message);
         }
     }
 
