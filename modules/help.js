@@ -64,12 +64,10 @@ const REGISTRY = [
     title: 'ᴅᴏᴡɴʟᴏᴀᴅ',
     commands: [
       '.dl <url>',
-      '.dl 1080|720|480|360 <url>',
       '.dl audio <url>',
-      '.dl audio 128 <url>',
       '.dl mp3 <url>',
-      '.dl mp3 192 <url>',
       '.song <query>',
+      '.video <query>',
     ],
   },
   {
