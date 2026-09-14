@@ -1,8 +1,10 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/help.js
 // Styled boxed menu — command list ONLY.
+// Renders commands with the CURRENT prefix.
 // ─────────────────────────────────────────────
 import { isOwner } from '../core/identity.js';
+import { getPrefix } from '../core/settings.js';
 
 const REGISTRY = [
   {
@@ -116,6 +118,12 @@ const REGISTRY = [
     commands: ['.activity', '.activity <chat>'],
   },
   {
+    id: 'prefix',
+    icon: '🔣',
+    title: 'ᴘʀᴇꜰɪx',
+    commands: ['.prefix', '.prefix <symbol>', '.prefix reset'],
+  },
+  {
     id: 'probe',
     icon: '📡',
     title: 'ᴘʀᴏʙᴇ',
@@ -131,26 +139,32 @@ const REGISTRY = [
 
 const TAIL = '└─────────────┈⚝';
 
-function renderBox(title, rows) {
+// Replace leading "." with the current prefix
+function applyPrefix(cmd, prefix) {
+  if (prefix === '.') return cmd;
+  return cmd.startsWith('.') ? prefix + cmd.slice(1) : cmd;
+}
+
+function renderBox(title, rows, prefix) {
   const lines = [];
   lines.push(`┌──❮ ${title} ❯`);
   lines.push('│');
-  for (const r of rows) lines.push(`│ ◈ ${r}`);
+  for (const r of rows) lines.push(`│ ◈ ${applyPrefix(r, prefix)}`);
   lines.push('│');
   lines.push(TAIL);
   return lines.join('\n');
 }
 
-function renderAll() {
+function renderAll(prefix) {
   const sections = REGISTRY.map((g) =>
-    renderBox(`${g.icon} ${g.title}`, g.commands)
+    renderBox(`${g.icon} ${g.title}`, g.commands, prefix)
   );
   return [
     '┌──❮ ⓌⓇⒶⒾⓉⒽ ❯',
     '│',
     '│ ᴄᴏᴍᴍᴀɴᴅꜱ ᴀʀᴇ ᴏᴡɴᴇʀ-ᴏɴʟʏ',
-    '│ ᴘʀᴇꜰɪx · .',
-    '│ ℹ️ .ᴄᴏᴍᴍᴀɴᴅ ꜰᴏʀ ɢᴜɪᴅᴇ',
+    `│ ᴘʀᴇꜰɪx · ${prefix}`,
+    `│ ℹ️ ${prefix}ᴄᴏᴍᴍᴀɴᴅ ꜰᴏʀ ɢᴜɪᴅᴇ`,
     '│',
     TAIL,
     '',
@@ -160,12 +174,12 @@ function renderAll() {
   ].join('\n');
 }
 
-function renderGroup(name) {
+function renderGroup(name, prefix) {
   const g = REGISTRY.find(
     (x) => x.id === name || x.title.replace(/[^a-z]/gi, '') === name
   );
   if (!g) return null;
-  return renderBox(`${g.icon} ${g.title}`, g.commands);
+  return renderBox(`${g.icon} ${g.title}`, g.commands, prefix);
 }
 
 export async function helpCommand(sock, chat, msg, args) {
@@ -178,18 +192,19 @@ export async function helpCommand(sock, chat, msg, args) {
     );
   }
 
+  const prefix = getPrefix();
   const target = (args?.[0] || '').toLowerCase().trim();
 
   if (!target) {
     return sock.sendMessage(
       chat,
-      { text: renderAll() },
+      { text: renderAll(prefix) },
       { quoted: msg }
     );
   }
 
   const wanted = target.replace(/[^a-z]/g, '');
-  const rendered = renderGroup(wanted);
+  const rendered = renderGroup(wanted, prefix);
 
   if (!rendered) {
     return sock.sendMessage(
