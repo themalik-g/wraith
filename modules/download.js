@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/download.js
-// YouTube downloader using yt-direct (InnerTube API, no cookies)
+// YouTube downloader using ytdlp-nodejs (yt-dlp binary wrapper)
+// No cookies required for public videos
 // ─────────────────────────────────────────────
 
 import fs from 'node:fs';
@@ -10,27 +11,18 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { YtDlp } from '@choewy/yt-dlp';
-import ytdl from 'yt-direct';
+import { YtdlpNodejs } from 'ytdlp-nodejs';
 import { isOwner } from '../core/identity.js';
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 
-const VIDEO_MAX_BYTES = 128 * 1024 * 1024; // 128 MB
-const AUDIO_MAX_BYTES = 15 * 1024 * 1024;  // 15 MB
-const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const VIDEO_MAX_BYTES = 128 * 1024 * 1024;
+const AUDIO_MAX_BYTES = 15 * 1024 * 1024;
+const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;
 const SEARCH_TIMEOUT_MS = 20_000;
-const CHAIN_TIMEOUT_MS = 3 * 60 * 1000;
 
-async function react(sock, chat, msg, emoji) {
-  try {
-    await sock.sendMessage(chat, { react: { text: emoji, key: msg.key } });
-  } catch (e) {
-    console.error('[react]', e?.message);
-  }
-}
-
-// ─── Queue ───
+// ─── Queue (unchanged) ───
 const _queue = [];
 let _running = false;
 
@@ -56,31 +48,9 @@ async function _drain() {
   }
 }
 
-// ─── Converter ───
-let _toAudio;
-async function getConverter() {
-  if (_toAudio !== undefined) return _toAudio;
-  try {
-    const m = await import('../lib/converter.js');
-    _toAudio = m.toAudio || m.default?.toAudio || null;
-  } catch {
-    _toAudio = null;
-  }
-  return _toAudio;
-}
-
-// ─── fetch timeout ───
-async function fetchWithTimeout(url, opts = {}, ms = 60_000) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), ms);
-  try {
-    return await fetch(url, { ...opts, signal: ctrl.signal });
-  } catch (e) {
-    if (e.name === 'AbortError') throw new Error(`timeout after ${ms / 1000}s`);
-    throw e;
-  } finally {
-    clearTimeout(timer);
-  }
+// ─── Helpers ───
+async function react(sock, chat, msg, emoji) {
+  try { await sock.sendMessage(chat, { react: { text: emoji, key: msg.key } }); } catch {}
 }
 
 function withTimeout(promise, ms, label = 'operation') {
@@ -93,20 +63,7 @@ function withTimeout(promise, ms, label = 'operation') {
   ]);
 }
 
-async function withRetry(fn, attempts = 2, gapMs = 800) {
-  let lastErr;
-  for (let i = 1; i <= attempts; i++) {
-    try {
-      return await fn();
-    } catch (e) {
-      lastErr = e;
-      if (i < attempts) await new Promise((r) => setTimeout(r, gapMs));
-    }
-  }
-  throw lastErr;
-}
-
-// ─── yt-dlp binary (for search fallback & non-YouTube) ───
+// ─── Search (unchanged) ───
 function findYtDlpBinary() {
   const candidates = [];
   try {
@@ -118,21 +75,12 @@ function findYtDlpBinary() {
       path.join(pkgDir, 'vendor', 'yt-dlp'),
       path.join(pkgDir, 'vendor', 'yt-dlp.exe'),
       path.join(pkgDir, 'yt-dlp'),
-      path.join(pkgDir, 'yt-dlp.exe'),
-      path.join(pkgDir, 'dist', 'yt-dlp'),
-      path.join(pkgDir, 'dist', 'yt-dlp.exe')
+      path.join(pkgDir, 'yt-dlp.exe')
     );
   } catch {}
-  candidates.push(
-    '/usr/local/bin/yt-dlp',
-    '/usr/bin/yt-dlp',
-    '/bin/yt-dlp',
-    '/opt/yt-dlp/yt-dlp'
-  );
+  candidates.push('/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp', '/bin/yt-dlp');
   for (const c of candidates) {
-    try {
-      if (fs.statSync(c).isFile()) return c;
-    } catch {}
+    try { if (fs.statSync(c).isFile()) return c; } catch {}
   }
   return null;
 }
@@ -158,29 +106,17 @@ async function ytDlpSearch(query) {
 
 async function scraperSearch(query) {
   const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAQ%253D%253D`;
-  const res = await fetchWithTimeout(
-    url,
-    {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-        Accept: 'text/html,application/xhtml+xml',
-      },
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
     },
-    SEARCH_TIMEOUT_MS
-  );
+  });
   if (!res.ok) throw new Error(`YouTube search HTTP ${res.status}`);
   const html = await res.text();
   const m = html.match(/"videoRenderer":\{"videoId":"([A-Za-z0-9_-]{11})"/);
   if (!m) throw new Error('No video results found');
-  const id = m[1];
-  let title = query;
-  try {
-    const tRe = new RegExp(`"videoId":"${id}".*?"title":\\{"runs":\\[\\{"text":"(.*?)"`);
-    const tm = html.match(tRe);
-    if (tm) title = JSON.parse(`"${tm[1]}"`);
-  } catch {}
-  return { id, url: `https://www.youtube.com/watch?v=${id}`, title };
+  return { id: m[1], url: `https://www.youtube.com/watch?v=${m[1]}`, title: query };
 }
 
 async function searchYouTube(query) {
@@ -190,16 +126,12 @@ async function searchYouTube(query) {
 }
 
 // ─── URL helpers ───
-function isYouTubeUrl(u) {
-  return /(?:youtube\.com|youtu\.be)/i.test(u);
-}
+function isYouTubeUrl(u) { return /(?:youtube\.com|youtu\.be)/i.test(u); }
 function extractYouTubeId(u) {
   const m = u.match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([A-Za-z0-9_-]{11})/);
   return m ? m[1] : null;
 }
-function thumbFor(id) {
-  return id ? `https://i.ytimg.com/vi/${id}/sddefault.jpg` : undefined;
-}
+function thumbFor(id) { return id ? `https://i.ytimg.com/vi/${id}/sddefault.jpg` : undefined; }
 
 async function resolveVideo(input) {
   if (isYouTubeUrl(input)) {
@@ -221,52 +153,88 @@ function detectFormat(buf) {
   return { ext: 'm4a', mime: 'audio/mp4' };
 }
 
-// ─── yt-direct download helpers ───
-async function downloadWithYtDirect(url, quality, format, maxBytes, onStatus) {
+// ─── NEW: ytdlp-nodejs download helper ───
+async function downloadWithYtdlp(url, mode, container, maxBytes, onStatus) {
+  const ytdlp = new YtdlpNodejs();
+
+  const tmpDir = os.tmpdir();
+  const prefix = `wraith_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  // Build format string based on mode
+  let formatStr;
+  if (mode === 'audio') {
+    // Best audio, prefer m4a, fall back to best
+    formatStr = container === 'mp3'
+      ? 'bestaudio/best'
+      : 'bestaudio[ext=m4a]/bestaudio/best';
+  } else {
+    // Best video with audio, prefer mp4
+    formatStr = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
+  }
+
+  const outputTemplate = path.join(tmpDir, `${prefix}.%(ext)s`);
+
   try {
-    if (onStatus) onStatus(`⏳ fetching metadata from YouTube...`);
-    const video = await withTimeout(
-      ytdl(url, {
-        quality: quality, // 'audio' or a resolution like '720p'
-        format: format,   // 'mp3', 'm4a', 'mp4', etc.
-        timeout: 30000,
+    if (onStatus) onStatus(`⬇️ downloading via yt-dlp...`);
+
+    const result = await withTimeout(
+      ytdlp.download(url, {
+        output: outputTemplate,
+        format: formatStr,
+        noPlaylist: true,
         retries: 3,
+        noWarnings: true,
+        noProgress: true,
+        // Post-processing for audio extraction if mp3 requested
+        ...(mode === 'audio' && container === 'mp3'
+          ? {
+              extractAudio: true,
+              audioFormat: 'mp3',
+              audioQuality: '0', // best
+            }
+          : {}),
       }),
       DOWNLOAD_TIMEOUT_MS,
-      'yt-direct metadata'
+      'yt-dlp download'
     );
 
-    if (onStatus) onStatus(`⬇️ downloading ${video.title}...`);
+    if (!result?.path || !fs.existsSync(result.path)) {
+      throw new Error('yt-dlp produced no output file');
+    }
 
-    const tmpFile = path.join(os.tmpdir(), `wraith_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${format}`);
-    const result = await withTimeout(
-      video.download(tmpFile),
-      DOWNLOAD_TIMEOUT_MS,
-      'yt-direct download'
-    );
-
-    if (!fs.existsSync(tmpFile)) throw new Error('Downloaded file not found');
-
-    const stat = fs.statSync(tmpFile);
+    const stat = fs.statSync(result.path);
     if (stat.size > maxBytes) {
-      fs.unlinkSync(tmpFile);
+      fs.unlinkSync(result.path);
       throw new Error(`File too large (${(stat.size / 1048576).toFixed(1)} MB)`);
     }
 
-    const buffer = fs.readFileSync(tmpFile);
-    fs.unlinkSync(tmpFile); // clean up immediately
+    const buffer = fs.readFileSync(result.path);
+    fs.unlinkSync(result.path);
+
+    // Get title from yt-dlp metadata
+    let title = 'media';
+    try {
+      const info = await withTimeout(
+        ytdlp.getInfo(url, { noWarnings: true, noPlaylist: true }),
+        15_000,
+        'yt-dlp metadata'
+      );
+      if (info?.title) title = info.title;
+    } catch {
+      // title fallback
+    }
 
     if (onStatus) onStatus(`✅ download complete (${(stat.size / 1048576).toFixed(1)} MB)`);
 
     return {
       buffer,
-      title: video.title,
-      thumbnail: video.thumbnail || thumbFor(extractYouTubeId(url)),
-      provider: 'yt-direct',
+      title,
+      thumbnail: thumbFor(extractYouTubeId(url)),
+      provider: 'ytdlp-nodejs',
       size: stat.size,
     };
   } catch (err) {
-    console.error(`[yt-direct] failed: ${err.message}`);
+    console.error(`[ytdlp-nodejs] failed: ${err.message}`);
     throw err;
   }
 }
@@ -300,39 +268,20 @@ export async function songCommand(sock, chat, msg, args) {
         }, { quoted: msg }).catch(() => {});
       }
 
-      const result = await downloadWithYtDirect(
+      const result = await downloadWithYtdlp(
         video.url,
-        'audio',       // quality: best audio
-        'mp3',         // format: mp3
+        'audio',
+        'm4a', // ytdlp-nodejs handles container via format string; m4a is safest
         AUDIO_MAX_BYTES,
         (s) => { sock.sendMessage(chat, { text: s }, { quoted: msg }).catch(() => {}); }
       );
 
-      let buf = result.buffer;
-      let fmt = detectFormat(buf);
-
-      // If it's not MP3, try to convert
-      if (fmt.ext !== 'mp3') {
-        const toAudio = await getConverter();
-        if (toAudio) {
-          try {
-            const converted = await withTimeout(toAudio(buf, fmt.ext), 30_000, 'conversion');
-            if (converted?.length) {
-              buf = converted;
-              fmt = { ext: 'mp3', mime: 'audio/mpeg' };
-            }
-          } catch (e) {
-            console.error('[song] convert failed:', e.message);
-          }
-        }
-      }
-
       const safeTitle = (result.title || video.title || 'song').replace(/[^\w\s-]/g, '').trim() || 'song';
 
       await sock.sendMessage(chat, {
-        audio: buf,
-        mimetype: fmt.mime,
-        fileName: `${safeTitle}.${fmt.ext}`,
+        audio: result.buffer,
+        mimetype: 'audio/mp4',
+        fileName: `${safeTitle}.m4a`,
         ptt: false,
       }, { quoted: msg });
 
@@ -375,11 +324,10 @@ export async function videoCommand(sock, chat, msg, args) {
         }, { quoted: msg }).catch(() => {});
       }
 
-      // For video, use 720p by default to keep file size manageable
-      const result = await downloadWithYtDirect(
+      const result = await downloadWithYtdlp(
         video.url,
-        '720p',        // quality
-        'mp4',         // format
+        'video',
+        'mp4',
         VIDEO_MAX_BYTES,
         (s) => { sock.sendMessage(chat, { text: s }, { quoted: msg }).catch(() => {}); }
       );
@@ -441,13 +389,11 @@ export async function downloadCommand(sock, chat, msg, args) {
   }
 
   if (isYouTubeUrl(url)) {
-    if (mode === 'audio') {
-      return songCommand(sock, chat, msg, [url]);
-    }
+    if (mode === 'audio') return songCommand(sock, chat, msg, [url]);
     return videoCommand(sock, chat, msg, [url]);
   }
 
-  // Non-YouTube: fall back to yt-dlp (existing implementation)
+  // Non-YouTube: fall back to yt-dlp via @choewy/yt-dlp (unchanged)
   return downloadViaYtDlp(sock, chat, msg, url, mode, container);
 }
 
