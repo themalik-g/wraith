@@ -6,6 +6,8 @@
 // · Quality selection · timeout · size caps · playlist-proof
 // · Crash-safe · full error reporting · uses official download() path
 // · Cobalt API fallback for cookie-walled platforms (YouTube etc.)
+// · Song command: URL search via optional yt-dlp binary;
+//   falls back to ytsearch: scheme directly through @choewy/yt-dlp.
 // ─────────────────────────────────────────────
 import { YtDlp } from '@choewy/yt-dlp';
 import fs from 'node:fs';
@@ -126,6 +128,8 @@ function classifyError(raw) {
     return '📡 Network error on the server — try again in a moment.';
   if (m.includes('unsupported url'))
     return '❌ This URL is not supported by the downloader.';
+  if (m.includes('enoent') || m.includes('not found in path'))
+    return '⚙️ yt-dlp helper binary missing — direct search unavailable, trying library path…';
   if (m.includes('cannot find module') || m.includes('yt-dlp'))
     return '⚙️ Downloader binary missing. Run `npm install` on the server.';
   if (m.includes('not a function'))
@@ -174,7 +178,7 @@ async function safeReply(sock, chat, msg, text) {
 }
 
 // ─────────────────────────────────────────────
-// Timeout wrapper (prevents hung downloads)
+// Timeout wrapper
 // ─────────────────────────────────────────────
 function withTimeout(promise, ms) {
   return Promise.race([
@@ -186,34 +190,102 @@ function withTimeout(promise, ms) {
 }
 
 // ─────────────────────────────────────────────
-// yt-dlp search helper — resolves query → YouTube URL
+// yt-dlp binary discovery (best effort, silent if missing)
+// We only use it to resolve a search query → real URL so Cobalt can be tried first.
+// If it's not present, we skip URL resolution and let @choewy/yt-dlp handle
+// the search URL directly.
 // ─────────────────────────────────────────────
-async function ytDlpSearchUrl(query) {
-  const candidates = [
-    'yt-dlp',
-    path.join(process.cwd(), 'node_modules', '.bin', 'yt-dlp'),
-    path.join(process.cwd(), 'node_modules', '@choewy', 'yt-dlp', 'bin', 'yt-dlp'),
-    path.join(process.cwd(), 'node_modules', 'yt-dlp-exec', 'bin', 'yt-dlp'),
+async function findYtDlpBinary() {
+  // 1. System PATH
+  try {
+    const { stdout } = await execFileAsync('which', ['yt-dlp'], { timeout: 5_000 });
+    const p = stdout.trim();
+    if (p && fs.existsSync(p)) return p;
+  } catch {
+    /* not in PATH */
+  }
+
+  // 2. Common locations relative to cwd and up to 3 parent dirs
+  const cwd = process.cwd();
+  const roots = [
+    cwd,
+    path.resolve(cwd, '..'),
+    path.resolve(cwd, '../..'),
+    path.resolve(cwd, '../../..'),
   ];
 
-  let lastErr;
-  for (const bin of candidates) {
-    try {
-      const { stdout } = await execFileAsync(
-        bin,
-        ['--get-url', '--no-warnings', '--no-playlist', `ytsearch1:${query}`],
-        { timeout: 30_000, maxBuffer: 1024 * 1024 }
-      );
-      const url = stdout.trim().split('\n')[0].trim();
-      if (url) return url;
-    } catch (e) {
-      lastErr = e;
+  const rels = [
+    'node_modules/.bin/yt-dlp',
+    'node_modules/yt-dlp-exec/bin/yt-dlp',
+    'node_modules/yt-dlp-exec/bin/yt-dlp.exe',
+    'node_modules/youtube-dl-exec/bin/yt-dlp',
+    'node_modules/youtube-dl-exec/bin/yt-dlp.exe',
+    'node_modules/yt-dlp-wrap/bin/yt-dlp',
+    'node_modules/@choewy/yt-dlp/bin/yt-dlp',
+    'node_modules/@choewy/yt-dlp/yt-dlp',
+    'node_modules/@choewy/yt-dlp/vendor/yt-dlp',
+    'yt-dlp',
+    'bin/yt-dlp',
+  ];
+
+  for (const root of roots) {
+    for (const rel of rels) {
+      const p = path.join(root, rel);
+      try {
+        if (fs.statSync(p).isFile()) return p;
+      } catch {
+        /* keep searching */
+      }
     }
   }
 
-  throw new Error(
-    `yt-dlp search failed: ${lastErr?.message || 'binary not found'}`
-  );
+  // 3. Absolute system paths
+  for (const p of [
+    '/usr/local/bin/yt-dlp',
+    '/usr/bin/yt-dlp',
+    '/bin/yt-dlp',
+    '/opt/yt-dlp/yt-dlp',
+  ]) {
+    try {
+      if (fs.statSync(p).isFile()) return p;
+    } catch {
+      /* keep searching */
+    }
+  }
+
+  return null;
+}
+
+async function tryBinarySearch(bin, query) {
+  try {
+    const { stdout } = await execFileAsync(
+      bin,
+      [
+        '--get-url',
+        '--no-warnings',
+        '--no-playlist',
+        '--skip-download',
+        `ytsearch1:${query}`,
+      ],
+      { timeout: 30_000, maxBuffer: 1024 * 1024 }
+    );
+    const url = stdout.trim().split('\n').find((l) => /^https?:\/\//.test(l.trim()));
+    return url ? url.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+// Resolve a search query into a concrete media URL (for Cobalt).
+// Returns null if no binary is available or the search fails.
+async function resolveSearchUrl(query) {
+  try {
+    const bin = await findYtDlpBinary();
+    if (!bin) return null;
+    return await tryBinarySearch(bin, query);
+  } catch {
+    return null;
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -228,7 +300,6 @@ export async function downloadCommand(sock, chat, msg, args) {
       return safeReply(sock, chat, msg, '⛔ Owner only.');
     }
 
-    // ── Parse args ──
     const parsed = parseArgs(args);
     if (!parsed) {
       return safeReply(sock, chat, msg, USAGE);
@@ -237,7 +308,6 @@ export async function downloadCommand(sock, chat, msg, args) {
     const outTemplate = path.join(os.tmpdir(), `${prefix}.%(ext)s`);
     await safeReply(sock, chat, msg, '⏳ downloading…');
 
-    // ── Build format string ──
     let formatStr;
     if (parsed.mode === 'audio') {
       formatStr = parsed.audioBitrate
@@ -249,7 +319,6 @@ export async function downloadCommand(sock, chat, msg, args) {
         : 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best';
     }
 
-    // ── Create YtDlp instance with ALL options in constructor ──
     const ytDlp = new YtDlp({
       url: parsed.url,
       output: outTemplate,
@@ -263,7 +332,6 @@ export async function downloadCommand(sock, chat, msg, args) {
       concurrentFragments: 1,
     });
 
-    // ── Minimal builder chain ──
     let builder;
     if (parsed.mode === 'audio') {
       builder = ytDlp.audioFormat(parsed.container).audio();
@@ -271,7 +339,6 @@ export async function downloadCommand(sock, chat, msg, args) {
       builder = ytDlp.mergeFormat('mp4').video();
     }
 
-    // ── Execute download (with timeout) ──
     let ytDlpFailed = false;
     let ytDlpError = null;
     let outFile = null;
@@ -341,7 +408,6 @@ export async function downloadCommand(sock, chat, msg, args) {
       }
     }
 
-    // ── Validate output ──
     if (!outFile || !fs.existsSync(outFile)) {
       throw new Error('Output file was not produced');
     }
@@ -354,7 +420,6 @@ export async function downloadCommand(sock, chat, msg, args) {
       );
     }
 
-    // ── Stream to WhatsApp ──
     const stream = fs.createReadStream(outFile);
     stream.on('close', () => cleanupByPrefix(prefix));
     stream.on('error', (err) => {
@@ -401,8 +466,14 @@ export async function downloadCommand(sock, chat, msg, args) {
 
 // ─────────────────────────────────────────────
 // Song command — .song <query>
-// Search via yt-dlp → download audio via Cobalt
-// If Cobalt fails → fallback to yt-dlp audio download
+//
+// Flow (matches your preference):
+//   1. Try to resolve query → real URL (uses yt-dlp binary IF available).
+//   2. If URL resolved → try Cobalt first (preferred for YouTube).
+//   3. Fall back to yt-dlp library download.
+//   4. If no URL could be resolved (no binary), skip Cobalt and pass
+//      `ytsearch1:<query>` straight to @choewy/yt-dlp — it handles search
+//      URLs natively, so no external binary is needed.
 // ─────────────────────────────────────────────
 export async function songCommand(sock, chat, msg, args) {
   const prefix = uniquePrefix();
@@ -425,56 +496,45 @@ export async function songCommand(sock, chat, msg, args) {
 
     await safeReply(sock, chat, msg, `🔍 Searching: *${query}*…`);
 
-    // ── Step 1: Search YouTube via yt-dlp ──
-    let url;
-    try {
-      url = await ytDlpSearchUrl(query);
-    } catch (searchErr) {
-      console.error('[song] search failed:', searchErr?.message);
-      return safeReply(
-        sock,
-        chat,
-        msg,
-        `❌ Could not search for *${query}*.\n_${String(searchErr?.message).slice(0, 150)}_`
-      );
-    }
+    // ── Step 1: best-effort URL resolution (for Cobalt path) ──
+    const resolvedUrl = await resolveSearchUrl(query).catch(() => null);
 
-    if (!url) {
-      return safeReply(sock, chat, msg, `❌ No results for *${query}*.`);
-    }
-
-    await safeReply(sock, chat, msg, `🎵 Found. Downloading audio…`);
-
-    // ── Step 2: Try Cobalt audio download ──
-    const cobaltOut = path.join(os.tmpdir(), `${prefix}.mp3`);
     let outFile = null;
     let usedCobalt = false;
 
-    try {
-      await withTimeout(
-        cobaltDownloadAudio(url, cobaltOut, {
-          audioFormat: 'mp3',
-          audioBitrate: '128',
-        }),
-        DOWNLOAD_TIMEOUT_MS
-      );
-      outFile = cobaltOut;
-      usedCobalt = true;
-    } catch (cobaltErr) {
-      console.error('[song] cobalt failed:', cobaltErr?.message);
-      await safeReply(
-        sock,
-        chat,
-        msg,
-        `⚠️ Cobalt failed. Retrying with yt-dlp…\n_${String(cobaltErr?.message).slice(0, 120)}_`
-      );
+    // ── Step 2: Cobalt (only when we resolved a real URL) ──
+    if (resolvedUrl) {
+      await safeReply(sock, chat, msg, '🎵 Found. Downloading via Cobalt…');
+      const cobaltOut = path.join(os.tmpdir(), `${prefix}.mp3`);
+      try {
+        await withTimeout(
+          cobaltDownloadAudio(resolvedUrl, cobaltOut, {
+            audioFormat: 'mp3',
+            audioBitrate: '128',
+          }),
+          DOWNLOAD_TIMEOUT_MS
+        );
+        outFile = cobaltOut;
+        usedCobalt = true;
+      } catch (cobaltErr) {
+        console.error('[song] cobalt failed:', cobaltErr?.message);
+        await safeReply(
+          sock,
+          chat,
+          msg,
+          `⚠️ Cobalt failed. Retrying with yt-dlp…\n_${String(cobaltErr?.message).slice(0, 120)}_`
+        );
+      }
+    } else {
+      await safeReply(sock, chat, msg, '🎵 Downloading via yt-dlp…');
     }
 
-    // ── Step 3: yt-dlp fallback ──
+    // ── Step 3: yt-dlp fallback (also handles the no-URL case via ytsearch) ──
     if (!outFile) {
+      const target = resolvedUrl || `ytsearch1:${query}`;
       try {
-        const ytDlp = new YtDlp({
-          url,
+        const yt = new YtDlp({
+          url: target,
           output: path.join(os.tmpdir(), `${prefix}.%(ext)s`),
           format: 'bestaudio/best',
           quiet: true,
@@ -487,23 +547,23 @@ export async function songCommand(sock, chat, msg, args) {
         });
 
         const result = await withTimeout(
-          ytDlp.audioFormat('mp3').audio().download(),
+          yt.audioFormat('mp3').audio().download(),
           DOWNLOAD_TIMEOUT_MS
         );
         outFile = result?.path;
       } catch (ytErr) {
-        console.error('[song] yt-dlp fallback failed:', ytErr?.message);
+        console.error('[song] yt-dlp failed:', ytErr?.message);
         cleanupByPrefix(prefix);
         return safeReply(
           sock,
           chat,
           msg,
-          `❌ Could not download *${query}*.\n_Both Cobalt and yt-dlp failed._`
+          `❌ Could not download *${query}*.\n_${String(ytErr?.message || ytErr).slice(0, 180)}_`
         );
       }
     }
 
-    // ── Step 4: Validate and send ──
+    // ── Step 4: validate + send ──
     if (!outFile || !fs.existsSync(outFile)) {
       cleanupByPrefix(prefix);
       return safeReply(sock, chat, msg, '❌ Download produced no file.');
@@ -549,4 +609,4 @@ export async function songCommand(sock, chat, msg, args) {
     cleanupByPrefix(prefix);
     await safeReply(sock, chat, msg, classifyError(err?.message || err));
   }
-  }
+}
