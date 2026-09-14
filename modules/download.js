@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/download.js
 // Media downloader — @choewy/yt-dlp (auto-installs yt-dlp + ffmpeg)
-// · Zero manual server setup (npm install handles everything)
+// · ALL options passed in constructor (no fragile builder methods)
 // · /tmp (RAM-backed) staging · auto-cleanup
 // · Quality selection · timeout · size caps · playlist-proof
 // · Crash-safe · full error reporting · uses official download() path
@@ -37,12 +37,6 @@ function cleanupByPrefix(prefix) {
 
 // ─────────────────────────────────────────────
 // Argument parser
-//   .dl <url>                   → best video (mp4)
-//   .dl 1080|720|480|360 <url>  → capped resolution
-//   .dl audio <url>             → best m4a
-//   .dl audio 128 <url>         → 128 kbps m4a
-//   .dl mp3 <url>               → best mp3
-//   .dl mp3 192 <url>           → 192 kbps mp3
 // ─────────────────────────────────────────────
 function parseArgs(args) {
   const arr = Array.isArray(args) ? [...args] : [];
@@ -98,6 +92,8 @@ function classifyError(raw) {
     return '❌ This URL is not supported by the downloader.';
   if (m.includes('cannot find module') || m.includes('yt-dlp'))
     return '⚙️ Downloader binary missing. Run `npm install` on the server.';
+  if (m.includes('not a function'))
+    return '⚙️ Library API mismatch. Run `npm install @choewy/yt-dlp@1.2.0` on the server.';
   return `❌ ${String(raw).slice(0, 180)}`;
 }
 
@@ -167,51 +163,45 @@ export async function downloadCommand(sock, chat, msg, args) {
     const outTemplate = path.join(os.tmpdir(), `${prefix}.%(ext)s`);
     await safeReply(sock, chat, msg, '⏳ downloading…');
 
-    // ── Build YtDlp instance ──
-    // IMPORTANT: quiet/noWarnings/noProgress are CONSTRUCTOR OPTIONS
-    // (not chainable methods in all versions) — passed in the options object.
-    let builder = new YtDlp({
+    // ── Build format string ──
+    let formatStr;
+    if (parsed.mode === 'audio') {
+      formatStr = parsed.audioBitrate
+        ? `bestaudio[abr<=${parseInt(parsed.audioBitrate, 10)}]/bestaudio`
+        : 'bestaudio/best';
+    } else {
+      formatStr = parsed.videoHeight
+        ? `bestvideo[height<=${parsed.videoHeight}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${parsed.videoHeight}]+bestaudio/best[height<=${parsed.videoHeight}]/best`
+        : 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best';
+    }
+
+    // ── Create YtDlp instance with ALL options in constructor ──
+    // (Builder methods for options are unreliable across versions)
+    const ytDlp = new YtDlp({
       url: parsed.url,
+      output: outTemplate,
+      format: formatStr,
       quiet: true,
       noWarnings: true,
       noProgress: true,
       playlist: false,
+      retries: 3,
+      fragmentRetries: 3,
+      concurrentFragments: 1,
     });
 
+    // ── Minimal builder chain (only methods confirmed to work) ──
+    let builder;
     if (parsed.mode === 'audio') {
-      // Correct order: .audioFormat() → .output() → .audio()
-      builder = builder
-        .audioFormat(parsed.container)
-        .output(outTemplate)
-        .audio();
-      if (parsed.audioBitrate) {
-        builder = builder.format(
-          `bestaudio[abr<=${parseInt(parsed.audioBitrate, 10)}]/bestaudio`
-        );
-      }
+      builder = ytDlp.audioFormat(parsed.container).audio();
     } else {
-      // Correct order: .mergeFormat() → .output() → .video()
-      builder = builder
-        .mergeFormat('mp4')
-        .output(outTemplate)
-        .video();
-      if (parsed.videoHeight) {
-        builder = builder.format(
-          `bestvideo[height<=${parsed.videoHeight}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${parsed.videoHeight}]+bestaudio/best[height<=${parsed.videoHeight}]/best`
-        );
-      }
+      builder = ytDlp.mergeFormat('mp4').video();
     }
-
-    // ── Resource-saving flags (only methods confirmed in docs) ──
-    builder = builder
-      .retries(3)
-      .fragmentRetries(3)
-      .concurrentFragments(1);  // default is 4 — set to 1 for lowest CPU
 
     // ── Execute download (with timeout) ──
     const result = await withTimeout(builder.download(), DOWNLOAD_TIMEOUT_MS);
 
-    // ── Use the official returned path (more reliable than scanning) ──
+    // ── Use the official returned path ──
     const outFile = result?.path;
     if (!outFile || !fs.existsSync(outFile)) {
       throw new Error('Output file was not produced');
