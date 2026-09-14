@@ -1,8 +1,9 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/download.js
-// .song → SoundCloud → Apple Music → Deezer
-//         + pure-JS MP3 conversion (lamejs + audio-decode)
+// .song → SoundCloud → Deezer → Apple Music
 // .dl   → non-YouTube platforms via @choewy/yt-dlp
+// No conversion — sends audio in its native format
+// with the correct mimetype + extension.
 // ─────────────────────────────────────────────
 
 import fs from 'node:fs';
@@ -72,88 +73,7 @@ function isYouTubeUrl(u) {
     return /(?:youtube\.com|youtu\.be)/i.test(u);
 }
 
-// ─── Pure-JS audio conversion (no ffmpeg) ───
-let _decodeAudioPromise = null;
-let _lamejs = null;
-
-async function loadDecodeAudio() {
-    if (_decodeAudioPromise) return _decodeAudioPromise;
-    _decodeAudioPromise = import('audio-decode')
-        .then((m) => m.default)
-        .catch((e) => {
-            console.warn('[audio] audio-decode load failed:', e.message);
-            return null;
-        });
-    return _decodeAudioPromise;
-}
-
-function loadLamejs() {
-    if (_lamejs) return _lamejs;
-    try {
-        _lamejs = require('lamejs');
-        return _lamejs;
-    } catch (e) {
-        console.warn('[audio] lamejs load failed:', e.message);
-        return null;
-    }
-}
-
-async function convertToMp3(buffer, inputExt) {
-    const decodeAudio = await loadDecodeAudio();
-    const lamejs = loadLamejs();
-
-    if (!decodeAudio || !lamejs) {
-        throw new Error('audio conversion libraries not available');
-    }
-
-    // 1. Decode source → AudioBuffer (Float32 samples)
-    const audioBuffer = await decodeAudio(buffer);
-
-    const channels = audioBuffer.numberOfChannels;
-    const sampleRate = audioBuffer.sampleRate;
-    const length = audioBuffer.length;
-
-    if (!length) throw new Error('decoded audio is empty');
-
-    // 2. Float32 → Int16 (lamejs expects Int16 PCM)
-    const toInt16 = (f32) => {
-        const out = new Int16Array(f32.length);
-        for (let i = 0; i < f32.length; i++) {
-            const s = Math.max(-1, Math.min(1, f32[i]));
-            out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-        }
-        return out;
-    };
-
-    const leftPcm = toInt16(audioBuffer.getChannelData(0));
-    const rightPcm = channels > 1 ? toInt16(audioBuffer.getChannelData(1)) : null;
-
-    // 3. Encode with lamejs
-    const kbps = 192;
-    const encoder = new lamejs.Mp3Encoder(channels, sampleRate, kbps);
-
-    const BLOCK = 1152;
-    const chunks = [];
-
-    for (let i = 0; i < length; i += BLOCK) {
-        const l = leftPcm.subarray(i, i + BLOCK);
-        const r = rightPcm ? rightPcm.subarray(i, i + BLOCK) : undefined;
-        const mp3buf = channels === 1
-            ? encoder.encodeBuffer(l)
-            : encoder.encodeBuffer(l, r);
-        if (mp3buf.length > 0) chunks.push(Buffer.from(mp3buf));
-    }
-
-    const flush = encoder.flush();
-    if (flush.length > 0) chunks.push(Buffer.from(flush));
-
-    const out = Buffer.concat(chunks);
-    if (!out.length) throw new Error('MP3 encoding produced empty output');
-
-    return out;
-}
-
-// ─── Send audio (with MP3 conversion for compatibility) ───
+// ─── Send audio (format-detected, no conversion) ───
 async function sendAudio(sock, chat, msg, result) {
     const title = result.title || 'song';
     const artist = result.artist || '';
@@ -180,31 +100,17 @@ async function sendAudio(sock, chat, msg, result) {
         } catch {}
     }
 
-    // Detect actual format
-    const detected = detectAudioFormat(result.buffer);
+    // Detect actual format from magic bytes — this is what makes WhatsApp accept the file
+    const fmt = detectAudioFormat(result.buffer);
 
-    let sendBuffer = result.buffer;
-    let sendExt = detected.ext;
-    let sendMime = detected.mime;
-
-    // Always convert to MP3 for WhatsApp compatibility
-    if (detected.ext !== 'mp3') {
-        try {
-            sendBuffer = await convertToMp3(result.buffer, detected.ext);
-            sendExt = 'mp3';
-            sendMime = 'audio/mpeg';
-            console.log('[audio] converted to MP3:', sendBuffer.length, 'bytes');
-        } catch (e) {
-            console.warn('[audio] MP3 conversion failed, sending original:', e.message);
-        }
-    }
+    console.log(`[audio] sending ${fmt.ext} (${fmt.mime}) — ${result.buffer.length} bytes`);
 
     await sock.sendMessage(
         chat,
         {
-            audio: sendBuffer,
-            mimetype: sendMime,
-            fileName: `${safeTitle}.${sendExt}`,
+            audio: result.buffer,
+            mimetype: fmt.mime,
+            fileName: `${safeTitle}.${fmt.ext}`,
             ptt: false,
         },
         { quoted: msg }
@@ -240,7 +146,7 @@ export async function songCommand(sock, chat, msg, args) {
                             'Usage: `.song <song name>`',
                             '',
                             'Partial names work — e.g. `.song shape of`',
-                            'Sources: SoundCloud → Apple Music → Deezer',
+                            'Sources: SoundCloud → Deezer → Apple Music',
                         ].join('\n'),
                     },
                     { quoted: msg }
@@ -268,7 +174,7 @@ export async function songCommand(sock, chat, msg, args) {
                     {
                         text:
                             `❌ Couldn't find that song.\n` +
-                            `Tried SoundCloud, Apple Music, and Deezer.\n` +
+                            `Tried SoundCloud, Deezer, and Apple Music.\n` +
                             `_${String(err?.message || err).slice(0, 160)}_`,
                     },
                     { quoted: msg }
