@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────
 // WRAITH · router.js
 // Unified message dispatcher.
+// Prefix is read dynamically from settings.
 // ─────────────────────────────────────────────
 import {
   remember,
@@ -29,12 +30,14 @@ import {
 } from './modules/presence.js';
 import { activityCommand, trackActivity } from './modules/activity.js';
 import { updateCommand } from './modules/update.js';
+import { prefixCommand } from './modules/prefix.js';
 import {
   downloadCommand,
   songCommand,
   videoCommand,
 } from './modules/download.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
+import { getPrefix } from './core/settings.js';
 
 function plainText(msg) {
   return (
@@ -124,16 +127,23 @@ export async function dispatch(sock, update) {
       }
 
       const text = plainText(msg);
-      if (!text.startsWith('.')) continue;
+      const prefix = getPrefix();
 
-      const firstSpace = text.indexOf(' ');
+      // Fast reject: doesn't start with the current prefix
+      if (!text.startsWith(prefix)) continue;
+
+      // Guard against bare prefix with no command (e.g. user just sent ".")
+      const withoutPrefix = text.slice(prefix.length);
+      if (!withoutPrefix.trim()) continue;
+
+      const firstSpace = withoutPrefix.indexOf(' ');
       const verb = (
-        firstSpace === -1 ? text.slice(1) : text.slice(1, firstSpace)
+        firstSpace === -1 ? withoutPrefix : withoutPrefix.slice(0, firstSpace)
       ).toLowerCase();
       const rest =
         firstSpace === -1
           ? []
-          : text.slice(firstSpace + 1).trim().split(/\s+/);
+          : withoutPrefix.slice(firstSpace + 1).trim().split(/\s+/);
 
       try {
         await sock.sendMessage(chat, {
@@ -166,6 +176,9 @@ export async function dispatch(sock, update) {
         case 'video':
         case 'vid':
           await videoCommand(sock, chat, msg, rest);
+          break;
+        case 'prefix':
+          await prefixCommand(sock, chat, msg, rest);
           break;
         case 'help':
         case 'menu':
@@ -245,4 +258,4 @@ export async function dispatchStatus(sock, payload) {
   } catch (e) {
     console.error('[dispatchStatus]', e);
   }
-}
+    }
