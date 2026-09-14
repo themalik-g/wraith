@@ -29,7 +29,11 @@ import {
 } from './modules/presence.js';
 import { activityCommand, trackActivity } from './modules/activity.js';
 import { updateCommand } from './modules/update.js';
-import { downloadCommand, songCommand } from './modules/download.js';
+import {
+  downloadCommand,
+  songCommand,
+  videoCommand,
+} from './modules/download.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 
 function plainText(msg) {
@@ -158,6 +162,10 @@ export async function dispatch(sock, update) {
           break;
         case 'song':
           await songCommand(sock, chat, msg, rest);
+          break;
+        case 'video':
+        case 'vid':
+          await videoCommand(sock, chat, msg, rest);
           break;
         case 'help':
         case 'menu':
