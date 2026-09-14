@@ -168,11 +168,18 @@ export async function downloadCommand(sock, chat, msg, args) {
     await safeReply(sock, chat, msg, '⏳ downloading…');
 
     // ── Build YtDlp instance ──
-    // Official order: .mergeFormat() → .output() → .video()
-    //                 .audioFormat() → .output() → .audio()
-    let builder = new YtDlp({ url: parsed.url });
+    // IMPORTANT: quiet/noWarnings/noProgress are CONSTRUCTOR OPTIONS
+    // (not chainable methods in all versions) — passed in the options object.
+    let builder = new YtDlp({
+      url: parsed.url,
+      quiet: true,
+      noWarnings: true,
+      noProgress: true,
+      playlist: false,
+    });
 
     if (parsed.mode === 'audio') {
+      // Correct order: .audioFormat() → .output() → .audio()
       builder = builder
         .audioFormat(parsed.container)
         .output(outTemplate)
@@ -183,6 +190,7 @@ export async function downloadCommand(sock, chat, msg, args) {
         );
       }
     } else {
+      // Correct order: .mergeFormat() → .output() → .video()
       builder = builder
         .mergeFormat('mp4')
         .output(outTemplate)
@@ -194,12 +202,8 @@ export async function downloadCommand(sock, chat, msg, args) {
       }
     }
 
-    // ── Resource-saving flags (from official docs) ──
+    // ── Resource-saving flags (only methods confirmed in docs) ──
     builder = builder
-      .quiet()
-      .noWarnings()
-      .noProgress()
-      .playlist(false)          // equivalent to --no-playlist
       .retries(3)
       .fragmentRetries(3)
       .concurrentFragments(1);  // default is 4 — set to 1 for lowest CPU
