@@ -1,261 +1,226 @@
 // ─────────────────────────────────────────────
-// WRAITH · router.js
-// Unified message dispatcher.
-// Prefix is read dynamically from settings.
+// WRAITH · modules/help.js
+// Styled boxed menu — command list ONLY.
+// Renders commands with the CURRENT prefix.
 // ─────────────────────────────────────────────
-import {
-  remember,
-  revealDelete,
-  revealEdit,
-  revealSecretEdit,
-  ghostCommand,
-  classifyMessage,
-} from './modules/ghost.js';
-import { peekCommand, autoPeek, watchQuotedViewOnce } from './modules/peek.js';
-import { lurkCommand, lurkTick } from './modules/lurk.js';
-import { pingCommand } from './modules/ping.js';
-import { helpCommand } from './modules/help.js';
-import { scheduleCommand } from './modules/schedule.js';
-import {
-  adminAction,
-  toggleProtection,
-  handleProtection,
-} from './modules/admin.js';
-import { getppCommand } from './modules/profile.js';
-import { getjidCommand } from './modules/jid.js';
-import {
-  presenceCommand,
-  shouldReadReceipts,
-  applyAutoPresence,
-} from './modules/presence.js';
-import { activityCommand, trackActivity } from './modules/activity.js';
-import { updateCommand } from './modules/update.js';
-import { prefixCommand } from './modules/prefix.js';
-import {
-  downloadCommand,
-  songCommand,
-  videoCommand,
-} from './modules/download.js';
-import { cacheChannelFromMessage } from './core/jid-resolver.js';
-import { getPrefix } from './core/settings.js';
+import { isOwner } from '../core/identity.js';
+import { getPrefix } from '../core/settings.js';
 
-function plainText(msg) {
-  return (
-    msg.message?.conversation ||
-    msg.message?.extendedTextMessage?.text ||
-    msg.message?.imageMessage?.caption ||
-    msg.message?.videoMessage?.caption ||
-    ''
-  ).trim();
+const REGISTRY = [
+  {
+    id: 'ghost',
+    icon: '👻',
+    title: 'ɢʜᴏꜱᴛ',
+    commands: [
+      '.ghost',
+      '.ghost on',
+      '.ghost off',
+      '.ghost edit on',
+      '.ghost edit off',
+    ],
+  },
+  {
+    id: 'peek',
+    icon: '👀',
+    title: 'ᴘᴇᴇᴋ',
+    commands: [
+      '.peek',
+      '.peek auto on',
+      '.peek auto off',
+      '.peek dest owner',
+      '.peek dest same',
+      '.peek dest both',
+    ],
+  },
+  {
+    id: 'lurk',
+    icon: '🕵️',
+    title: 'ʟᴜʀᴋ',
+    commands: [
+      '.lurk',
+      '.lurk on',
+      '.lurk off',
+      '.lurk react on',
+      '.lurk react off',
+      '.lurk download on',
+      '.lurk download off',
+      '.lurk emoji ❤️',
+      '.lurk emoji random',
+      '.lurk emoji none',
+    ],
+  },
+  {
+    id: 'schedule',
+    icon: '⏰',
+    title: 'ꜱᴄʜᴇᴅᴜʟᴇ',
+    commands: [
+      '.schedule',
+      '.schedule txt date am/pm',
+      '.schedule list',
+      '.schedule cancel <id>',
+    ],
+  },
+  {
+    id: 'download',
+    icon: '⬇️',
+    title: 'ᴅᴏᴡɴʟᴏᴀᴅ',
+    commands: [
+      '.dl <url>',
+      '.dl audio <url>',
+      '.dl mp3 <url>',
+      '.song <query>',
+      '.video <query>',
+    ],
+  },
+  {
+    id: 'admin',
+    icon: '🛡️',
+    title: 'ᴀᴅᴍɪɴ',
+    commands: [
+      '.kick @user',
+      '.add 923…',
+      '.promote @user',
+      '.demote @user',
+      '.antilink on|off',
+      '.antispam on|off',
+      '.antisticker on|off',
+    ],
+  },
+  {
+    id: 'tools',
+    icon: '🔧',
+    title: 'ᴛᴏᴏʟꜱ',
+    commands: [
+      '.getpp',
+      '.getpp <number>',
+      '.getjid',
+      '.getjid currentchat',
+      '.getjid channels',
+      '.getjid members',
+    ],
+  },
+  {
+    id: 'presence',
+    icon: '⚙️',
+    title: 'ᴘʀᴇꜱᴇɴᴄᴇ',
+    commands: [
+      '.presence',
+      '.presence online on|off',
+      '.presence typing on|off',
+      '.presence recording on|off',
+      '.presence reads on|off',
+    ],
+  },
+  {
+    id: 'activity',
+    icon: '📊',
+    title: 'ᴀᴄᴛɪᴠɪᴛʏ',
+    commands: ['.activity', '.activity <chat>'],
+  },
+  {
+    id: 'prefix',
+    icon: '🔣',
+    title: 'ᴘʀᴇꜰɪx',
+    commands: ['.prefix', '.prefix <symbol>', '.prefix reset'],
+  },
+  {
+    id: 'probe',
+    icon: '📡',
+    title: 'ᴘʀᴏʙᴇ',
+    commands: ['.ping'],
+  },
+  {
+    id: 'system',
+    icon: '⚡',
+    title: 'sʏsᴛᴇᴍ',
+    commands: ['.update'],
+  },
+];
+
+const TAIL = '└─────────────┈⚝';
+
+// Replace leading "." with the current prefix
+function applyPrefix(cmd, prefix) {
+  if (prefix === '.') return cmd;
+  return cmd.startsWith('.') ? prefix + cmd.slice(1) : cmd;
 }
 
-export async function dispatch(sock, update) {
-  if (update.type && update.type !== 'notify' && update.type !== 'append') return;
+function renderBox(title, rows, prefix) {
+  const lines = [];
+  lines.push(`┌──❮ ${title} ❯`);
+  lines.push('│');
+  for (const r of rows) lines.push(`│ ◈ ${applyPrefix(r, prefix)}`);
+  lines.push('│');
+  lines.push(TAIL);
+  return lines.join('\n');
+}
 
-  for (const msg of update.messages || []) {
-    if (!msg?.message) continue;
+function renderAll(prefix) {
+  const sections = REGISTRY.map((g) =>
+    renderBox(`${g.icon} ${g.title}`, g.commands, prefix)
+  );
+  return [
+    '┌──❮ ⓌⓇⒶⒾⓉⒽ ❯',
+    '│',
+    '│ ᴄᴏᴍᴍᴀɴᴅꜱ ᴀʀᴇ ᴏᴡɴᴇʀ-ᴏɴʟʏ',
+    `│ ᴘʀᴇꜰɪx · ${prefix}`,
+    `│ ℹ️ ${prefix}ᴄᴏᴍᴍᴀɴᴅ ꜰᴏʀ ɢᴜɪᴅᴇ`,
+    '│',
+    TAIL,
+    '',
+    ...sections,
+    '',
+    'ⓌⓇⒶⒾⓉⒽ',
+  ].join('\n');
+}
 
-    try {
-      const chat = msg.key.remoteJid;
-      if (!chat) continue;
+function renderGroup(name, prefix) {
+  const g = REGISTRY.find(
+    (x) => x.id === name || x.title.replace(/[^a-z]/gi, '') === name
+  );
+  if (!g) return null;
+  return renderBox(`${g.icon} ${g.title}`, g.commands, prefix);
+}
 
-      try {
-        trackActivity(chat, msg, plainText(msg));
-      } catch (e) {
-        console.error('[router] trackActivity', e.message);
-      }
-
-      try {
-        cacheChannelFromMessage(msg);
-      } catch (e) {
-        console.error('[router] cacheChannelFromMessage', e.message);
-      }
-
-      try {
-        if (shouldReadReceipts() && !msg.key.fromMe && chat !== 'status@broadcast') {
-          await sock.readMessages([msg.key]);
-        }
-      } catch (e) {
-        console.error('[router] readReceipts', e.message);
-      }
-
-      const kind = classifyMessage(msg);
-      if (kind === 'revoke') {
-        await revealDelete(sock, msg);
-        continue;
-      }
-      if (kind === 'edit') {
-        await revealEdit(sock, msg);
-        continue;
-      }
-      if (kind === 'secret_edit') {
-        await revealSecretEdit(sock, msg);
-        continue;
-      }
-
-      try {
-        await remember(sock, msg);
-      } catch (e) {
-        console.error('[router] remember', e.message);
-      }
-
-      try {
-        await autoPeek(sock, msg);
-      } catch (e) {
-        console.error('[router] autoPeek', e.message);
-      }
-
-      try {
-        await watchQuotedViewOnce(sock, msg);
-      } catch (e) {
-        console.error('[router] watchQuotedViewOnce', e.message);
-      }
-
-      if (chat === 'status@broadcast') continue;
-
-      try {
-        await applyAutoPresence(sock, chat);
-      } catch (e) {
-        console.error('[router] applyAutoPresence', e.message);
-      }
-
-      try {
-        const blocked = await handleProtection(sock, chat, msg, plainText(msg));
-        if (blocked) continue;
-      } catch (e) {
-        console.error('[router] handleProtection', e.message);
-      }
-
-      const text = plainText(msg);
-      const prefix = getPrefix();
-
-      // Fast reject: doesn't start with the current prefix
-      if (!text.startsWith(prefix)) continue;
-
-      // Guard against bare prefix with no command (e.g. user just sent ".")
-      const withoutPrefix = text.slice(prefix.length);
-      if (!withoutPrefix.trim()) continue;
-
-      const firstSpace = withoutPrefix.indexOf(' ');
-      const verb = (
-        firstSpace === -1 ? withoutPrefix : withoutPrefix.slice(0, firstSpace)
-      ).toLowerCase();
-      const rest =
-        firstSpace === -1
-          ? []
-          : withoutPrefix.slice(firstSpace + 1).trim().split(/\s+/);
-
-      try {
-        await sock.sendMessage(chat, {
-          react: { text: '⌛', key: msg.key },
-        });
-      } catch (e) {
-        console.error('[router] react', e.message);
-      }
-
-      switch (verb) {
-        case 'ghost':
-          await ghostCommand(sock, chat, msg, rest);
-          break;
-        case 'peek':
-          await peekCommand(sock, chat, msg, rest);
-          break;
-        case 'lurk':
-          await lurkCommand(sock, chat, msg, rest);
-          break;
-        case 'ping':
-          await pingCommand(sock, chat, msg);
-          break;
-        case 'dl':
-        case 'download':
-          await downloadCommand(sock, chat, msg, rest);
-          break;
-        case 'song':
-          await songCommand(sock, chat, msg, rest);
-          break;
-        case 'video':
-        case 'vid':
-          await videoCommand(sock, chat, msg, rest);
-          break;
-        case 'prefix':
-          await prefixCommand(sock, chat, msg, rest);
-          break;
-        case 'help':
-        case 'menu':
-          await helpCommand(sock, chat, msg, rest);
-          break;
-        case 'schedule':
-          await scheduleCommand(sock, chat, msg, rest);
-          break;
-        case 'kick':
-          await adminAction(sock, chat, msg, rest, 'remove');
-          break;
-        case 'add':
-          await adminAction(sock, chat, msg, rest, 'add');
-          break;
-        case 'promote':
-          await adminAction(sock, chat, msg, rest, 'promote');
-          break;
-        case 'demote':
-          await adminAction(sock, chat, msg, rest, 'demote');
-          break;
-        case 'antilink':
-          await toggleProtection(sock, chat, msg, rest, 'antilink');
-          break;
-        case 'antispam':
-          await toggleProtection(sock, chat, msg, rest, 'antispam');
-          break;
-        case 'antisticker':
-          await toggleProtection(sock, chat, msg, rest, 'antisticker');
-          break;
-        case 'getpp':
-          await getppCommand(sock, chat, msg, rest);
-          break;
-        case 'getjid':
-          await getjidCommand(sock, chat, msg, rest);
-          break;
-        case 'presence':
-          await presenceCommand(sock, chat, msg, rest);
-          break;
-        case 'activity':
-          await activityCommand(sock, chat, msg, rest);
-          break;
-        case 'update':
-          await updateCommand(sock, chat, msg, rest);
-          break;
-        default:
-          break;
-      }
-    } catch (e) {
-      console.error('[dispatch]', e);
-    }
+export async function helpCommand(sock, chat, msg, args) {
+  const from = msg.key.participant || msg.key.remoteJid;
+  if (!msg.key.fromMe && !isOwner(from)) {
+    return sock.sendMessage(
+      chat,
+      { text: '⛔ Owner only.' },
+      { quoted: msg }
+    );
   }
-}
 
-export async function dispatchUpdate(sock, update) {
-  if (!update?.key) return;
+  const prefix = getPrefix();
+  const target = (args?.[0] || '').toLowerCase().trim();
 
-  const editNode =
-    update.update?.message?.protocolMessage ||
-    update.update?.message ||
-    update.message?.protocolMessage;
-  if (!editNode) return;
-
-  const envelope = {
-    key: update.key,
-    participant: update.participant || update.key.participant,
-    message: { protocolMessage: editNode },
-  };
-
-  const t = editNode.type;
-  if (t === 14 || t === 'MESSAGE_EDIT') await revealEdit(sock, envelope);
-  else if (t === 0 || t === 'REVOKE') await revealDelete(sock, envelope);
-}
-
-export async function dispatchStatus(sock, payload) {
-  try {
-    await lurkTick(sock, payload);
-  } catch (e) {
-    console.error('[dispatchStatus]', e);
+  if (!target) {
+    return sock.sendMessage(
+      chat,
+      { text: renderAll(prefix) },
+      { quoted: msg }
+    );
   }
-    }
+
+  const wanted = target.replace(/[^a-z]/g, '');
+  const rendered = renderGroup(wanted, prefix);
+
+  if (!rendered) {
+    return sock.sendMessage(
+      chat,
+      {
+        text: `❓ no menu page called _${target}_.\n\n${REGISTRY.map(
+          (g) => `• ${g.id}`
+        ).join(' · ')}`,
+      },
+      { quoted: msg }
+    );
+  }
+
+  return sock.sendMessage(
+    chat,
+    { text: rendered },
+    { quoted: msg }
+  );
+}
