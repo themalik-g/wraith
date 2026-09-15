@@ -8,13 +8,21 @@ import { CONFIG } from '../config.js';
 import { chunkText, withTempFile, downloadToFile } from '../lib/net.js';
 import { searchBooks, searchMovie, searchSong, fetchLyrics, searchImages } from '../lib/apis.js';
 
-// ★ In-memory cache of each chat's last book search → `.book dl 2` is reliable
+// In-memory cache of each chat's last book search → `.book dl 2` is reliable
 const bookCache = new Map(); // chat → { time, query, books }
 const BOOK_CACHE_TTL = 10 * 60 * 1000;
 function getCachedBooks(chat) {
   const e = bookCache.get(chat);
   if (e && Date.now() - e.time < BOOK_CACHE_TTL) return e;
   return null;
+}
+
+// ★ FIX: hard timeout helper so a dead source errors out instead of hanging
+async function timedFetch(url, timeout = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try { return await fetch(url, { signal: controller.signal }); }
+  finally { clearTimeout(timer); }
 }
 
 function ownerOnly(sock, chat, msg) {
@@ -34,7 +42,6 @@ export async function bookCommand(sock, chat, msg, args) {
   try {
     const a0 = (args?.[0] || '').toLowerCase();
 
-    // ★ NEW: `.book dl <index>` uses the cached last search — actually downloads the right book
     if (a0 === 'dl' && args[1]) {
       const cached = getCachedBooks(chat);
       let book = null;
@@ -42,7 +49,6 @@ export async function bookCommand(sock, chat, msg, args) {
       if (cached && !isNaN(n) && cached.books[n - 1]) {
         book = cached.books[n - 1];
       } else {
-        // fallback: treat arg as an ID/query
         const r = await searchBooks(args[1], 1);
         if (r.ok && r.books[0]) book = r.books[0];
       }
@@ -159,7 +165,7 @@ export async function movieCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .songinfo (info only — `.song` remains the downloader) ─────────────────
+// ── .songinfo ───────────────────────────────────────────────────────────────
 export async function songCommand(sock, chat, msg, args) {
   try {
     const query = (args || []).join(' ').trim();
@@ -210,7 +216,7 @@ export async function lyricsCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .ppt ★ REAL .pptx (pptxgenjs, lazy-loaded; TXT outline as fallback) ─────
+// ── .ppt ────────────────────────────────────────────────────────────────────
 let pptxModule; // undefined = not tried, null = unavailable
 async function getPptx() {
   if (pptxModule === undefined) {
@@ -220,22 +226,24 @@ async function getPptx() {
   return pptxModule;
 }
 
+// ★ FIX: both Wikipedia calls now share one hard timeout
 async function fetchWikiSummary(topic) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const r = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(topic)}`);
-    if (r.ok) {
-      const d = await r.json();
+    const r1 = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(topic)}`, { signal: controller.signal });
+    if (r1.ok) {
+      const d = await r1.json();
       if (d?.extract) return { title: d.title || topic, extract: d.extract };
     }
-  } catch {}
-  try {
-    const r = await fetch(`https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext&exsentences=20&titles=${encodeURIComponent(topic)}&format=json&origin=*`);
-    if (r.ok) {
-      const d = await r.json();
+    const r2 = await fetch(`https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext&exsentences=20&titles=${encodeURIComponent(topic)}&format=json&origin=*`, { signal: controller.signal });
+    if (r2.ok) {
+      const d = await r2.json();
       const page = d?.query?.pages ? Object.values(d.query.pages)[0] : null;
       if (page?.extract) return { title: page.title || topic, extract: page.extract };
     }
   } catch {}
+  finally { clearTimeout(timer); }
   return null;
 }
 
@@ -285,7 +293,6 @@ export async function pptCommand(sock, chat, msg, args) {
       return;
     }
 
-    // Fallback: TXT outline (kept so the command still answers without the lib)
     const lines = [`PRESENTATION: ${title}`, '='.repeat(60), '', ...summary.split('\n').filter(Boolean).slice(0, 12)];
     await sock.sendMessage(chat, {
       document: Buffer.from(lines.join('\n'), 'utf8'),
@@ -298,7 +305,7 @@ export async function pptCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .couplepp (shape-flexible parser, clear failure message) ────────────────
+// ── .couplepp ───────────────────────────────────────────────────────────────
 const COUPLE_PP_SOURCES = [
   'https://raw.githubusercontent.com/PikaBotz/important-API/main/couple-API/couplepp.json',
 ];
@@ -309,10 +316,9 @@ export async function coupleppCommand(sock, chat, msg, args) {
     let pairs = [];
     for (const url of COUPLE_PP_SOURCES) {
       try {
-        const res = await fetch(url);
+        const res = await timedFetch(url, 15000); // ★ FIX: was a bare fetch() with no timeout
         if (!res.ok) continue;
         const data = await res.json();
-        // ★ accept multiple JSON shapes: [...] | {data:[...]} | {couples:[...]}
         pairs = Array.isArray(data) ? data : (data?.data || data?.couples || []);
         if (pairs.length) break;
       } catch {}
