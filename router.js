@@ -28,7 +28,7 @@ import {
 
 // ── Phase 2: Media + AI ─────────────────────────────────────────────────────
 import {
-  bookCommand, imageCommand, movieCommand, songCommand, lyricsCommand,
+  bookCommand, imageCommand, movieCommand, songCommand as songInfoCommand, lyricsCommand,
   pptCommand, coupleppCommand,
 } from './modules/media.js';
 import { chatbotCommand, maybeAutoReply } from './modules/ai.js';
@@ -65,8 +65,15 @@ const CRITICAL_COMMANDS = new Set([
   'gitdl', 'mfdl', 'chatbot',
 ]);
 
-let presenceTrackerAttached = false;
-let callRejectorAttached = false;
+// ★ FIX: attach background listeners PER SOCKET, not once per process.
+//        A reconnect creates a NEW socket — WeakSet lets us re-attach safely.
+const attachedSockets = new WeakSet();
+function attachBackground(sock) {
+  if (!sock || attachedSockets.has(sock)) return;
+  attachedSockets.add(sock);
+  try { attachPresenceTracker(sock); } catch (e) { console.error('[router] attachPresenceTracker', e.message); }
+  try { attachCallRejector(sock); } catch (e) { console.error('[router] attachCallRejector', e.message); }
+}
 
 function plainText(msg) {
   return (
@@ -79,13 +86,8 @@ function plainText(msg) {
 }
 
 export async function dispatch(sock, update) {
-  // Attach background listeners exactly once per socket
-  if (!presenceTrackerAttached) {
-    try { attachPresenceTracker(sock); presenceTrackerAttached = true; } catch (e) { console.error('[router] attachPresenceTracker', e.message); }
-  }
-  if (!callRejectorAttached) {
-    try { attachCallRejector(sock); callRejectorAttached = true; } catch (e) { console.error('[router] attachCallRejector', e.message); }
-  }
+  // ★ FIX: per-socket attach (survives reconnects)
+  attachBackground(sock);
 
   if (update.type && update.type !== 'notify' && update.type !== 'append') return;
 
@@ -124,7 +126,11 @@ export async function dispatch(sock, update) {
 
       const text = plainText(msg);
       const prefix = getPrefix();
-      if (!text.startsWith(prefix)) continue;
+      // ★ FIX: non-command messages now go to the auto-chatbot instead of being dropped
+      if (!text.startsWith(prefix)) {
+        try { await maybeAutoReply(sock, chat, msg); } catch (e) { console.error('[router] chatbot', e.message); }
+        continue;
+      }
 
       const withoutPrefix = text.slice(prefix.length);
       if (!withoutPrefix.trim()) continue;
@@ -145,7 +151,16 @@ export async function dispatch(sock, update) {
         }
       }
 
-      try { await sock.sendMessage(chat, { react: { text: '⌛', key: msg.key } }); } catch (e) { console.error('[router] react', e.message); }
+      // ★ Only react for verbs the router actually knows
+      const KNOWN = new Set([...CRITICAL_COMMANDS,
+        'dl', 'download', 'song', 'songinfo', 'help', 'menu', 'ping',
+        'currency', 'qr', 'define', 'weather', 'pwned', 'owner', 'script', 'repo',
+        'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
+        'welcome', 'goodbye', 'getpp',
+      ]);
+      if (KNOWN.has(verb)) {
+        try { await sock.sendMessage(chat, { react: { text: '⌛', key: msg.key } }); } catch (e) { console.error('[router] react', e.message); }
+      }
 
       try {
         switch (verb) {
@@ -157,6 +172,7 @@ export async function dispatch(sock, update) {
           case 'dl':
           case 'download': await downloadCommand(sock, chat, msg, rest); break;
           case 'song': await dlSongCommand(sock, chat, msg, rest); break;
+          case 'songinfo': await songInfoCommand(sock, chat, msg, rest); break;
           case 'prefix': await prefixCommand(sock, chat, msg, rest); break;
           case 'help':
           case 'menu': await helpCommand(sock, chat, msg, rest); break;
@@ -238,19 +254,25 @@ export async function dispatch(sock, update) {
   }
 }
 
-// Auto-chatbot hook: called for every message that isn't a command
+// ★ Kept for backward compatibility — chatbot now runs inside dispatch directly
 export async function maybeAutoChatbot(sock, chat, msg) {
   try { return await maybeAutoReply(sock, chat, msg); } catch { return false; }
 }
 
 export async function dispatchUpdate(sock, update) {
-  if (!update?.key) return;
-  const editNode = update.update?.message?.protocolMessage || update.update?.message || update.message?.protocolMessage;
-  if (!editNode) return;
-  const envelope = { key: update.key, participant: update.participant || update.key.participant, message: { protocolMessage: editNode } };
-  const t = editNode.type;
-  if (t === 14 || t === 'MESSAGE_EDIT') await revealEdit(sock, envelope);
-  else if (t === 0 || t === 'REVOKE') await revealDelete(sock, envelope);
+  // ★ FIX: messages.update emits an ARRAY — handle every entry
+  const list = Array.isArray(update) ? update : [update];
+  for (const u of list) {
+    try {
+      if (!u?.key) continue;
+      const editNode = u.update?.message?.protocolMessage || u.update?.message || u.message?.protocolMessage;
+      if (!editNode) continue;
+      const envelope = { key: u.key, participant: u.participant || u.key.participant, message: { protocolMessage: editNode } };
+      const t = editNode.type;
+      if (t === 14 || t === 'MESSAGE_EDIT') await revealEdit(sock, envelope);
+      else if (t === 0 || t === 'REVOKE') await revealDelete(sock, envelope);
+    } catch (e) { console.error('[dispatchUpdate]', e.message); }
+  }
 }
 
 export async function dispatchStatus(sock, payload) {
