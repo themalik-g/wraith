@@ -39,6 +39,8 @@ export function attachPresenceTracker(sock) {
         if (!p?.lastKnownPresence) continue;
         if (!store[jid]) store[jid] = { events: [], onlineCount: 0, totalOnlineMs: 0, lastChange: 0, subscribed: true };
         const rec = store[jid];
+        // ★ FIX: `.stalk stop` now genuinely pauses recording for this contact
+        if (rec.subscribed === false) continue;
         const status = p.lastKnownPresence;
         const last = rec.events[rec.events.length - 1];
         if (last && last.status === status && now - last.time < 1000) continue;
@@ -70,21 +72,20 @@ export async function stalkCommand(sock, chat, msg, args) {
       const lines = [`👁️ *stalked contacts* · ${keys.length}`, ''];
       for (const jid of keys.slice(0, 30)) {
         const r = store[jid];
-        lines.push(`• \`${jid.split('@')[0]}\` — ${r.onlineCount} online sessions`);
+        const state = r.subscribed === false ? ' · ⏸️ paused' : '';
+        lines.push(`• \`${jid.split('@')[0]}\` — ${r.onlineCount} online sessions${state}`);
       }
       return sendChunked(sock, chat, msg, lines.join('\n'));
     }
 
     if (a0 === 'stop') {
-      // ★ FIX: validate digits instead of concatenating 'undefined'
       const digits = (args?.[1] || '').replace(/\D/g, '');
       if (!digits) return sock.sendMessage(chat, { text: '❌ Usage: `.stalk stop <number>`' }, { quoted: msg });
-      const target = `${digits}@s.whatsapp.net`;
       const store = readStore();
       let stopped = false;
       for (const jid of Object.keys(store)) {
         if (jid.replace(/\D/g, '').includes(digits)) {
-          store[jid].subscribed = false;
+          store[jid].subscribed = false; // ★ FIX: tracker now honours this flag
           stopped = true;
         }
       }
@@ -111,9 +112,15 @@ export async function stalkCommand(sock, chat, msg, args) {
       return sock.sendMessage(chat, { text: `❌ Could not subscribe to presence for \`${targetJid.split('@')[0]}\`.\n_They may have "Last Seen" hidden._` }, { quoted: msg });
     }
 
-    await new Promise((r) => setTimeout(r, 1500));
+    // ★ FIX: re-activate tracking when the owner stalks a paused contact again
     const store = readStore();
-    const rec = store[targetJid];
+    if (store[targetJid]) {
+      store[targetJid].subscribed = true;
+      writeStore(store);
+    }
+
+    await new Promise((r) => setTimeout(r, 1500));
+    const rec = readStore()[targetJid];
     if (!rec || !rec.events.length) {
       return sock.sendMessage(chat, { text: `👁️ Now tracking \`${targetJid.split('@')[0]}\`.\n\n_No presence events yet. WhatsApp only sends these if the user has "Last Seen" visible._` }, { quoted: msg });
     }
