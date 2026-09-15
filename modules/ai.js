@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
+import { isOwner } from '../core/identity.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -150,13 +151,15 @@ async function handleChatbotCommand(sock, chat, message, match) {
   }
 
   const data = loadUserGroupData();
-  const botNumber = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+
+  // ── Owner check: use the same helper every other module uses ──
   const senderId =
     message.key.participant ||
     message.participant ||
-    message.pushName ||
-    message.key.remoteJid;
-  const isOwnerUser = senderId === botNumber;
+    message.key.remoteJid ||
+    message.pushName;
+
+  const isOwnerUser = message.key.fromMe || isOwner(senderId);
 
   if (isOwnerUser) {
     if (match === 'on') {
@@ -183,8 +186,10 @@ async function handleChatbotCommand(sock, chat, message, match) {
   if (chat.endsWith('@g.us')) {
     try {
       const meta = await sock.groupMetadata(chat);
-      isAdmin = meta.participants.some(
-        (p) => p.id === senderId && (p.admin === 'admin' || p.admin === 'superadmin')
+      const norm = (j) => String(j || '').split(':')[0].replace(/\D/g, '');
+      const senderNorm = norm(senderId);
+      isAdmin = (meta.participants || []).some(
+        (p) => norm(p.id) === senderNorm && (p.admin === 'admin' || p.admin === 'superadmin')
       );
     } catch {}
   }
