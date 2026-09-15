@@ -13,8 +13,6 @@ import { getMode } from './utility.js';
 const c = (cmd, ownerOnly = false) => ({ cmd, ownerOnly });
 
 // ── full command registry ────────────────────
-// Preserves your old ghost/peek/lurk/schedule detail,
-// merges every new command from the updated bot.
 const REGISTRY = [
   {
     id: 'core',
@@ -250,34 +248,35 @@ function visibleRegistry(isOwnerUser) {
 }
 
 // ── full menu page ───────────────────────────
-function renderAll(prefix, isOwnerUser) {
+function renderAll(prefix, isOwnerUser, mode) {
   const groups = visibleRegistry(isOwnerUser);
+
+  // Header — matches the OLD style exactly when owner / private mode.
+  const headerLines = [
+    '┌──❮ ⓌⓇⒶⒾⓉⒽ ❯',
+    '│',
+  ];
+
+  if (isOwnerUser || mode !== 'public') {
+    headerLines.push('│ ᴄᴏᴍᴍᴀɴᴅꜱ ᴀʀᴇ ᴏᴡɴᴇʀ-ᴏɴʟʏ');
+  } else {
+    headerLines.push('│ ᴘᴜʙʟɪᴄ ᴍᴏᴅᴇ · ꜱᴏᴍᴇ ᴄᴏᴍᴍᴀɴᴅꜱ ʜɪᴅᴅᴇɴ');
+  }
+
+  headerLines.push(`│ ᴘʀᴇꜰɪx · ${prefix}`);
+  headerLines.push(`│ ℹ️ ${prefix}ᴄᴏᴍᴍᴀɴᴅ ꜰᴏʀ ɢᴜɪᴅᴇ`);
+  headerLines.push('│');
+  headerLines.push(TAIL);
+
+  const header = headerLines.join('\n');
+
+  // Sections sit flush against each other — no blank lines between boxes.
   const sections = groups.map((g) =>
     renderBox(g.icon, g.title, g.commands.map((x) => x.cmd), prefix)
   );
 
-  const total = groups.reduce((n, g) => n + g.commands.length, 0);
-
-  let mode = 'private';
-  try {
-    mode = getMode();
-  } catch {}
-
-  const botName = CONFIG?.botName || CONFIG?.codename || 'WRAITH';
-  const version = CONFIG?.version || '1.3.2';
-
-  const header = [
-    '┌──❮ ⓌⓇⒶⒾⓉⒽ ❯',
-    '│',
-    `│ ${botName} · v${version} · ᴍᴏᴅᴇ ${mode}`,
-    `│ ᴘʀᴇꜰɪx · ${prefix}`,
-    `│ ᴄᴏᴍᴍᴀɴᴅꜱ · ${total}`,
-    `│ ℹ️ ${prefix}help <category> ꜰᴏʀ ᴅᴇᴛᴀɪʟꜱ`,
-    '│',
-    TAIL,
-  ].join('\n');
-
-  return [header, '', ...sections, '', 'ⓌⓇⒶⒾⓉⒽ'].join('\n');
+  // header, then boxes (flush), then one blank line, then closing brand.
+  return [header, ...sections, '', 'ⓌⓇⒶⒾⓉ⓽'].join('\n');
 }
 
 // ── category lookup ──────────────────────────
@@ -322,11 +321,17 @@ export async function helpCommand(sock, chat, msg, args) {
     const from = msg.key.participant || msg.key.remoteJid;
     const isOwnerUser = msg.key.fromMe || isOwner(from);
     const prefix = getPrefix();
+
+    let mode = 'private';
+    try {
+      mode = getMode();
+    } catch {}
+
     const target = (args?.[0] || '').toLowerCase().trim();
 
     // ── no argument → full menu ──
     if (!target) {
-      const text = renderAll(prefix, isOwnerUser);
+      const text = renderAll(prefix, isOwnerUser, mode);
       return sendSafe(sock, chat, msg, text);
     }
 
@@ -339,9 +344,7 @@ export async function helpCommand(sock, chat, msg, args) {
         .join(' · ');
       return sock.sendMessage(
         chat,
-        {
-          text: `❓ no menu page called _${target}_.\n\n${avail}`,
-        },
+        { text: `❓ no menu page called _${target}_.\n\n${avail}` },
         { quoted: msg }
       );
     }
