@@ -3,6 +3,7 @@
 // Welcome / goodbye messages on membership changes.
 // Wired in start.js → 'group-participants.update'
 // ─────────────────────────────────────────────
+import { getPrefix } from '../core/settings.js';
 import { getWelcomeConfig } from '../modules/group.js';
 
 function mentionText(participants) {
@@ -22,13 +23,10 @@ export function handleGroupParticipantUpdate(sock, update) {
     const cfg = getWelcomeConfig()[chat];
     if (!cfg) return;
 
-    // Skip people the bot itself removed (kicked) for goodbye — reduces spam
-    const byBot = update.by ? false : false; // placeholder for future logic
-
     if (action === 'add' && cfg.welcome) {
       const text =
         `👋 Welcome ${mentionText(participants)}!\n` +
-        `Enjoy your stay. Type ${'`'}.help${'`'} to see what the bot can do.`;
+        `Enjoy your stay. Type \`${getPrefix()}help\` to see what the bot can do.`;
       sock.sendMessage(chat, { text, mentions: participants }).catch(() => {});
       return;
     }
