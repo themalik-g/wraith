@@ -15,32 +15,28 @@ import { activityCommand, trackActivity } from './modules/activity.js';
 import { updateCommand } from './modules/update.js';
 import { prefixCommand } from './modules/prefix.js';
 import { songCommand } from './modules/song.js';
-import { ytdlCommand } from './modules/download.js';
+import { ytdlCommand, mp3Command } from './modules/download.js';
 import { urlCommand } from './modules/url.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 import { getPrefix } from './core/settings.js';
 import { isOwner } from './core/identity.js';
 import { CONFIG } from './config.js';
 
-// ── Phase 1: Utility ────────────────────────────────────────────────────────
+// ── Phase 1 ──
 import {
   currencyCommand, qrCommand, defineCommand, weatherCommand, pwnedCommand,
   ownerCommand, scriptCommand, modeCommand, getMode,
 } from './modules/utility.js';
 
-// ── Phase 2: Media + AI ─────────────────────────────────────────────────────
+// ── Phase 2 ──
 import {
   bookCommand, imageCommand, movieCommand, songCommand as songInfoCommand, lyricsCommand,
   coupleppCommand,
 } from './modules/media.js';
 import { pptCommand } from './modules/ppt.js';
-import {
-  chatbotCommand,
-  maybeAutoReply,
-  reminiCommand,
-} from './modules/ai.js';
+import { chatbotCommand, maybeAutoReply, reminiCommand } from './modules/ai.js';
 
-// ── Phase 3: Group + Owner ──────────────────────────────────────────────────
+// ── Phase 3 ──
 import {
   welcomeCommand, goodbyeCommand, kickallCommand, kickccCommand,
   setdescCommand, setgppCommand, approveallCommand, declineallCommand,
@@ -50,14 +46,13 @@ import {
 } from './modules/group.js';
 import { setppCommand, setaboutCommand, chatstatsCommand } from './modules/owner.js';
 
-// ── Phase 4: Downloaders + Social ───────────────────────────────────────────
+// ── Phase 4 ──
 import { gitdlCommand, mfdlCommand } from './modules/downloader.js';
 import { igCommand, tiktokCommand, fbCommand, rmbgCommand } from './modules/social.js';
 
-// ── Phase 5: Presence / Stalk ───────────────────────────────────────────────
+// ── Phase 5 ──
 import { attachPresenceTracker, stalkCommand } from './modules/presence-track.js';
 
-// Commands that are ALWAYS owner-only, even in public mode.
 const CRITICAL_COMMANDS = new Set([
   'ghost', 'peek', 'lurk', 'schedule',
   'kick', 'add', 'promote', 'demote',
@@ -92,7 +87,6 @@ function plainText(msg) {
 
 export async function dispatch(sock, update) {
   attachBackground(sock);
-
   if (update.type && update.type !== 'notify' && update.type !== 'append') return;
 
   for (const msg of update.messages || []) {
@@ -143,7 +137,6 @@ export async function dispatch(sock, update) {
       const verb = (firstSpace === -1 ? withoutPrefix : withoutPrefix.slice(0, firstSpace)).toLowerCase();
       const rest = firstSpace === -1 ? [] : withoutPrefix.slice(firstSpace + 1).trim().split(/\s+/);
 
-      // ── Mode gate ──
       const sender = msg.key.participant || msg.key.remoteJid;
       const senderIsOwner = msg.key.fromMe || isOwner(sender);
       const mode = getMode();
@@ -178,8 +171,8 @@ export async function dispatch(sock, update) {
 
           // ── Download (yt-dlp, all platforms) ──
           case 'dl':
-          case 'download':
-          case 'mp3': await ytdlCommand(sock, chat, msg, rest); break;
+          case 'download': await ytdlCommand(sock, chat, msg, rest); break;
+          case 'mp3': await mp3Command(sock, chat, msg, rest); break;
 
           case 'songinfo': await songInfoCommand(sock, chat, msg, rest); break;
           case 'prefix': await prefixCommand(sock, chat, msg, rest); break;
@@ -288,4 +281,4 @@ export async function dispatchUpdate(sock, update) {
 
 export async function dispatchStatus(sock, payload) {
   try { await lurkTick(sock, payload); } catch (e) { console.error('[dispatchStatus]', e); }
-                                             }
+}
