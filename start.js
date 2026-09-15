@@ -28,8 +28,8 @@ import parsePhoneNumber from 'awesome-phonenumber';
 import { CONFIG } from './config.js';
 import { dispatch, dispatchStatus, dispatchUpdate } from './router.js';
 import { trace } from './modules/debug.js';
-import { startScheduler } from './modules/schedule.js';
-import { startPresenceHeartbeat } from './modules/presence.js';
+import { startScheduler, stopScheduler } from './modules/schedule.js';
+import { startPresenceHeartbeat, stopPresenceHeartbeat } from './modules/presence.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -135,6 +135,10 @@ let pairingRequested = false;
 let notifiedLinked = false;
 
 function teardownSock() {
+  // stop background loops tied to this socket
+  try { stopPresenceHeartbeat(); } catch {}
+  try { stopScheduler(); }         catch {}
+
   if (!currentSock) return;
   const s = currentSock;
   currentSock = null;
@@ -266,9 +270,6 @@ async function ignite() {
     const mod = await import('./core/groupEvents.js').catch(() => null);
     if (mod?.handleGroupParticipantUpdate) mod.handleGroupParticipantUpdate(sock, update);
   });
-
-  // ★ REMOVED: dead `commands/anticall.js` block (feature lives in modules/group.js)
-  // ★ REMOVED: wrong `messages.delete → dispatchStatus` wiring (lurk handles its own events)
 
   sock.ev.on('status.update', async (st) => {
     try { await dispatchStatus(sock, st); } catch (e) {
