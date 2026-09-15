@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/song.js
 // .song  →  SoundCloud → Apple Music → Deezer
-// (full-length audio via lib/music-sources.js)
+// (full-length audio, always MP3, in memory)
 // ─────────────────────────────────────────────
 import PQueue from 'p-queue';
 import { fetchAudioFromAnySource } from '../lib/music-sources.js';
@@ -29,27 +29,20 @@ export async function songCommand(sock, chat, msg, args) {
 
     try {
       const result = await fetchAudioFromAnySource(
-        query,
-        MAX_BYTES,
-        (t) => edit(sock, chat, status, t)
+        query, MAX_BYTES, (t) => edit(sock, chat, status, t)
       );
 
-      if (!result?.buffer?.length) throw new Error('empty buffer from source');
-
       const safeName = (query.replace(/[^\w\s-]/g, '').slice(0, 50).trim() || 'audio');
-      const ext = result.format || 'mp3';
 
       await sock.sendMessage(chat, {
         audio: result.buffer,
-        mimetype: result.mimetype || 'audio/mpeg',
-        fileName: `${safeName}.${ext}`,
+        mimetype: 'audio/mpeg',
+        fileName: `${safeName}.mp3`,
         ptt: false,
       }, { quoted: msg });
 
-      await edit(
-        sock, chat, status,
-        `✅ *Done via ${result.provider}*\n_${result.title}${result.artist ? ' — ' + result.artist : ''}_`
-      );
+      await edit(sock, chat, status,
+        `✅ *Done via ${result.provider}*\n_${result.title}${result.artist ? ' — ' + result.artist : ''}_`);
       await react(sock, chat, msg, '☑');
     } catch (e) {
       console.error('[song]', e.message);
