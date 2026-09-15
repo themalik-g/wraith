@@ -8,10 +8,6 @@ import { isOwner } from '../core/identity.js';
 import { getMode } from './utility.js';
 import { chunkText } from '../lib/net.js';
 
-// ─────────────────────────────────────────────
-// Command catalog — grouped for readability.
-// Each entry: [command, short description]
-// ─────────────────────────────────────────────
 function catalog() {
   return {
     '🛡️ core': [
@@ -27,7 +23,7 @@ function catalog() {
       ['ghost', 'ghost-mode configuration'],
       ['peek', 'reveal view-once / deleted media'],
       ['lurk', 'watch status updates'],
-      ['schedule', 'schedule messages (reply to media to schedule it)'],
+      ['schedule', 'schedule text or media for later (reply to schedule it)'],
     ],
     '🔧 utility': [
       ['currency <from> <to> [amount]', 'live exchange rate (aliases ok)'],
@@ -39,13 +35,13 @@ function catalog() {
     ],
     '📚 media': [
       ['book <query>', 'search Project Gutenberg / Open Library'],
-      ['book dl <id>', 'download a book'],
+      ['book dl <number>', 'download from last search results'],
       ['img <query> [count]', 'stock images (max 10)'],
       ['couplepp [count]', 'couple profile pictures (max 5)'],
       ['movie <title>', 'movie info'],
-      ['song <title> [artist]', 'song info'],
+      ['songinfo <title> [artist]', 'song info (Deezer/MusicBrainz)'],
       ['lyrics <artist> - <title>', 'song lyrics'],
-      ['ppt <topic>', 'presentation outline'],
+      ['ppt <topic>', 'download a .pptx presentation'],
       ['rmbg', 'reply to image — remove background'],
     ],
     '⬇️ downloaders': [
@@ -62,6 +58,7 @@ function catalog() {
     '🤖 ai': [
       ['chatbot', 'show chatbot status'],
       ['chatbot on / off', 'enable/disable auto-reply'],
+      ['chatbot groups on / off', 'reply in groups when @mentioned'],
       ['chatbot set <instructions>', 'set custom AI instructions'],
     ],
     '👥 group admin': [
@@ -83,7 +80,7 @@ function catalog() {
       ['stalk <number>', 'presence tracker for a contact'],
       ['stalk list', 'list tracked contacts'],
       ['stalk stop <number>', 'stop tracking a contact'],
-      ['chatstats <number>', 'chat statistics'],
+      ['chatstats <number>', 'chat statistics across groups'],
     ],
     '💬 chat controls': [
       ['mute [8h|1d|forever]', 'mute this chat'],
@@ -105,9 +102,6 @@ async function sendChunked(sock, chat, msg, text) {
   for (const p of chunkText(text, 3800)) await sock.sendMessage(chat, { text: p }, { quoted: msg });
 }
 
-// ─────────────────────────────────────────────
-// .help / .menu  [category]
-// ─────────────────────────────────────────────
 export async function helpCommand(sock, chat, msg, args) {
   try {
     const prefix = getPrefix();
@@ -116,7 +110,6 @@ export async function helpCommand(sock, chat, msg, args) {
     const mode = getMode();
     const all = catalog();
 
-    // Owner-only command set — used to tag/hide entries for non-owner in public mode.
     const OWNER_ONLY_VERBS = new Set([
       'ghost', 'peek', 'lurk', 'schedule',
       'kickall', 'kickcc', 'setdesc', 'setgpp',
@@ -128,7 +121,6 @@ export async function helpCommand(sock, chat, msg, args) {
       'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
     ]);
 
-    // Filter catalogue if user is not owner in public mode
     function filterForViewer(groups) {
       if (isOwnerUser) return groups;
       const out = {};
@@ -142,7 +134,6 @@ export async function helpCommand(sock, chat, msg, args) {
       return out;
     }
 
-    // Optional: a specific category requested
     const requested = (args || []).join(' ').trim().toLowerCase();
     let groupsToShow = filterForViewer(all);
 
@@ -154,18 +145,16 @@ export async function helpCommand(sock, chat, msg, args) {
       if (match) {
         groupsToShow = { [match]: groupsToShow[match] };
       } else {
-        // no exact category — show list of categories
         const lines = [
-          `📖 *help* — no category matching “${requested}”`,
+          `📖 *help* — no category matching "${requested}"`,
           '',
           '*Available categories:*',
-          ...Object.keys(all).map((k) => `• ${k}  _(use_ \`${prefix}help ${k.replace(/[^\w\s]/g, '').trim()}\`_`)`,
+          ...Object.keys(all).map((k) => `• ${k}  _(use_ \`${prefix}help ${k.replace(/[^\w\s]/g, '').trim()}\`_)`),
         ];
         return sendChunked(sock, chat, msg, lines.join('\n'));
       }
     }
 
-    // Header
     const lines = [];
     lines.push(`╭━━━〔 *${CONFIG.botName || 'WRAITH'}* 〕━━━╮`);
     lines.push(`│  v${CONFIG.version || '1.3.2'} · mode *${mode}*`);
@@ -174,7 +163,6 @@ export async function helpCommand(sock, chat, msg, args) {
     lines.push(`╰━━━━━━━━━━━━━━━━━━╯`);
     lines.push('');
 
-    // If no specific category: show condensed overview + category list
     if (!requested) {
       lines.push('*categories:*');
       for (const [name, cmds] of Object.entries(groupsToShow)) {
@@ -184,7 +172,6 @@ export async function helpCommand(sock, chat, msg, args) {
       lines.push(`_Type_ \`${prefix}help <category>\` _for details._`);
       lines.push(`_Example:_ \`${prefix}help media\``);
 
-      // Owner quick access — dump everything if owner and no filter, in chunks
       if (isOwnerUser) {
         lines.push('');
         lines.push('_Owner: showing all categories below._');
@@ -201,7 +188,6 @@ export async function helpCommand(sock, chat, msg, args) {
       return sendChunked(sock, chat, msg, lines.join('\n'));
     }
 
-    // Specific category view
     for (const [name, cmds] of Object.entries(groupsToShow)) {
       lines.push(`— *${name}* —`);
       for (const [cmd, desc] of cmds) {
