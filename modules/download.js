@@ -1,360 +1,262 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/download.js
-// .song → SoundCloud → Deezer → Apple Music
-//         + MP3 conversion for compatibility
-// .dl   → non-YouTube platforms via @choewy/yt-dlp
+// .song → @snwfdhmp/soundcloud-downloader (priority)
+//      → yt-dlp (fallback, live % edits)
+//      → final ☑ green tick react
 // ─────────────────────────────────────────────
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawn } = require('child_process');
 
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
-import { createRequire } from 'node:module';
-import { YtDlp } from '@choewy/yt-dlp';
-import { isOwner } from '../core/identity.js';
-import {
-    fetchAudioFromAnySource,
-    detectAudioFormat,
-    convertToMp3,
-} from '../lib/music-sources.js';
-
-const require = createRequire(import.meta.url);
-
-const AUDIO_MAX_BYTES = 15 * 1024 * 1024;
-const VIDEO_MAX_BYTES = 128 * 1024 * 1024;
-const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;
-
-// ─── Queue ───
-const _queue = [];
-let _running = false;
-
-function enqueue(task) {
-    return new Promise((resolve, reject) => {
-        _queue.push({ task, resolve, reject });
-        _drain();
-    });
+// SoundCloud downloader (scoped fork)
+let scdl;
+try {
+  scdl = require('@snwfdhmp/soundcloud-downloader');
+  scdl = scdl.default || scdl;
+} catch (e) {
+  console.warn('[song] @snwfdhmp/soundcloud-downloader not loaded:', e.message);
+  scdl = null;
 }
 
+const TMP_DIR = path.join(os.tmpdir(), 'wraith-song');
+if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+
+const AUDIO_MAX_BYTES = 15 * 1024 * 1024;
+
+// ─── Serial queue ───
+const _queue = [];
+let _running = false;
+function enqueue(task) {
+  return new Promise((resolve, reject) => {
+    _queue.push({ task, resolve, reject });
+    _drain();
+  });
+}
 async function _drain() {
-    if (_running) return;
-    const next = _queue.shift();
-    if (!next) return;
-    _running = true;
-    try {
-        next.resolve(await next.task());
-    } catch (e) {
-        next.reject(e);
-    } finally {
-        _running = false;
-        setImmediate(_drain);
-    }
+  if (_running) return;
+  const next = _queue.shift();
+  if (!next) return;
+  _running = true;
+  try { next.resolve(await next.task()); }
+  catch (e) { next.reject(e); }
+  finally { _running = false; setImmediate(_drain); }
 }
 
 // ─── Helpers ───
 async function react(sock, chat, msg, emoji) {
+  try { await sock.sendMessage(chat, { react: { text: emoji, key: msg.key } }); } catch {}
+}
+async function editMessage(sock, chat, key, text) {
+  try { await sock.sendMessage(chat, { text, edit: key.key }); } catch {}
+}
+function progressBar(pct) {
+  const filled = Math.max(0, Math.min(20, Math.round(pct / 5)));
+  return '█'.repeat(filled) + '░'.repeat(20 - filled);
+}
+function cleanFile(p) { try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch {} }
+function newestMp3(dir) {
+  const files = fs.readdirSync(dir)
+    .filter(f => f.toLowerCase().endsWith('.mp3'))
+    .map(f => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+    .sort((a, b) => b.t - a.t);
+  return files[0] ? path.join(dir, files[0].f) : null;
+}
+
+// ─── SoundCloud client_id scrape ───
+let _cachedClientId = null;
+async function getSoundcloudClientId() {
+  if (_cachedClientId) return _cachedClientId;
+
+  const res = await fetch('https://soundcloud.com', {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+  });
+  const html = await res.text();
+
+  const candidates = [
+    ...[...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map(m => m[1]),
+    ...[...html.matchAll(/https:\/\/a-v2\.sndcdn\.com\/assets\/[^"']+\.js/g)].map(m => m[0])
+  ];
+
+  for (const src of candidates) {
+    const full = src.startsWith('http') ? src : `https://soundcloud.com${src}`;
     try {
-        await sock.sendMessage(chat, { react: { text: emoji, key: msg.key } });
+      const js = await (await fetch(full)).text();
+      const m = js.match(/client_id\s*[:=]\s*["']([a-zA-Z0-9]{20,})["']/);
+      if (m) {
+        _cachedClientId = m[1];
+        return _cachedClientId;
+      }
     } catch {}
+  }
+  throw new Error('Could not extract SoundCloud client_id');
 }
 
-function withTimeout(promise, ms, label = 'operation') {
-    let timer;
-    return Promise.race([
-        promise.finally(() => clearTimeout(timer)),
-        new Promise((_, rej) => {
-            timer = setTimeout(
-                () => rej(new Error(`${label} timeout after ${ms / 1000}s`)),
-                ms
-            );
-        }),
-    ]);
+async function searchSoundcloud(query) {
+  const clientId = await getSoundcloudClientId();
+  const url =
+    `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}` +
+    `&client_id=${clientId}&limit=1&app_locale=en`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0' }
+  });
+  if (!res.ok) throw new Error(`SoundCloud search HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data.collection || !data.collection.length) return null;
+  return data.collection[0];
 }
 
-function isYouTubeUrl(u) {
-    return /(?:youtube\.com|youtu\.be)/i.test(u);
+// ─── SoundCloud download path ───
+async function downloadViaSoundcloud(query, outFile) {
+  if (!scdl) throw new Error('soundcloud-downloader not installed');
+
+  const track = await searchSoundcloud(query);
+  if (!track || !track.permalink_url) throw new Error('No SoundCloud result');
+
+  const stream = await scdl.download(track.permalink_url);
+  await new Promise((resolve, reject) => {
+    const ws = fs.createWriteStream(outFile);
+    stream.pipe(ws);
+    stream.on('error', reject);
+    ws.on('finish', resolve);
+    ws.on('error', reject);
+  });
+
+  if (!fs.existsSync(outFile) || fs.statSync(outFile).size < 1024) {
+    throw new Error('SoundCloud download produced empty file');
+  }
+  return track;
 }
 
-// ─── Send audio (with MP3 conversion) ───
-async function sendAudio(sock, chat, msg, result) {
-    const title = result.title || 'song';
-    const artist = result.artist || '';
-    const safeTitle = title.replace(/[^\w\s-]/g, '').trim() || 'song';
-    const displayName = artist ? `${artist} - ${title}` : title;
-
-    if (!result.buffer || result.buffer.length < 2000) {
-        throw new Error('downloaded audio is empty or too small');
-    }
-
-    // Send artwork first (best-effort)
-    if (result.artwork) {
-        try {
-            await sock
-                .sendMessage(
-                    chat,
-                    {
-                        image: { url: result.artwork },
-                        caption: `🎵 *${displayName}*\n_Source: ${result.provider}_`,
-                    },
-                    { quoted: msg }
-                )
-                .catch(() => {});
-        } catch {}
-    }
-
-    // Detect actual format from buffer
-    const detected = detectAudioFormat(result.buffer);
-
-    let sendBuffer = result.buffer;
-    let sendExt = detected.ext;
-    let sendMime = detected.mime;
-
-    // Always convert to MP3 for WhatsApp compatibility
-    if (detected.ext !== 'mp3') {
-        try {
-            console.log(`[audio] converting ${detected.ext} → mp3...`);
-            sendBuffer = await convertToMp3(result.buffer, detected.ext);
-            sendExt = 'mp3';
-            sendMime = 'audio/mpeg';
-            console.log(`[audio] conversion complete: ${sendBuffer.length} bytes`);
-        } catch (e) {
-            console.warn('[audio] MP3 conversion failed, sending original:', e.message);
-        }
-    }
-
-    console.log(`[audio] sending ${sendExt} (${sendMime}) — ${sendBuffer.length} bytes`);
-
-    await sock.sendMessage(
-        chat,
-        {
-            audio: sendBuffer,
-            mimetype: sendMime,
-            fileName: `${safeTitle}.${sendExt}`,
-            ptt: false,
-        },
-        { quoted: msg }
-    );
-
-    await react(sock, chat, msg, '✅');
-}
-
-// ─── .song ───
-export async function songCommand(sock, chat, msg, args) {
-    return enqueue(async () => {
-        try {
-            const from = msg?.key?.participant || msg?.key?.remoteJid;
-            if (!msg?.key?.fromMe && !isOwner(from)) {
-                await react(sock, chat, msg, '❌');
-                return sock.sendMessage(
-                    chat,
-                    { text: '⛔ Owner only.' },
-                    { quoted: msg }
-                );
-            }
-
-            const query = Array.isArray(args) ? args.join(' ').trim() : '';
-
-            if (!query) {
-                await react(sock, chat, msg, '❌');
-                return sock.sendMessage(
-                    chat,
-                    {
-                        text: [
-                            '* WRAITH · SONG*',
-                            '',
-                            'Usage: `.song <song name>`',
-                            '',
-                            'Partial names work — e.g. `.song shape of`',
-                            'Sources: SoundCloud → Deezer → Apple Music',
-                        ].join('\n'),
-                    },
-                    { quoted: msg }
-                );
-            }
-
-            const onStatus = (s) =>
-                sock
-                    .sendMessage(chat, { text: s }, { quoted: msg })
-                    .catch(() => {});
-
-            const result = await fetchAudioFromAnySource(
-                query,
-                AUDIO_MAX_BYTES,
-                onStatus
-            );
-
-            return sendAudio(sock, chat, msg, result);
-        } catch (err) {
-            console.error('[song] error:', err?.message);
-            await react(sock, chat, msg, '❌');
-            await sock
-                .sendMessage(
-                    chat,
-                    {
-                        text:
-                            `❌ Couldn't find that song.\n` +
-                            `Tried SoundCloud, Deezer, and Apple Music.\n` +
-                            `_${String(err?.message || err).slice(0, 160)}_`,
-                    },
-                    { quoted: msg }
-                )
-                .catch(() => {});
-        }
+// ─── yt-dlp fallback ───
+function runYtDlp(query, outFile, onProgress) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      `scsearch1:${query}`,
+      '-x',
+      '--audio-format', 'mp3',
+      '--audio-quality', '0',
+      '--newline',
+      '--no-playlist',
+      '--force-overwrites',
+      '-o', outFile
+    ];
+    const proc = spawn('yt-dlp', args);
+    let err = '';
+    proc.stdout.on('data', chunk => {
+      const m = chunk.toString().match(/\[download\]\s+([\d.]+)%/);
+      if (m && onProgress) onProgress(parseFloat(m[1]));
     });
+    proc.stderr.on('data', d => { err += d.toString(); });
+    proc.on('error', e => reject(new Error(`yt-dlp not found: ${e.message}`)));
+    proc.on('close', code => {
+      if (code === 0) resolve();
+      else reject(new Error(err.slice(-200) || `yt-dlp exited ${code}`));
+    });
+  });
 }
 
-// ─── .dl (non-YouTube only) ───
-export async function downloadCommand(sock, chat, msg, args) {
-    const from = msg?.key?.participant || msg?.key?.remoteJid;
-    if (!msg?.key?.fromMe && !isOwner(from)) {
-        await react(sock, chat, msg, '❌');
-        return sock.sendMessage(
-            chat,
-            { text: '⛔ Owner only.' },
-            { quoted: msg }
-        );
-    }
+// ─── Main handler ───
+async function songCommand(sock, chat, msg, args) {
+  const query = (args || []).join(' ').trim();
+  if (!query) {
+    return sock.sendMessage(chat, {
+      text: '❌ Usage: `.song <song name>`'
+    }, { quoted: msg });
+  }
 
-    const arr = Array.isArray(args) ? [...args] : [];
-    const urlIdx = arr.findIndex((p) => /^https?:\/\//i.test(p));
+  return enqueue(async () => {
+    const status = await sock.sendMessage(chat, {
+      text: `🎵 *Searching:* ${query}`
+    }, { quoted: msg });
 
-    if (urlIdx === -1) {
-        await react(sock, chat, msg, '❌');
-        return sock.sendMessage(
-            chat,
-            {
-                text: [
-                    '* WRAITH · DOWNLOAD*',
-                    '',
-                    'Supported (via yt-dlp):',
-                    'Instagram, TikTok, X, Vimeo, Facebook, Reddit,',
-                    'Pinterest, LinkedIn, Snapchat, Twitch, Dailymotion,',
-                    'SoundCloud, Bandcamp, and 1000+ more.',
-                    '',
-                    'Usage:',
-                    '• `.dl <url>` — auto (video)',
-                    '• `.dl audio <url>` — audio only',
-                    '• `.dl mp3 <url>` — mp3',
-                    '',
-                    '⚠️ YouTube is not supported. Use `.song <name>`.',
-                ].join('\n'),
-            },
-            { quoted: msg }
-        );
-    }
-
-    const url = arr.splice(urlIdx, 1)[0];
-
-    if (isYouTubeUrl(url)) {
-        await react(sock, chat, msg, '❌');
-        return sock.sendMessage(
-            chat,
-            {
-                text:
-                    '❌ YouTube is not supported.\n' +
-                    'Use `.song <song name>` to fetch music.',
-            },
-            { quoted: msg }
-        );
-    }
-
-    let mode = 'video';
-    let container = 'mp4';
-
-    for (const p of arr.map((x) => String(x).toLowerCase())) {
-        if (p === 'audio' || p === 'a') { mode = 'audio'; container = 'm4a'; }
-        else if (p === 'mp3') { mode = 'audio'; container = 'mp3'; }
-        else if (p === 'm4a') { mode = 'audio'; container = 'm4a'; }
-        else if (p === 'video' || p === 'v') { mode = 'video'; container = 'mp4'; }
-    }
-
-    return downloadViaYtDlp(sock, chat, msg, url, mode, container);
-}
-
-// ─── Non-YouTube download via @choewy/yt-dlp ───
-async function downloadViaYtDlp(sock, chat, msg, url, mode, container) {
-    const prefix = `wraith_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    const outTemplate = path.join(os.tmpdir(), `${prefix}.%(ext)s`);
+    let outFile = null;
+    let usedSource = null;
 
     try {
-        await sock.sendMessage(chat, { text: '⏳ downloading…' }, { quoted: msg });
+      // ── Step 1: SoundCloud (priority) ──
+      await editMessage(sock, chat, status,
+        `🎵 *Searching SoundCloud…*`);
 
-        const ytDlp = new YtDlp({
-            url,
-            output: outTemplate,
-            format:
-                mode === 'audio'
-                    ? 'bestaudio/best'
-                    : 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            quiet: true,
-            noWarnings: true,
-            noProgress: true,
-            playlist: false,
-            retries: 3,
+      outFile = path.join(TMP_DIR, `wraith-${Date.now()}.mp3`);
+      let soundcloudOk = false;
+
+      try {
+        await editMessage(sock, chat, status,
+          `🎵 *Downloading from SoundCloud…*`);
+        const track = await downloadViaSoundcloud(query, outFile);
+        soundcloudOk = true;
+        usedSource = 'SoundCloud';
+        await editMessage(sock, chat, status,
+          `🎵 *Downloaded from SoundCloud ✅*\n\n_${(track.title || query).slice(0, 60)}_`);
+      } catch (scErr) {
+        console.warn('[song] SoundCloud failed:', scErr.message);
+        cleanFile(outFile);
+        outFile = null;
+      }
+
+      // ── Step 2: yt-dlp fallback with live progress ──
+      if (!soundcloudOk) {
+        usedSource = 'yt-dlp';
+        outFile = path.join(TMP_DIR, `wraith-${Date.now()}.mp3`);
+
+        await editMessage(sock, chat, status,
+          `🎵 *Downloading using yt-dlp…*\n\n[${progressBar(0)}] 0%`);
+
+        let lastPct = -1;
+        await runYtDlp(query, outFile, async (pct) => {
+          if (pct - lastPct < 5 && pct < 100) return;
+          lastPct = pct;
+          await editMessage(sock, chat, status,
+            `🎵 *Downloading using yt-dlp…*\n\n[${progressBar(pct)}] ${pct.toFixed(1)}%`);
         });
 
-        const builder =
-            mode === 'audio'
-                ? ytDlp.audioFormat(container).audio()
-                : ytDlp.mergeFormat('mp4').video();
+        await editMessage(sock, chat, status,
+          `🎵 *Downloaded ✅*\n\nNow converting to MP3…`);
 
-        const result = await withTimeout(
-            builder.download(),
-            DOWNLOAD_TIMEOUT_MS,
-            'yt-dlp download'
-        );
-        const outFile = result?.path;
-
-        if (!outFile || !fs.existsSync(outFile)) throw new Error('no output file produced');
-
-        const stat = fs.statSync(outFile);
-        const cap = mode === 'audio' ? AUDIO_MAX_BYTES : VIDEO_MAX_BYTES;
-        if (stat.size > cap) {
-            try { fs.unlinkSync(outFile); } catch {}
-            throw new Error(`File too large (${(stat.size / 1048576).toFixed(1)} MB)`);
+        if (!fs.existsSync(outFile)) {
+          const alt = newestMp3(TMP_DIR);
+          if (!alt) throw new Error('No output file from yt-dlp');
+          if (alt !== outFile) fs.renameSync(alt, outFile);
         }
 
-        const stream = fs.createReadStream(outFile);
-        const cleanup = () => { try { fs.unlinkSync(outFile); } catch {} };
-        stream.on('close', cleanup);
-        stream.on('error', cleanup);
+        await editMessage(sock, chat, status,
+          `🎵 *Downloaded ✅*\n*Converted to MP3 ✅*\n\nUploading…`);
+      }
 
-        const filename = path.basename(outFile);
-
-        if (mode === 'audio') {
-            await sock.sendMessage(
-                chat,
-                {
-                    audio: { stream },
-                    mimetype: 'audio/mpeg',
-                    fileName: filename,
-                    ptt: false,
-                },
-                { quoted: msg }
-            );
-        } else {
-            await sock.sendMessage(
-                chat,
-                {
-                    video: { stream },
-                    mimetype: 'video/mp4',
-                    fileName: filename,
-                    caption: filename,
-                },
-                { quoted: msg }
-            );
-        }
-
-        await react(sock, chat, msg, '✅');
-    } catch (err) {
-        console.error('[dl] error:', err?.message);
+      // ── Step 3: size check ──
+      const stat = fs.statSync(outFile);
+      if (stat.size > AUDIO_MAX_BYTES) {
+        const mb = (stat.size / 1024 / 1024).toFixed(2);
+        await editMessage(sock, chat, status,
+          `⚠️ File too big (${mb} MB). WhatsApp limit ~15 MB.`);
         await react(sock, chat, msg, '❌');
-        await sock
-            .sendMessage(
-                chat,
-                {
-                    text: `❌ Download failed.\n${String(err?.message || err).slice(0, 180)}`,
-                },
-                { quoted: msg }
-            )
-            .catch(() => {});
+        cleanFile(outFile);
+        return;
+      }
+
+      // ── Step 4: send ──
+      const buffer = fs.readFileSync(outFile);
+      const safeName = query.replace(/[^\w\s-]/g, '').slice(0, 50).trim() || 'audio';
+
+      await sock.sendMessage(chat, {
+        audio: buffer,
+        mimetype: 'audio/mpeg',
+        fileName: `${safeName}.mp3`,
+        ptt: false
+      }, { quoted: msg });
+
+      await editMessage(sock, chat, status, `✅ *Done via ${usedSource}*`);
+      await react(sock, chat, msg, '☑');
+      cleanFile(outFile);
+
+    } catch (err) {
+      console.error('[song]', err.message);
+      await editMessage(sock, chat, status, `❌ *Failed:* ${err.message}`);
+      await react(sock, chat, msg, '❌');
+      if (outFile) cleanFile(outFile);
     }
+  });
 }
+
+module.exports = { songCommand };
