@@ -14,7 +14,8 @@ import { presenceCommand, shouldReadReceipts, applyAutoPresence } from './module
 import { activityCommand, trackActivity } from './modules/activity.js';
 import { updateCommand } from './modules/update.js';
 import { prefixCommand } from './modules/prefix.js';
-import { downloadCommand, songCommand as dlSongCommand } from './modules/download.js';
+import { downloadCommand } from './modules/download.js';
+import { songCommand as dlSongCommand } from './modules/song.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 import { getPrefix } from './core/settings.js';
 import { isOwner } from './core/identity.js';
@@ -29,9 +30,15 @@ import {
 // ── Phase 2: Media + AI ─────────────────────────────────────────────────────
 import {
   bookCommand, imageCommand, movieCommand, songCommand as songInfoCommand, lyricsCommand,
-  pptCommand, coupleppCommand,
+  coupleppCommand,
 } from './modules/media.js';
-import { chatbotCommand, maybeAutoReply } from './modules/ai.js';
+import { pptCommand } from './modules/ppt.js';
+import {
+  chatbotCommand,
+  maybeAutoReply,
+  rmbgCommand,
+  reminiCommand,
+} from './modules/ai.js';
 
 // ── Phase 3: Group + Owner ──────────────────────────────────────────────────
 import {
@@ -45,7 +52,7 @@ import { setppCommand, setaboutCommand, chatstatsCommand } from './modules/owner
 
 // ── Phase 4: Downloaders + Social ───────────────────────────────────────────
 import { gitdlCommand, mfdlCommand } from './modules/downloader.js';
-import { igCommand, tiktokCommand, fbCommand, rmbgCommand } from './modules/social.js';
+import { igCommand, tiktokCommand, fbCommand } from './modules/social.js';
 
 // ── Phase 5: Presence / Stalk ───────────────────────────────────────────────
 import { attachPresenceTracker, stalkCommand } from './modules/presence-track.js';
@@ -61,12 +68,10 @@ const CRITICAL_COMMANDS = new Set([
   'approveall', 'declineall', 'leave', 'join',
   'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
   'rejectcalls', 'setpp', 'setabout', 'chatstats',
-  'ig', 'tiktok', 'fb', 'rmbg',
+  'ig', 'tiktok', 'fb', 'rmbg', 'remini',
   'gitdl', 'mfdl', 'chatbot',
 ]);
 
-// ★ FIX: attach background listeners PER SOCKET, not once per process.
-//        A reconnect creates a NEW socket — WeakSet lets us re-attach safely.
 const attachedSockets = new WeakSet();
 function attachBackground(sock) {
   if (!sock || attachedSockets.has(sock)) return;
@@ -86,7 +91,6 @@ function plainText(msg) {
 }
 
 export async function dispatch(sock, update) {
-  // ★ FIX: per-socket attach (survives reconnects)
   attachBackground(sock);
 
   if (update.type && update.type !== 'notify' && update.type !== 'append') return;
@@ -126,7 +130,8 @@ export async function dispatch(sock, update) {
 
       const text = plainText(msg);
       const prefix = getPrefix();
-      // ★ FIX: non-command messages now go to the auto-chatbot instead of being dropped
+
+      // Non-command messages → chatbot auto-reply (only fires when .chatbot on in that chat)
       if (!text.startsWith(prefix)) {
         try { await maybeAutoReply(sock, chat, msg); } catch (e) { console.error('[router] chatbot', e.message); }
         continue;
@@ -139,7 +144,7 @@ export async function dispatch(sock, update) {
       const verb = (firstSpace === -1 ? withoutPrefix : withoutPrefix.slice(0, firstSpace)).toLowerCase();
       const rest = firstSpace === -1 ? [] : withoutPrefix.slice(firstSpace + 1).trim().split(/\s+/);
 
-      // ── Mode gate ──────────────────────────────────────────────────────
+      // ── Mode gate ──
       const sender = msg.key.participant || msg.key.remoteJid;
       const senderIsOwner = msg.key.fromMe || isOwner(sender);
       const mode = getMode();
@@ -151,12 +156,11 @@ export async function dispatch(sock, update) {
         }
       }
 
-      // ★ Only react for verbs the router actually knows
       const KNOWN = new Set([...CRITICAL_COMMANDS,
         'dl', 'download', 'song', 'songinfo', 'help', 'menu', 'ping',
         'currency', 'qr', 'define', 'weather', 'pwned', 'owner', 'script', 'repo',
         'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
-        'welcome', 'goodbye', 'getpp',
+        'welcome', 'goodbye', 'getpp', 'remini',
       ]);
       if (KNOWN.has(verb)) {
         try { await sock.sendMessage(chat, { react: { text: '⌛', key: msg.key } }); } catch (e) { console.error('[router] react', e.message); }
@@ -240,6 +244,7 @@ export async function dispatch(sock, update) {
           case 'tiktok': await tiktokCommand(sock, chat, msg, rest); break;
           case 'fb': await fbCommand(sock, chat, msg, rest); break;
           case 'rmbg': await rmbgCommand(sock, chat, msg, rest); break;
+          case 'remini': await reminiCommand(sock, chat, msg, rest); break;
 
           // ── Phase 5 ──
           case 'stalk': await stalkCommand(sock, chat, msg, rest); break;
@@ -254,13 +259,11 @@ export async function dispatch(sock, update) {
   }
 }
 
-// ★ Kept for backward compatibility — chatbot now runs inside dispatch directly
 export async function maybeAutoChatbot(sock, chat, msg) {
   try { return await maybeAutoReply(sock, chat, msg); } catch { return false; }
 }
 
 export async function dispatchUpdate(sock, update) {
-  // ★ FIX: messages.update emits an ARRAY — handle every entry
   const list = Array.isArray(update) ? update : [update];
   for (const u of list) {
     try {
