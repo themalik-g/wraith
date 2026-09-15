@@ -1,25 +1,26 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/utility.js
-// Phase 1 utility commands + presence tracker.
-// All handlers are crash-safe: the router wraps them, and each has internal
-// try/catch so a single bad reply never kills the process.
+// Phase 1 utility commands + presence tracker backbone.
+// All handlers crash-safe.
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import { isOwner, ownerJid } from '../core/identity.js';
 import { readJson, writeJsonAtomic } from '../core/state-io.js';
 import { vaultPath, dropFromVault } from '../core/vault.js';
 import { CONFIG } from '../config.js';
-import { httpGetJson, httpGetText, raceApis, downloadToFile, withTempFile, chunkText } from '../lib/net.js';
+import { chunkText, withTempFile } from '../lib/net.js';
+import {
+  fetchCurrency, defineWord, fetchWeather, checkPwned,
+  generateQr, decodeQr,
+} from '../lib/apis.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MODE_FILE = path.join(here, '..', 'state', 'mode.json');
-const PRESENCE_FILE = path.join(here, '..', 'state', 'presence-track.json');
 
-// ── Mode (feature #18) ─────────────────────────────────────────────────────
+// ── Mode ────────────────────────────────────────────────────────────────────
 export function getMode() {
   const m = readJson(MODE_FILE, { mode: 'private' });
   return m.mode === 'public' ? 'public' : 'private';
@@ -28,7 +29,7 @@ export function setMode(mode) {
   writeJsonAtomic(MODE_FILE, { mode: mode === 'public' ? 'public' : 'private' });
 }
 
-// ── Shared helpers ─────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────
 function fromOf(msg) {
   return msg.key.participant || msg.key.remoteJid;
 }
@@ -40,12 +41,8 @@ function ownerOnly(sock, chat, msg) {
   }
   return false;
 }
-function splitLong(text) {
-  return chunkText(text, 3800);
-}
 async function sendChunked(sock, chat, msg, text) {
-  const parts = splitLong(text);
-  for (const p of parts) {
+  for (const p of chunkText(text, 3800)) {
     await sock.sendMessage(chat, { text: p }, { quoted: msg });
   }
 }
@@ -62,108 +59,63 @@ async function downloadQuotedMedia(msg) {
   return { buffer: Buffer.concat(chunks), kind, mimetype: node.mimetype || 'image/png' };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// .currency <from> <to> [amount]
-// ─────────────────────────────────────────────────────────────────────────────
+// ── .currency ───────────────────────────────────────────────────────────────
+const ALIASES = {
+  pakistan: 'PKR', pkr: 'PKR', india: 'INR', inr: 'INR', nepal: 'NPR', npr: 'NPR',
+  usa: 'USD', us: 'USD', america: 'USD', usd: 'USD',
+  uk: 'GBP', gb: 'GBP', gbp: 'GBP', britain: 'GBP', england: 'GBP',
+  uae: 'AED', aed: 'AED', emirates: 'AED', saudi: 'SAR', sar: 'SAR', ksa: 'SAR',
+  euro: 'EUR', eur: 'EUR', europe: 'EUR', japan: 'JPY', jpy: 'JPY',
+  china: 'CNY', cny: 'CNY', bangladesh: 'BDT', bdt: 'BDT', srilanka: 'LKR', lkr: 'LKR',
+  canada: 'CAD', cad: 'CAD', australia: 'AUD', aud: 'AUD', turkey: 'TRY', try: 'TRY',
+  malaysia: 'MYR', myr: 'MYR', indonesia: 'IDR', idr: 'IDR',
+  qatar: 'QAR', qar: 'QAR', kuwait: 'KWD', kwd: 'KWD',
+  bahrain: 'BHD', bhd: 'BHD', oman: 'OMR', omr: 'OMR',
+};
+function resolveCurrency(s) {
+  const k = String(s || '').trim().toLowerCase();
+  return ALIASES[k] || k.toUpperCase();
+}
+
 export async function currencyCommand(sock, chat, msg, args) {
   try {
     const [fromRaw, toRaw, amountRaw] = args || [];
     if (!fromRaw || !toRaw) {
       return sock.sendMessage(chat, {
-        text: '💱 *currency*\n\nUsage: `.currency USD PKR 100`\nAliases: country names or ISO codes (USD, PKR, INR, NPR, AED, SAR, GBP, EUR…)',
+        text: '💱 *currency*\n\nUsage: `.currency USD PKR 100`\nAliases: country names or ISO codes.',
       }, { quoted: msg });
     }
     const amount = Number(amountRaw || 1);
     if (!Number.isFinite(amount) || amount <= 0) {
       return sock.sendMessage(chat, { text: '❌ Amount must be a positive number.' }, { quoted: msg });
     }
-
-    // Alias resolution for common country names → ISO codes
-    const ALIASES = {
-      pakistan: 'PKR', pkr: 'PKR',
-      india: 'INR', inr: 'INR', nepal: 'NPR', npr: 'NPR',
-      usa: 'USD', us: 'USD', america: 'USD', usd: 'USD',
-      uk: 'GBP', gb: 'GBP', gbp: 'GBP', britain: 'GBP', england: 'GBP',
-      uae: 'AED', aed: 'AED', emirates: 'AED',
-      saudi: 'SAR', sar: 'SAR', ksa: 'SAR',
-      euro: 'EUR', eur: 'EUR', europe: 'EUR',
-      japan: 'JPY', jpy: 'JPY', china: 'CNY', cny: 'CNY',
-      bangladesh: 'BDT', bdt: 'BDT', srilanka: 'LKR', lkr: 'LKR',
-      canada: 'CAD', cad: 'CAD', australia: 'AUD', aud: 'AUD',
-      turkey: 'TRY', try: 'TRY', malaysia: 'MYR', myr: 'MYR',
-      indonesia: 'IDR', idr: 'IDR', qatar: 'QAR', qar: 'QAR',
-      kuwait: 'KWD', kwd: 'KWD', bahrain: 'BHD', bhd: 'BHD',
-      oman: 'OMR', omr: 'OMR',
-    };
-    const resolve = (s) => {
-      const k = String(s || '').trim().toLowerCase();
-      return ALIASES[k] || k.toUpperCase();
-    };
-    const from = resolve(fromRaw);
-    const to = resolve(toRaw);
-
-    const result = await raceApis(
-      [
-        `https://open.er-api.com/v6/latest/${encodeURIComponent(from)}`,
-        `https://api.exchangerate-api.com/v4/latest/${encodeURIComponent(from)}`,
-        `https://api.frankfurter.app/latest?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
-      ],
-      (d) => {
-        const rates = d?.rates || d?.conversion_rates;
-        return rates && typeof rates[to] === 'number';
-      }
-    );
-
-    if (!result.ok) {
-      return sock.sendMessage(chat, {
-        text: `❌ Could not fetch rates for *${from} → ${to}*.\n_Tried ${result.errors.length} sources._`,
-      }, { quoted: msg });
+    const from = resolveCurrency(fromRaw);
+    const to = resolveCurrency(toRaw);
+    const r = await fetchCurrency(from, to);
+    if (!r.ok) {
+      return sock.sendMessage(chat, { text: `❌ Could not fetch rates for *${from} → ${to}*.` }, { quoted: msg });
     }
-
-    const data = result.data;
-    const rates = data.rates || data.conversion_rates;
-    const rate = rates[to];
+    const rate = r.rate;
     const converted = amount * rate;
-    const updated = data.time_last_update_utc || data.date || data.time_last_updated || 'just now';
-
-    const out = [
-      `💱 *currency exchange*`,
-      '',
-      `*${amount} ${from}*  →  *${converted.toFixed(4)} ${to}*`,
-      `_1 ${from} = ${rate} ${to}_`,
-      `_1 ${to} = ${(1 / rate).toFixed(6)} ${from}_`,
-      '',
-      `_source: ${result.source.split('?')[0].replace('https://', '')}_`,
-      `_updated: ${updated}_`,
-    ].join('\n');
-    await sock.sendMessage(chat, { text: out }, { quoted: msg });
+    await sock.sendMessage(chat, {
+      text: `💱 *currency*\n\n*${amount} ${from}*  →  *${converted.toFixed(4)} ${to}*\n_1 ${from} = ${rate} ${to}_\n_1 ${to} = ${(1 / rate).toFixed(6)} ${from}_\n\n_source: ${r.source.replace('https://', '').split('?')[0]}_`,
+    }, { quoted: msg });
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ currency failed: ${e.message}` }, { quoted: msg }).catch(() => {});
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// .qr <text> | .qr read   (reply to a QR image)
-// ─────────────────────────────────────────────────────────────────────────────
+// ── .qr ─────────────────────────────────────────────────────────────────────
 export async function qrCommand(sock, chat, msg, args) {
   try {
     const a0 = (args?.[0] || '').toLowerCase();
-    const sub = a0 === 'read' ? 'read' : 'generate';
-
-    if (sub === 'read') {
+    if (a0 === 'read') {
       const media = await downloadQuotedMedia(msg).catch(() => null);
       if (!media || media.kind !== 'image') {
         return sock.sendMessage(chat, { text: '❌ Reply to a QR image with `.qr read`.' }, { quoted: msg });
       }
-      const form = new FormData();
-      form.append('file', new Blob([media.buffer], { type: media.mimetype }), 'qr.png');
-      const res = await fetch('https://api.qrserver.com/v1/read-qr-code/', { method: 'POST', body: form });
-      if (!res.ok) throw new Error(`QR read HTTP ${res.status}`);
-      const data = await res.json();
-      const decoded = data?.[0]?.symbol?.[0]?.data;
-      if (!decoded) {
-        return sock.sendMessage(chat, { text: '❌ No QR detected in that image.' }, { quoted: msg });
-      }
+      const { decoded } = await decodeQr(media.buffer, media.mimetype);
+      if (!decoded) return sock.sendMessage(chat, { text: '❌ No QR detected.' }, { quoted: msg });
       return sendChunked(sock, chat, msg, `🔍 *QR decoded*\n\n\`\`\`\n${decoded}\n\`\`\``);
     }
 
@@ -173,22 +125,10 @@ export async function qrCommand(sock, chat, msg, args) {
         text: '📱 *qr*\n\n`.qr <text>` — generate QR\n`.qr read` — reply to a QR image to decode it',
       }, { quoted: msg });
     }
-    const urls = [
-      `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(text)}`,
-      `https://quickchart.io/qr?size=600&text=${encodeURIComponent(text)}`,
-    ];
-    const out = await withTempFile('qr.png', async (dest) => {
-      let lastErr;
-      for (const u of urls) {
-        try {
-          await downloadToFile(u, dest, 5 * 1024 * 1024);
-          return dest;
-        } catch (e) { lastErr = e; }
-      }
-      throw lastErr || new Error('QR generation failed');
-    });
+    const r = await generateQr(text);
+    if (!r.ok) throw new Error('QR generation failed');
     await sock.sendMessage(chat, {
-      image: fs.readFileSync(out),
+      image: r.buffer,
       caption: `📱 QR for: _${text.slice(0, 80)}${text.length > 80 ? '…' : ''}_`,
     }, { quoted: msg });
   } catch (e) {
@@ -196,31 +136,22 @@ export async function qrCommand(sock, chat, msg, args) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// .define <word>
-// ─────────────────────────────────────────────────────────────────────────────
+// ── .define ─────────────────────────────────────────────────────────────────
 export async function defineCommand(sock, chat, msg, args) {
   try {
     const word = (args || []).join(' ').trim();
-    if (!word) {
-      return sock.sendMessage(chat, { text: '📖 *define*\n\nUsage: `.define <word>`' }, { quoted: msg });
-    }
+    if (!word) return sock.sendMessage(chat, { text: '📖 *define*\n\nUsage: `.define <word>`' }, { quoted: msg });
 
-    const result = await raceApis(
-      [
-        `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`,
-        `https://api.dictionaryapi.dev/api/v2/entries/en_US/${encodeURIComponent(word)}`,
-      ],
-      (d) => Array.isArray(d) && d.length > 0 && d[0].meanings
-    );
+    const r = await defineWord(word);
+    if (!r.ok) return sock.sendMessage(chat, { text: `❌ No definition found for *${word}*.` }, { quoted: msg });
 
-    let lines = [];
-    if (result.ok) {
-      const entry = result.data[0];
-      lines.push(`📖 *${entry.word}*${entry.phonetic ? `  _${entry.phonetic}_` : ''}`);
+    const lines = [];
+    if (r.entry) {
+      const e = r.entry;
+      lines.push(`📖 *${e.word}*${e.phonetic ? `  _${e.phonetic}_` : ''}`);
       lines.push('');
       let n = 0;
-      for (const meaning of (entry.meanings || []).slice(0, 4)) {
+      for (const meaning of (e.meanings || []).slice(0, 4)) {
         lines.push(`*${meaning.partOfSpeech}*`);
         for (const def of (meaning.definitions || []).slice(0, 3)) {
           n++;
@@ -229,23 +160,12 @@ export async function defineCommand(sock, chat, msg, args) {
         }
         lines.push('');
       }
-      const syns = entry.meanings.flatMap((m) => m.definitions.flatMap((d) => d.synonyms || [])).slice(0, 10);
+      const syns = e.meanings.flatMap((m) => m.definitions.flatMap((d) => d.synonyms || [])).slice(0, 10);
       if (syns.length) lines.push(`_synonyms:_ ${syns.join(', ')}`);
-    } else {
-      // Fallback: Wiktionary
-      try {
-        const wk = await httpGetJson(`https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(word)}`);
-        const defs = wk?.en?.[0]?.definitions || [];
-        if (defs.length) {
-          lines.push(`📖 *${word}*  _(Wiktionary)_`);
-          lines.push('');
-          defs.slice(0, 5).forEach((d, i) => lines.push(`${i + 1}. ${d.definition.replace(/<[^>]+>/g, '')}`));
-        }
-      } catch {}
-    }
-
-    if (!lines.length) {
-      return sock.sendMessage(chat, { text: `❌ No definition found for *${word}*.` }, { quoted: msg });
+    } else if (r.wiktionary) {
+      lines.push(`📖 *${word}*  _(Wiktionary)_`);
+      lines.push('');
+      r.wiktionary.slice(0, 5).forEach((d, i) => lines.push(`${i + 1}. ${d.definition.replace(/<[^>]+>/g, '')}`));
     }
     await sendChunked(sock, chat, msg, lines.join('\n'));
   } catch (e) {
@@ -253,16 +173,13 @@ export async function defineCommand(sock, chat, msg, args) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// .weather <city>  — warns if rain/storm probability > 50%
-// ─────────────────────────────────────────────────────────────────────────────
+// ── .weather ────────────────────────────────────────────────────────────────
 const STORM_CODES = new Set([95, 96, 99]);
-const RAIN_CODES = new Set([61, 63, 65, 80, 81, 82, 66, 67]);
 function codeLabel(c) {
   if (STORM_CODES.has(c)) return '⛈️ thunderstorm';
-  if (RAIN_CODES.has(c)) return '🌧️ rain';
-  if (c === 71 || c === 73 || c === 75 || c === 77 || c === 85 || c === 86) return '❄️ snow';
-  if (c === 45 || c === 48) return '🌫️ fog';
+  if ([61, 63, 65, 80, 81, 82, 66, 67].includes(c)) return '🌧️ rain';
+  if ([71, 73, 75, 77, 85, 86].includes(c)) return '❄️ snow';
+  if ([45, 48].includes(c)) return '🌫️ fog';
   if (c === 0) return '☀️ clear';
   if (c <= 3) return '🌤️ partly cloudy';
   return '☁️ cloudy';
@@ -271,104 +188,49 @@ function codeLabel(c) {
 export async function weatherCommand(sock, chat, msg, args) {
   try {
     const city = (args || []).join(' ').trim();
-    if (!city) {
-      return sock.sendMessage(chat, { text: '🌦️ *weather*\n\nUsage: `.weather <city>`\nWarns you if rain/storm probability is above 50% in the next few days.' }, { quoted: msg });
-    }
+    if (!city) return sock.sendMessage(chat, { text: '🌦️ *weather*\n\nUsage: `.weather <city>`\nWarns if rain/storm probability > 50%.' }, { quoted: msg });
 
-    // Geocode
-    let lat = null, lon = null, label = city;
-    try {
-      const geo = await httpGetJson(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`);
-      const r = geo?.results?.[0];
-      if (r) { lat = r.latitude; lon = r.longitude; label = `${r.name}, ${r.country || ''}`.trim(); }
-    } catch {}
+    const r = await fetchWeather(city, CONFIG.weather?.stormThreshold || 50);
+    if (!r.ok) return sock.sendMessage(chat, { text: `❌ Could not fetch weather for *${city}*.` }, { quoted: msg });
 
-    let forecastLines = [];
-    let warned = false;
-
-    if (lat !== null && lon !== null) {
-      const fc = await httpGetJson(
-        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-        `&daily=precipitation_probability_max,weathercode,temperature_2m_max,temperature_2m_min` +
-        `&timezone=auto&forecast_days=5`
-      );
-      const d = fc?.daily;
-      if (d?.time) {
-        forecastLines.push(`🌦️ *${label}* — next ${d.time.length} days`);
-        forecastLines.push('');
-        for (let i = 0; i < d.time.length; i++) {
-          const date = d.time[i];
-          const pop = d.precipitation_probability_max?.[i] ?? 0;
-          const wc = d.weathercode?.[i] ?? 0;
-          const tmax = d.temperature_2m_max?.[i];
-          const tmin = d.temperature_2m_min?.[i];
-          const warn = pop >= 50 || STORM_CODES.has(wc) ? ' ⚠️' : '';
-          if (pop >= 50 || STORM_CODES.has(wc)) warned = true;
-          forecastLines.push(`• ${date} — ${codeLabel(wc)}${warn}`);
-          forecastLines.push(`   rain ${pop}% · ${tmin}°C – ${tmax}°C`);
-        }
-      }
-    }
-
-    if (!forecastLines.length) {
-      // Fallback: wttr.in
-      try {
-        const w = await httpGetJson(`https://wttr.in/${encodeURIComponent(city)}?format=j1`);
-        const cur = w?.current_condition?.[0];
-        if (cur) {
-          label = w.nearest_area?.[0]?.areaName?.[0]?.value || city;
-          forecastLines.push(`🌦️ *${label}* — current`);
-          forecastLines.push('');
-          forecastLines.push(`• temp · ${cur.temp_C}°C (feels ${cur.FeelsLikeC}°C)`);
-          forecastLines.push(`• weather · ${cur.weatherDesc?.[0]?.value || '—'}`);
-          forecastLines.push(`• humidity · ${cur.humidity}%`);
-          forecastLines.push(`• wind · ${cur.windspeedKmph} km/h`);
-        }
-      } catch {}
-    }
-
-    if (!forecastLines.length) {
-      return sock.sendMessage(chat, { text: `❌ Could not fetch weather for *${city}*.` }, { quoted: msg });
-    }
-
-    const header = warned
+    const lines = [];
+    const header = r.warned
       ? '⚠️ *WEATHER WARNING* — rain/storm probability above 50% detected.\n'
       : '✅ *weather check* — no heavy rain/storm expected above 50%.\n';
-
-    await sendChunked(sock, chat, msg, header + '\n' + forecastLines.join('\n'));
+    lines.push(header);
+    lines.push(`🌦️ *${r.label}*`);
+    lines.push('');
+    if (r.days) {
+      for (const d of r.days) {
+        const w = d.warn ? ' ⚠️' : '';
+        lines.push(`• ${d.date} — ${codeLabel(d.weathercode)}${w}`);
+        lines.push(`   rain ${d.pop}% · ${d.tmin}°C – ${d.tmax}°C`);
+      }
+    } else if (r.current) {
+      lines.push(`• temp · ${r.current.temp}°C (feels ${r.current.feels}°C)`);
+      lines.push(`• weather · ${r.current.desc}`);
+      lines.push(`• humidity · ${r.current.humidity}%`);
+      lines.push(`• wind · ${r.current.wind} km/h`);
+    }
+    await sendChunked(sock, chat, msg, lines.join('\n'));
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ weather failed: ${e.message}` }, { quoted: msg }).catch(() => {});
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// .pwned <password>   — HIBP k-anonymity check
-// ─────────────────────────────────────────────────────────────────────────────
+// ── .pwned ──────────────────────────────────────────────────────────────────
 export async function pwnedCommand(sock, chat, msg, args) {
   try {
     const pwd = (args || []).join(' ').trim();
-    if (!pwd) {
-      return sock.sendMessage(chat, { text: '🔐 *pwned*\n\nUsage: `.pwned <password>`\nChecks Have I Been Pwned via k-anonymity (your password never leaves this device).' }, { quoted: msg });
-    }
-    const sha1 = crypto.createHash('sha1').update(pwd).digest('hex').toUpperCase();
-    const prefix = sha1.slice(0, 5);
-    const suffix = sha1.slice(5);
-
-    const res = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, {
-      headers: { 'User-Agent': 'WRAITH-Bot/1.0' },
-    });
-    if (!res.ok) throw new Error(`HIBP HTTP ${res.status}`);
-    const body = await res.text();
-    const line = body.split('\n').find((l) => l.startsWith(suffix));
-    const count = line ? parseInt(line.split(':')[1], 10) : 0;
-
+    if (!pwd) return sock.sendMessage(chat, { text: '🔐 *pwned*\n\nUsage: `.pwned <password>`' }, { quoted: msg });
+    const { count } = await checkPwned(pwd);
     if (count > 0) {
       await sock.sendMessage(chat, {
-        text: `🚨 *PWNED*\n\nThat password has appeared in *${count.toLocaleString()}* data breaches.\n\n_Change it immediately — especially if you reuse it._`,
+        text: `🚨 *PWNED*\n\nThat password appeared in *${count.toLocaleString()}* breaches.\n_Change it immediately — especially if reused._`,
       }, { quoted: msg });
     } else {
       await sock.sendMessage(chat, {
-        text: `✅ *SAFE*\n\nThat password was not found in any known breach.\n\n_Tip: still use a password manager and 2FA._`,
+        text: `✅ *SAFE*\n\nThat password was not found in known breaches.\n_Tip: still use a password manager + 2FA._`,
       }, { quoted: msg });
     }
   } catch (e) {
@@ -376,38 +238,27 @@ export async function pwnedCommand(sock, chat, msg, args) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// .owner — send owner's contact card
-// ─────────────────────────────────────────────────────────────────────────────
+// ── .owner ──────────────────────────────────────────────────────────────────
 export async function ownerCommand(sock, chat, msg) {
   try {
-    if (!CONFIG.owner) {
-      return sock.sendMessage(chat, { text: '❌ Owner not configured.' }, { quoted: msg });
-    }
+    if (!CONFIG.owner) return sock.sendMessage(chat, { text: '❌ Owner not configured.' }, { quoted: msg });
     const digits = CONFIG.owner.replace(/\D/g, '');
     const vcard = [
-      'BEGIN:VCARD',
-      'VERSION:3.0',
+      'BEGIN:VCARD', 'VERSION:3.0',
       `FN:${CONFIG.codename || 'WRAITH'} Owner`,
       `TEL;type=CELL;type=VOICE;waid=${digits}:+${digits}`,
       `NOTE:${CONFIG.botName || 'WRAITH'} owner`,
       'END:VCARD',
     ].join('\n');
-
     await sock.sendMessage(chat, {
-      contacts: {
-        displayName: `${CONFIG.codename || 'WRAITH'} Owner`,
-        contacts: [{ vcard }],
-      },
+      contacts: { displayName: `${CONFIG.codename || 'WRAITH'} Owner`, contacts: [{ vcard }] },
     }, { quoted: msg });
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ owner card failed: ${e.message}` }, { quoted: msg }).catch(() => {});
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// .script / .repo — return the repo URL
-// ─────────────────────────────────────────────────────────────────────────────
+// ── .script / .repo ─────────────────────────────────────────────────────────
 export async function scriptCommand(sock, chat, msg) {
   try {
     const url = CONFIG.repoUrl || 'https://github.com/themalik-g/wraith';
@@ -419,9 +270,7 @@ export async function scriptCommand(sock, chat, msg) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// .mode  (owner only) — show / set public|private
-// ─────────────────────────────────────────────────────────────────────────────
+// ── .mode ───────────────────────────────────────────────────────────────────
 export async function modeCommand(sock, chat, msg, args) {
   if (ownerOnly(sock, chat, msg)) return;
   try {
@@ -442,114 +291,10 @@ export async function modeCommand(sock, chat, msg, args) {
     setMode(a0);
     await sock.sendMessage(chat, {
       text: a0 === 'public'
-        ? '🌐 *Public mode enabled.*\nEveryone can use non-critical commands.\nOwner-only commands (ghost/peek/lurk/schedule/admin/stalk/mode/…) still require owner.'
+        ? '🌐 *Public mode enabled.*\nEveryone can use non-critical commands.\nOwner-only commands still require owner.'
         : '🔒 *Private mode enabled.*\nOnly the owner can use any command now.',
     }, { quoted: msg });
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ mode failed: ${e.message}` }, { quoted: msg }).catch(() => {});
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Presence tracker (feature #12 backbone) + .stalk command
-// Attach once from the router. Records presence transitions for subscribed JIDs.
-// ─────────────────────────────────────────────────────────────────────────────
-const MAX_EVENTS_PER_JID = 500;
-
-function readPresence() { return readJson(PRESENCE_FILE, {}); }
-function writePresence(o) { writeJsonAtomic(PRESENCE_FILE, o); }
-
-export function attachPresenceTracker(sock) {
-  sock.ev.on('presence.update', ({ id, presences }) => {
-    try {
-      if (!id || !presences) return;
-      const store = readPresence();
-      const now = Date.now();
-      for (const [jid, p] of Object.entries(presences)) {
-        if (!p?.lastKnownPresence) continue;
-        if (!store[jid]) store[jid] = { events: [], onlineCount: 0, totalOnlineMs: 0, lastChange: 0 };
-        const rec = store[jid];
-        const status = p.lastKnownPresence; // 'available' | 'unavailable' | 'composing' | 'recording' | 'paused'
-        const last = rec.events[rec.events.length - 1];
-        if (last && last.status === status && now - last.time < 1000) continue;
-        if (status === 'available' && (!last || last.status !== 'available')) rec.onlineCount += 1;
-        if (last && last.status === 'available' && status !== 'available') rec.totalOnlineMs += now - last.time;
-        rec.events.push({ time: now, status });
-        if (rec.events.length > MAX_EVENTS_PER_JID) rec.events.splice(0, rec.events.length - MAX_EVENTS_PER_JID);
-        rec.lastChange = now;
-      }
-      writePresence(store);
-    } catch (e) {
-      if (process.env.WRAITH_DEBUG === '1') console.log('[presence-track]', e.message);
-    }
-  });
-}
-
-export async function stalkCommand(sock, chat, msg, args) {
-  if (ownerOnly(sock, chat, msg)) return;
-  try {
-    const a0 = (args?.[0] || '').toLowerCase();
-
-    if (a0 === 'list') {
-      const store = readPresence();
-      const keys = Object.keys(store);
-      if (!keys.length) return sock.sendMessage(chat, { text: ' No stalking data yet. Use `.stalk <number>` first.' }, { quoted: msg });
-      const lines = [`👁️ *stalked contacts* · ${keys.length}`, ''];
-      for (const jid of keys.slice(0, 30)) {
-        const r = store[jid];
-        lines.push(`• \`${jid.split('@')[0]}\` — ${r.onlineCount} online sessions`);
-      }
-      return sendChunked(sock, chat, msg, lines.join('\n'));
-    }
-
-    // Resolve target
-    let targetJid = null;
-    const ctx = msg.message?.extendedTextMessage?.contextInfo;
-    if (ctx?.participant) {
-      targetJid = ctx.participant;
-    } else if (args?.[0]) {
-      const digits = args[0].replace(/\D/g, '');
-      if (digits.length >= 7) {
-        try {
-          const wa = await sock.onWhatsApp(digits);
-          targetJid = wa?.[0]?.jid || `${digits}@s.whatsapp.net`;
-        } catch { targetJid = `${digits}@s.whatsapp.net`; }
-      }
-    }
-    if (!targetJid) {
-      return sock.sendMessage(chat, { text: '👁️ *stalk*\n\nUsage: `.stalk <number>` or reply to a message with `.stalk`\n`.stalk list` — show all tracked contacts' }, { quoted: msg });
-    }
-
-    // Subscribe to presence
-    try { await sock.presenceSubscribe(targetJid); } catch (e) {
-      return sock.sendMessage(chat, { text: `❌ Could not subscribe to presence for \`${targetJid.split('@')[0]}\`.\n_They may have "Last Seen" hidden._` }, { quoted: msg });
-    }
-
-    // Give the tracker a moment, then show stats
-    await new Promise((r) => setTimeout(r, 1500));
-    const store = readPresence();
-    const rec = store[targetJid];
-    if (!rec || !rec.events.length) {
-      return sock.sendMessage(chat, { text: `👁️ Now tracking \`${targetJid.split('@')[0]}\`.\n\n_No presence events recorded yet. WhatsApp only sends these if the user has "Last Seen" visible. Try again in a few minutes._` }, { quoted: msg });
-    }
-
-    const last = rec.events[rec.events.length - 1];
-    const first = rec.events[0];
-    const totalHrs = (rec.totalOnlineMs / 3_600_000).toFixed(2);
-    const lines = [
-      `👁️ *stalk* · \`${targetJid.split('@')[0]}\``,
-      '',
-      `• first seen · ${new Date(first.time).toLocaleString('en-GB', { timeZone: CONFIG.timezone || 'Asia/Karachi' })}`,
-      `• last change · ${new Date(last.time).toLocaleString('en-GB', { timeZone: CONFIG.timezone || 'Asia/Karachi' })}`,
-      `• current status · *${last.status}*`,
-      `• online sessions · ${rec.onlineCount}`,
-      `• total online time · ${totalHrs} h`,
-      `• events recorded · ${rec.events.length}`,
-      '',
-      `_tracking continues in the background while the bot is running._`,
-    ];
-    await sendChunked(sock, chat, msg, lines.join('\n'));
-  } catch (e) {
-    await sock.sendMessage(chat, { text: `⚠️ stalk failed: ${e.message}` }, { quoted: msg }).catch(() => {});
   }
 }
