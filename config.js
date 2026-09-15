@@ -1,16 +1,4 @@
 // config.js — WRAITH per-session config
-//
-// The VPS launcher spawns one node process per number with
-// --preserve-symlinks --preserve-symlinks-main
-// so `import.meta.url` points into the instance folder
-// (instances/<id>/config.js → symlink to this file).
-// That makes `./state/*` naturally per-session.
-//
-// Reads, in order of precedence:
-//   instances/<id>/state/owner.json   → { owner: "92300..." }
-//   instances/<id>/state/config.json  → { botName, timezone, ... }
-//   BASE (below)
-
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -18,7 +6,7 @@ import { fileURLToPath } from 'url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 const BASE = {
-  owner: "",                       // filled from state/owner.json at load time
+  owner: "",
   codename: "WRAITH",
   botName: "WRAITH",
   version: "1.3.2",
@@ -28,6 +16,23 @@ const BASE = {
   vaultMaxMB: 200,
   reconnectDelay: 3000,
   repoUrl: "https://github.com/themalik-g/wraith",
+  // Feature-specific defaults
+  chatbot: {
+    enabled: false,
+    instructions: "You are WRAITH, a helpful WhatsApp assistant. Reply concisely in the same language the user writes in. Be friendly but brief.",
+    cooldownMs: 5000,
+  },
+  stalk: {
+    maxEventsPerJid: 500,
+  },
+  weather: {
+    stormThreshold: 50, // percent
+  },
+  media: {
+    maxImages: 10,
+    maxCouplePairs: 5,
+    maxDownloadMB: 100,
+  },
 };
 
 function readJson(p, fallback) {
@@ -47,7 +52,6 @@ function loadSessionConfig() {
 
 export const CONFIG = loadSessionConfig();
 
-// commands can call this to persist a settings change for THIS session only
 export function saveSessionConfig(patch = {}) {
   const stateDir = path.join(here, 'state');
   fs.mkdirSync(stateDir, { recursive: true });
