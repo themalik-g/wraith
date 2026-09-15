@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
-import { isOwner } from '../core/identity.js';
+import { isOwner, ownerJid } from '../core/identity.js';
 import { readJson, writeJsonAtomic } from '../core/state-io.js';
 import { withTempFile } from '../lib/net.js';
 import { chunkText } from '../lib/net.js';
@@ -24,6 +24,22 @@ function ownerOnly(sock, chat, msg) {
 function isGroup(chat) {
   return chat.endsWith('@g.us');
 }
+
+// ★ FIX: welcome/goodbye toggling is now restricted to the bot owner,
+//        fromMe, or an actual group admin (was: literally anyone).
+async function canManageGroup(sock, chat, msg) {
+  if (msg.key.fromMe) return true;
+  const from = msg.key.participant || msg.key.remoteJid;
+  if (isOwner(from)) return true;
+  try {
+    const meta = await sock.groupMetadata(chat);
+    const norm = (j) => String(j || '').split(':')[0].replace(/\D/g, '');
+    const p = (meta.participants || []).find((x) => norm(x.id) === norm(from));
+    if (p?.admin) return true;
+  } catch {}
+  return false;
+}
+
 async function sendChunked(sock, chat, msg, text) {
   for (const p of chunkText(text, 3800)) await sock.sendMessage(chat, { text: p }, { quoted: msg });
 }
@@ -40,6 +56,9 @@ export function setWelcomeConfig(chat, patch) {
 
 export async function welcomeCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
+  if (!(await canManageGroup(sock, chat, msg))) {
+    return sock.sendMessage(chat, { text: '⛔ Group admins or owner only.' }, { quoted: msg });
+  }
   const a0 = (args?.[0] || '').toLowerCase();
   const cfg = getWelcomeConfig()[chat] || {};
   if (a0 === 'on') {
@@ -55,6 +74,9 @@ export async function welcomeCommand(sock, chat, msg, args) {
 
 export async function goodbyeCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
+  if (!(await canManageGroup(sock, chat, msg))) {
+    return sock.sendMessage(chat, { text: '⛔ Group admins or owner only.' }, { quoted: msg });
+  }
   const a0 = (args?.[0] || '').toLowerCase();
   const cfg = getWelcomeConfig()[chat] || {};
   if (a0 === 'on') {
@@ -69,9 +91,6 @@ export async function goodbyeCommand(sock, chat, msg, args) {
 }
 
 // ── Pending join-request resolver ───────────────────────────────────────────
-// ★ FIX: pending requests are NOT in groupMetadata.participants.
-//   Baileys ≥6.7 exposes groupRequestParticipantsList; fall back to
-//   metadata flags on older/newer forks. Returns null when unsupported.
 async function listPending(sock, chat) {
   if (typeof sock.groupRequestParticipantsList === 'function') {
     try {
@@ -102,8 +121,10 @@ export async function kickallCommand(sock, chat, msg, args) {
   try {
     const meta = await sock.groupMetadata(chat);
     const botJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+    // ★ FIX: the configured owner is now protected too, not just meta.owner
+    const protectedJids = new Set([botJid, meta.owner, ownerJid()].filter(Boolean));
     const targets = meta.participants
-      .filter((p) => p.id !== botJid && p.id !== meta.owner && p.admin == null)
+      .filter((p) => !protectedJids.has(p.id) && p.admin == null)
       .map((p) => p.id);
     if (!targets.length) return sock.sendMessage(chat, { text: '❌ No members to remove.' }, { quoted: msg });
 
@@ -131,10 +152,11 @@ export async function kickccCommand(sock, chat, msg, args) {
 
     const meta = await sock.groupMetadata(chat);
     const botJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+    const protectedJids = new Set([botJid, meta.owner, ownerJid()].filter(Boolean));
     const targets = meta.participants
       .filter((p) => {
         const digits = p.id.split('@')[0].replace(/\D/g, '');
-        return digits.startsWith(code) && p.id !== botJid && p.id !== meta.owner;
+        return digits.startsWith(code) && !protectedJids.has(p.id) && p.admin == null;
       })
       .map((p) => p.id);
     if (!targets.length) return sock.sendMessage(chat, { text: `❌ No members with country code +${code}.` }, { quoted: msg });
@@ -188,7 +210,7 @@ export async function setgppCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .approveall / .declineall ★ FIXED ──────────────────────────────────────
+// ── .approveall / .declineall ──────────────────────────────────────────────
 export async function approveallCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (ownerOnly(sock, chat, msg)) return;
