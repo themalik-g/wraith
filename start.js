@@ -184,7 +184,6 @@ async function ignite() {
   sock.ev.on('connection.update', async (u) => {
     const { connection, lastDisconnect, qr } = u;
 
-    // ★ pairing code — requested only after the socket says it's ready
     if (qr && !sock.authState.creds.registered && !pairingRequested) {
       pairingRequested = true;
       const number = pairingNumber || CONFIG.owner || null;
@@ -204,7 +203,6 @@ async function ignite() {
       reconnectAttempts = 0;
       console.log(tag, green(`online as +${sock.user?.id?.split(':')[0]}`));
 
-      // fresh pairing → tell the launcher once
       if (pairingNumber && !notifiedLinked) {
         notifiedLinked = true;
         notifyLinked();
@@ -249,7 +247,6 @@ async function ignite() {
     trace('messages.upsert', { session: sessionId, type: u.type, count: u.messages?.length });
     for (const m of u.messages || []) rememberMessage(m);
 
-    // ★ statuses: hand the FULL messages to lurk (needed for silent download)
     try {
       if ((u.messages || []).some(m => m?.key?.remoteJid === 'status@broadcast')) {
         await dispatchStatus(sock, u);
@@ -261,48 +258,22 @@ async function ignite() {
     await dispatch(sock, u, sessionId);
   });
 
+  // ★ FIXED in router: dispatchUpdate now handles the ARRAY Baileys emits
   sock.ev.on('messages.update', (upd) => dispatchUpdate(sock, upd));
-  sock.ev.on('messages.delete', (del) => dispatchStatus(sock, del));
 
+  // ★ welcome/goodbye — core/groupEvents.js (created in round 1)
   sock.ev.on('group-participants.update', async (update) => {
     const mod = await import('./core/groupEvents.js').catch(() => null);
     if (mod?.handleGroupParticipantUpdate) mod.handleGroupParticipantUpdate(sock, update);
   });
 
-  // status.update emits bare WAMessageKey[] — keys only (view/react, no download)
+  // ★ REMOVED: dead `commands/anticall.js` block (feature lives in modules/group.js)
+  // ★ REMOVED: wrong `messages.delete → dispatchStatus` wiring (lurk handles its own events)
+
   sock.ev.on('status.update', async (st) => {
     try { await dispatchStatus(sock, st); } catch (e) {
       console.error('[dispatchStatus:status.update]', e);
     }
-  });
-
-  const antiCallNotified = new Set();
-  sock.ev.on('call', async (calls) => {
-    try {
-      const { readState } = await import('./commands/anticall.js').catch(() => ({}));
-      if (!readState || !readState().enabled) return;
-      for (const call of calls) {
-        const caller = call.from || call.peerJid || call.chatId;
-        if (!caller) continue;
-        try {
-          if (typeof sock.rejectCall === 'function' && call.id) {
-            await sock.rejectCall(call.id, caller);
-          }
-        } catch {}
-        if (!antiCallNotified.has(caller)) {
-          antiCallNotified.add(caller);
-          setTimeout(() => antiCallNotified.delete(caller), 60000);
-          try {
-            await sock.sendMessage(caller, {
-              text: '📵 Anticall is enabled. Your call was rejected and you will be blocked.'
-            });
-          } catch {}
-        }
-        setTimeout(async () => {
-          try { await sock.updateBlockStatus(caller, 'block'); } catch {}
-        }, 800);
-      }
-    } catch {}
   });
 }
 
