@@ -270,6 +270,78 @@ export async function joinCommand(sock, chat, msg, args) {
   }
 }
 
+// ── .open / .close ──────────────────────────────────────────────────────────
+export async function openCommand(sock, chat, msg) {
+  if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
+  if (ownerOnly(sock, chat, msg)) return;
+  try {
+    await sock.groupSettingUpdate(chat, 'not_announcement');
+    await sock.sendMessage(chat, { text: '🔓 Group opened. All members can send messages.' }, { quoted: msg });
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ open failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+export async function closeCommand(sock, chat, msg) {
+  if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
+  if (ownerOnly(sock, chat, msg)) return;
+  try {
+    await sock.groupSettingUpdate(chat, 'announcement');
+    await sock.sendMessage(chat, { text: '🔒 Group closed. Only admins can send messages.' }, { quoted: msg });
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ close failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+// ── .tagall / .hidetag ──────────────────────────────────────────────────────
+export async function tagallCommand(sock, chat, msg, args) {
+  if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
+  if (ownerOnly(sock, chat, msg)) return;
+  try {
+    const meta = await sock.groupMetadata(chat);
+    const participants = meta.participants || [];
+    if (!participants.length) return sock.sendMessage(chat, { text: '❌ No members found.' }, { quoted: msg });
+
+    const textArg = (args || []).join(' ').trim();
+    const mentions = participants.map((p) => p.id);
+
+    let body = `📢 *Attention Everyone!*${textArg ? `\n\n💬 _${textArg}_` : ''}\n\n`;
+    participants.forEach((p, idx) => {
+      const num = p.id.split('@')[0];
+      body += `${idx + 1}. @${num}\n`;
+    });
+
+    await sock.sendMessage(chat, { text: body, mentions }, { quoted: msg });
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ tagall failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+export async function hidetagCommand(sock, chat, msg, args) {
+  if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
+  if (ownerOnly(sock, chat, msg)) return;
+  try {
+    const meta = await sock.groupMetadata(chat);
+    const participants = meta.participants || [];
+    if (!participants.length) return sock.sendMessage(chat, { text: '❌ No members found.' }, { quoted: msg });
+
+    let messageText = (args || []).join(' ').trim();
+    const ctx = msg.message?.extendedTextMessage?.contextInfo;
+    const quoted = ctx?.quotedMessage;
+
+    if (!messageText && quoted) {
+      messageText = quoted.conversation || quoted.extendedTextMessage?.text || 'Attention group members!';
+    }
+
+    if (!messageText) messageText = '📢 Notification';
+
+    const mentions = participants.map((p) => p.id);
+    await sock.sendMessage(chat, { text: messageText, mentions }, { quoted: msg });
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ hidetag failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
 // ── .mute / .unmute ─────────────────────────────────────────────────────────
 export async function muteCommand(sock, chat, msg, args) {
   try {

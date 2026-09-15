@@ -38,12 +38,12 @@ import { pptCommand } from './modules/ppt.js';
 // ── Phase 3 ──
 import {
   welcomeCommand, goodbyeCommand, kickallCommand, kickccCommand,
-  setdescCommand, setgppCommand, approveallCommand, declineallCommand,
-  leaveCommand, joinCommand, muteCommand, unmuteCommand,
+  setdescCommand as setgdescCommand, setdescCommand, setgppCommand, approveallCommand, declineallCommand,
+  leaveCommand, joinCommand, openCommand, closeCommand, tagallCommand, hidetagCommand, muteCommand, unmuteCommand,
   archiveCommand, unarchiveCommand, clearchatCommand,
   rejectcallsCommand, attachCallRejector, getWelcomeConfig,
 } from './modules/group.js';
-import { setppCommand, setaboutCommand, chatstatsCommand } from './modules/owner.js';
+import { setppCommand, setaboutCommand, chatstatsCommand, blockCommand, unblockCommand, blocklistCommand, unblockallCommand, setstatusCommand, getstatusCommand, getpairCommand } from './modules/owner.js';
 
 // ── Phase 4 ──
 import { gitdlCommand, mfdlCommand } from './modules/downloader.js';
@@ -215,8 +215,13 @@ export async function dispatch(sock, update) {
           case 'goodbye': await goodbyeCommand(sock, chat, msg, rest); break;
           case 'kickall': await kickallCommand(sock, chat, msg, rest); break;
           case 'kickcc': await kickccCommand(sock, chat, msg, rest); break;
-          case 'setdesc': await setdescCommand(sock, chat, msg, rest); break;
+          case 'setdesc':
+          case 'setgdesc': await setgdescCommand(sock, chat, msg, rest); break;
           case 'setgpp': await setgppCommand(sock, chat, msg, rest); break;
+          case 'open': await openCommand(sock, chat, msg); break;
+          case 'close': await closeCommand(sock, chat, msg); break;
+          case 'tagall': await tagallCommand(sock, chat, msg, rest); break;
+          case 'hidetag': await hidetagCommand(sock, chat, msg, rest); break;
           case 'approveall': await approveallCommand(sock, chat, msg, rest); break;
           case 'declineall': await declineallCommand(sock, chat, msg, rest); break;
           case 'leave': await leaveCommand(sock, chat, msg, rest); break;
@@ -230,6 +235,13 @@ export async function dispatch(sock, update) {
           case 'setpp': await setppCommand(sock, chat, msg, rest); break;
           case 'setabout': await setaboutCommand(sock, chat, msg, rest); break;
           case 'chatstats': await chatstatsCommand(sock, chat, msg, rest); break;
+          case 'setstatus': await setstatusCommand(sock, chat, msg, rest); break;
+          case 'getstatus': await getstatusCommand(sock, chat, msg, rest); break;
+          case 'getpair': await getpairCommand(sock, chat, msg, rest); break;
+          case 'block': await blockCommand(sock, chat, msg, rest); break;
+          case 'unblock': await unblockCommand(sock, chat, msg, rest); break;
+          case 'blocklist': await blocklistCommand(sock, chat, msg); break;
+          case 'unblockall': await unblockallCommand(sock, chat, msg); break;
 
           // ── Phase 4 ──
           case 'gitdl': await gitdlCommand(sock, chat, msg, rest); break;
