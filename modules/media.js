@@ -1,11 +1,18 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/media.js
-// Books (downloadable-only) + PPT (DuckDuckGo AI)
+// Books + image search + movie + song info + lyrics + couplepp
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { searchBooks } from '../lib/apis.js';
+import {
+  searchBooks,
+  searchImages,
+  searchMovie,
+  searchSong,
+  fetchLyrics,
+} from '../lib/apis.js';
+import { chunkText, downloadToFile } from '../lib/net.js';
 
 // ─── Book cache ───
 const bookCache = new Map();
@@ -17,49 +24,9 @@ function getCachedBooks(chat) {
   return null;
 }
 
-// ─── Small helpers ───
-function chunkText(text, size = 3800) {
-  const out = [];
-  for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
-  return out;
-}
-
 async function sendChunked(sock, chat, msg, text) {
-  for (const p of chunkText(text)) {
+  for (const p of chunkText(text, 3800)) {
     await sock.sendMessage(chat, { text: p }, { quoted: msg });
-  }
-}
-
-async function downloadToFile(url, dest, maxBytes = 100 * 1024 * 1024, timeoutSec = 30, extraHeaders = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutSec * 1000);
-
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0', ...extraHeaders }
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const reader = res.body.getReader();
-    const ws = fs.createWriteStream(dest);
-    let downloaded = 0;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      downloaded += value.length;
-      if (downloaded > maxBytes) {
-        ws.destroy();
-        throw new Error('File exceeds size limit');
-      }
-      if (!ws.write(Buffer.from(value))) {
-        await new Promise((r) => ws.once('drain', r));
-      }
-    }
-    await new Promise((r) => ws.end(r));
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -112,7 +79,7 @@ export async function bookCommand(sock, chat, msg, args) {
           book.url,
           dest,
           100 * 1024 * 1024,
-          60,
+          5,
           book.url.includes('archive.org') ? { Referer: 'https://archive.org/' } : {}
         );
 
@@ -168,176 +135,232 @@ export async function bookCommand(sock, chat, msg, args) {
 }
 
 // ─────────────────────────────────────────────
-// DuckDuckGo free AI — bullet generator
+// .img / .image — stock image search
 // ─────────────────────────────────────────────
-async function fetchDuckDuckGoBullets(topic, total = 20) {
-  const prompt =
-    `Give me exactly ${total} short factual presentation bullet points about "${topic}". ` +
-    `Return ONLY the bullet points, one per line. No numbering, no markdown, no extra text.`;
-
-  const models = [
-    'gpt-4o-mini',
-    'claude-3-haiku',
-    'meta-llama/Llama-3-70b-chat-hf',
-    'mistralai/Mixtral-8x7B-Instruct-v0.1'
-  ];
-
-  let lastErr;
-
-  for (const model of models) {
-    try {
-      // Step 1: get vqd
-      const vqdRes = await fetch('https://duckduckgo.com/duckchat/v1/status', {
-        headers: { 'x-vqd-accept': '1', 'User-Agent': 'Mozilla/5.0' }
-      });
-      const vqd = vqdRes.headers.get('x-vqd-4');
-      if (!vqd) throw new Error('No vqd token');
-
-      // Step 2: POST chat
-      const chatRes = await fetch('https://duckduckgo.com/duckchat/v1/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-vqd-4': vqd,
-          'User-Agent': 'Mozilla/5.0'
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'user', content: prompt }]
-        })
-      });
-
-      if (!chatRes.ok) throw new Error(`DDG ${chatRes.status}`);
-      const text = await chatRes.text();
-
-      // Parse SSE-style stream
-      const parts = [];
-      for (const line of text.split('\n')) {
-        const t = line.trim();
-        if (!t.startsWith('data:')) continue;
-        const payload = t.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
-        try {
-          const j = JSON.parse(payload);
-          if (j.message) parts.push(j.message);
-        } catch {}
-      }
-
-      const raw = parts.join('').trim();
-      if (!raw) throw new Error('Empty DDG reply');
-
-      const bullets = raw
-        .split('\n')
-        .map((l) => l.replace(/^[\-\*\u2022\d\.\)\s]+/, '').trim())
-        .filter((l) => l.length > 3)
-        .slice(0, total);
-
-      if (!bullets.length) throw new Error('No bullets parsed');
-      return bullets;
-
-    } catch (e) {
-      lastErr = e;
-      console.warn(`[ppt] DDG model ${model} failed:`, e.message);
+export async function imageCommand(sock, chat, msg, args) {
+  try {
+    const parts = (args || []).slice();
+    let count = 5;
+    if (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) {
+      count = Math.min(Math.max(parseInt(parts.pop(), 10), 1), 10);
     }
-  }
+    const query = parts.join(' ').trim();
+    if (!query) {
+      return sock.sendMessage(chat, {
+        text: '🖼️ *img*\n\nUsage: `.img <query> [count]`\nCount default 5, max 10.'
+      }, { quoted: msg });
+    }
 
-  throw lastErr || new Error('DuckDuckGo AI unavailable');
+    await sock.sendMessage(chat, { text: `🔎 Searching images for *${query}*…` }, { quoted: msg });
+
+    const r = await searchImages(query, count);
+    if (!r.ok || !r.images?.length) {
+      return sock.sendMessage(chat, { text: `❌ No images found for *${query}*.` }, { quoted: msg });
+    }
+
+    let sent = 0;
+    for (const img of r.images.slice(0, count)) {
+      const url = img.full || img.url;
+      if (!url) continue;
+      try {
+        await sock.sendMessage(chat, {
+          image: { url },
+          caption: sent === 0 ? `🖼️ *${query}*\n_source: ${img.source || r.source || 'web'}_` : undefined,
+        }, sent === 0 ? { quoted: msg } : undefined);
+        sent++;
+      } catch {}
+    }
+    if (!sent) {
+      await sock.sendMessage(chat, { text: `❌ Could not send any images for *${query}*.` }, { quoted: msg });
+    }
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ img failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
 }
 
 // ─────────────────────────────────────────────
-// .ppt
+// .movie
 // ─────────────────────────────────────────────
-export async function pptCommand(sock, chat, msg, args) {
-  const topic = (args || []).join(' ').trim();
-  if (!topic) {
-    return sock.sendMessage(chat, { text: '📊 *ppt*\n\nUsage: `.ppt <topic>`' }, { quoted: msg });
-  }
-
-  const status = await sock.sendMessage(chat, {
-    text: `📊 *Building presentation on* ${topic}…`
-  }, { quoted: msg });
-
+export async function movieCommand(sock, chat, msg, args) {
   try {
-    await sock.sendMessage(chat, {
-      text: `📊 *Fetching content…*`,
-      edit: status.key
-    }).catch(() => {});
-
-    const bullets = await fetchDuckDuckGoBullets(topic, 20);
-    if (!bullets.length) throw new Error('No content returned');
-
-    // ─── Lazy-load pptxgenjs (CJS) ───
-    const { createRequire } = await import('node:module');
-    const require = createRequire(import.meta.url);
-    let PptxGenJS;
-    try {
-      const mod = require('pptxgenjs');
-      PptxGenJS = mod?.default || mod;
-    } catch {
-      throw new Error('pptxgenjs not installed');
+    const query = (args || []).join(' ').trim();
+    if (!query) {
+      return sock.sendMessage(chat, { text: '🎬 *movie*\n\nUsage: `.movie <title>`' }, { quoted: msg });
     }
 
-    const safeName = topic.replace(/[^\w\s-]/g, '').trim().slice(0, 40) || 'presentation';
-
-    const pptx = new PptxGenJS();
-    pptx.layout = 'LAYOUT_WIDE';
-    pptx.title = topic;
-
-    // Title slide
-    const s1 = pptx.addSlide();
-    s1.background = { color: '1a1a2e' };
-    s1.addText(topic, {
-      x: 0.5, y: 1.9, w: 12, h: 1.4,
-      fontSize: 36, bold: true, align: 'center', color: 'FFFFFF'
-    });
-    s1.addText('Generated by WRAITH', {
-      x: 0.5, y: 3.5, w: 12, h: 0.5,
-      fontSize: 14, align: 'center', color: 'AAAAAA'
-    });
-
-    // Content slides — 4 bullets per slide
-    for (let i = 0; i < bullets.length; i += 4) {
-      const slide = pptx.addSlide();
-      slide.background = { color: 'FFFFFF' };
-      slide.addText(`${topic}`, {
-        x: 0.5, y: 0.3, w: 12, h: 0.7,
-        fontSize: 22, bold: true, color: '1a1a2e'
-      });
-      slide.addText(
-        bullets.slice(i, i + 4).map((b) => ({
-          text: b,
-          options: { bullet: true, breakLine: true }
-        })),
-        {
-          x: 0.6, y: 1.2, w: 11.8, h: 5,
-          fontSize: 15, color: '333333', lineSpacing: 22
-        }
-      );
+    const r = await searchMovie(query);
+    if (!r.ok) {
+      return sock.sendMessage(chat, { text: `❌ No movie found for *${query}*.` }, { quoted: msg });
     }
 
-    const total = Math.ceil(bullets.length / 4) + 1;
-    const dest = path.join(os.tmpdir(), `wraith-ppt-${Date.now()}.pptx`);
-    await pptx.writeFile({ fileName: dest });
+    const lines = [
+      `🎬 *${r.title}*`,
+      `*year* · ${r.year || '—'}`,
+      `*genre* · ${r.genre || '—'}`,
+      `*director* · ${r.director || '—'}`,
+      `*rating* · ${r.rating || '—'}`,
+      '',
+      r.description ? r.description.slice(0, 600) : '',
+      '',
+      `_source: ${r.source}_`
+    ].filter(Boolean);
 
-    await sock.sendMessage(chat, {
-      document: fs.readFileSync(dest),
-      fileName: `${safeName}.pptx`,
-      mimetype: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      caption: `📊 *${topic}* — ${total} slides\n_Source: DuckDuckGo AI_`
-    }, { quoted: msg });
-
-    try { fs.unlinkSync(dest); } catch {}
-
-    await sock.sendMessage(chat, {
-      text: `✅ *Done*`,
-      edit: status.key
-    }).catch(() => {});
-
+    if (r.poster) {
+      await sock.sendMessage(chat, {
+        image: { url: r.poster },
+        caption: lines.join('\n')
+      }, { quoted: msg });
+    } else {
+      await sendChunked(sock, chat, msg, lines.join('\n'));
+    }
   } catch (e) {
-    console.error('[ppt]', e.message);
-    await sock.sendMessage(chat, {
-      text: `❌ *PPT failed:* ${e.message}`,
-      edit: status.key
-    }).catch(() => {});
+    await sock.sendMessage(chat, { text: `⚠️ movie failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+// ─────────────────────────────────────────────
+// .songinfo — track metadata (not a download)
+// ─────────────────────────────────────────────
+export async function songCommand(sock, chat, msg, args) {
+  try {
+    const query = (args || []).join(' ').trim();
+    if (!query) {
+      return sock.sendMessage(chat, { text: '🎵 *songinfo*\n\nUsage: `.songinfo <title>`' }, { quoted: msg });
+    }
+
+    const r = await searchSong(query);
+    if (!r.ok) {
+      return sock.sendMessage(chat, { text: `❌ No song found for *${query}*.` }, { quoted: msg });
+    }
+
+    const dur = r.duration
+      ? `${Math.floor(r.duration / 60)}:${String(r.duration % 60).padStart(2, '0')}`
+      : '—';
+
+    const lines = [
+      `🎵 *${r.title}*`,
+      `*artist* · ${r.artist || '—'}`,
+      `*album* · ${r.album || '—'}`,
+      `*duration* · ${dur}`,
+      '',
+      `_source: ${r.source}_`
+    ];
+
+    if (r.cover) {
+      await sock.sendMessage(chat, {
+        image: { url: r.cover },
+        caption: lines.join('\n')
+      }, { quoted: msg });
+    } else {
+      await sendChunked(sock, chat, msg, lines.join('\n'));
+    }
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ songinfo failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+// ─────────────────────────────────────────────
+// .lyrics
+// ─────────────────────────────────────────────
+export async function lyricsCommand(sock, chat, msg, args) {
+  try {
+    const full = (args || []).join(' ').trim();
+    if (!full) {
+      return sock.sendMessage(chat, {
+        text: '📜 *lyrics*\n\nUsage: `.lyrics <artist> - <title>`'
+      }, { quoted: msg });
+    }
+
+    const sep = full.indexOf(' - ');
+    if (sep === -1) {
+      return sock.sendMessage(chat, {
+        text: '❌ Use format: `.lyrics <artist> - <title>`'
+      }, { quoted: msg });
+    }
+
+    const artist = full.slice(0, sep).trim();
+    const title  = full.slice(sep + 3).trim();
+    if (!artist || !title) {
+      return sock.sendMessage(chat, {
+        text: '❌ Both artist and title are required.'
+      }, { quoted: msg });
+    }
+
+    const r = await fetchLyrics(artist, title);
+    if (!r.ok || !r.lyrics) {
+      return sock.sendMessage(chat, {
+        text: `❌ No lyrics found for *${title}* by *${artist}*.`
+      }, { quoted: msg });
+    }
+
+    const header = `📜 *${title}* — _${artist}_\n_source: ${r.source}_\n\n`;
+    await sendChunked(sock, chat, msg, header + r.lyrics);
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ lyrics failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+// ─────────────────────────────────────────────
+// .couplepp — random couple profile pics in a group
+// ─────────────────────────────────────────────
+export async function coupleppCommand(sock, chat, msg, args) {
+  if (!chat.endsWith('@g.us')) {
+    return sock.sendMessage(chat, { text: '❌ This command only works in groups.' }, { quoted: msg });
+  }
+  try {
+    const meta = await sock.groupMetadata(chat);
+    const parts = (meta.participants || []).filter((p) => p?.id);
+    if (parts.length < 2) {
+      return sock.sendMessage(chat, { text: '❌ Not enough members to pair.' }, { quoted: msg });
+    }
+
+    const count = Math.min(Math.max(parseInt(args?.[0], 10) || 1, 1), 5);
+    let sent = 0;
+
+    for (let i = 0; i < count; i++) {
+      const a = parts[Math.floor(Math.random() * parts.length)];
+      let b = parts[Math.floor(Math.random() * parts.length)];
+      let guard = 0;
+      while (b.id === a.id && guard++ < 20) {
+        b = parts[Math.floor(Math.random() * parts.length)];
+      }
+      if (b.id === a.id) continue;
+
+      let urlA = null, urlB = null;
+      try { urlA = await sock.profilePictureUrl(a.id, 'image'); } catch {}
+      try { urlB = await sock.profilePictureUrl(b.id, 'image'); } catch {}
+      if (!urlA && !urlB) continue;
+
+      const aNum = a.id.split('@')[0];
+      const bNum = b.id.split('@')[0];
+      const caption = `💞 *couple*\n@${aNum} ❤️ @${bNum}`;
+      const mentions = [a.id, b.id];
+
+      try {
+        if (urlA) {
+          await sock.sendMessage(chat, {
+            image: { url: urlA },
+            caption,
+            mentions,
+          }, { quoted: msg });
+        } else if (urlB) {
+          await sock.sendMessage(chat, {
+            image: { url: urlB },
+            caption,
+            mentions,
+          }, { quoted: msg });
+        }
+        if (urlA && urlB) {
+          await sock.sendMessage(chat, { image: { url: urlB } });
+        }
+        sent++;
+      } catch {}
+    }
+
+    if (!sent) {
+      await sock.sendMessage(chat, { text: '❌ Could not fetch profile pictures for a couple.' }, { quoted: msg });
+    }
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ couplepp failed: ${e.message}` }, { quoted: msg }).catch(() => {});
   }
 }
