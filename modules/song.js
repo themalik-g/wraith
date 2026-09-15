@@ -1,14 +1,14 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/song.js
-// Primary: @snwfdhmp/soundcloud-downloader → proper MP3 conversion
-// Backup : SoundCloud search → yt-dlp downloads the track URL
+// Primary: @snwfdhmp/soundcloud-downloader → ffmpeg-static → proper MP3
+// Backup : SoundCloud search → @choewy/yt-dlp class → MP3
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import PQueue from 'p-queue';
+import ffmpegPath from 'ffmpeg-static';
 
 const require = createRequire(import.meta.url);
 
@@ -20,19 +20,6 @@ try {
 } catch (e) {
   console.warn('[song] @snwfdhmp/soundcloud-downloader unavailable:', e.message);
 }
-
-// ─── yt-dlp binary resolver (@choewy/yt-dlp) ───
-let YTDLP_BIN = 'yt-dlp';
-try {
-  const ytdlp = require('@choewy/yt-dlp');
-  const candidate =
-    ytdlp?.path ||
-    ytdlp?.binary ||
-    ytdlp?.default?.path ||
-    ytdlp?.default?.binary ||
-    null;
-  if (candidate && fs.existsSync(candidate)) YTDLP_BIN = candidate;
-} catch {}
 
 const TMP_DIR = path.join(os.tmpdir(), 'wraith-song');
 fs.mkdirSync(TMP_DIR, { recursive: true });
@@ -47,108 +34,64 @@ async function react(sock, chat, msg, emoji) {
 async function editMessage(sock, chat, key, text) {
   try { await sock.sendMessage(chat, { text, edit: key.key }); } catch {}
 }
-function progressBar(pct) {
-  const filled = Math.max(0, Math.min(20, Math.round(pct / 5)));
-  return '█'.repeat(filled) + '░'.repeat(20 - filled);
-}
 function cleanFile(p) {
   try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch {}
 }
-function newestAudio(dir) {
+function newestAudio(dir, since) {
   const files = fs.readdirSync(dir)
     .filter((f) => /\.(mp3|m4a|opus|ogg|wav|webm)$/i.test(f))
-    .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+    .map((f) => {
+      const full = path.join(dir, f);
+      return { f, full, t: fs.statSync(full).mtimeMs };
+    })
+    .filter((x) => !since || x.t >= since)
     .sort((a, b) => b.t - a.t);
-  return files[0] ? path.join(dir, files[0].f) : null;
-}
-
-// ─── Format detection from file header ───
-function detectAudioFormat(buf) {
-  if (!buf || buf.length < 12) return { ext: 'mp3', mime: 'audio/mpeg' };
-  const a4 = buf.toString('ascii', 4, 8);
-  const a0 = buf.toString('ascii', 0, 4);
-  if (a4 === 'ftyp') return { ext: 'm4a', mime: 'audio/mp4' };
-  if (a0 === 'ID3' || (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) return { ext: 'mp3', mime: 'audio/mpeg' };
-  if (a0 === 'OggS') return { ext: 'ogg', mime: 'audio/ogg; codecs=opus' };
-  if (a0 === 'RIFF') return { ext: 'wav', mime: 'audio/wav' };
-  if (a0 === 'fLaC') return { ext: 'flac', mime: 'audio/flac' };
-  return { ext: 'mp3', mime: 'audio/mpeg' };
+  return files[0] ? files[0].full : null;
 }
 
 // ─────────────────────────────────────────────
 //  PROPER MP3 CONVERTER
-//  audio-decode (decode any format → PCM)
-//  @audio/encode (encode PCM → MP3 via WASM)
-//  No ffmpeg binary required.
+//  ffmpeg-static ships a real ffmpeg binary — no
+//  system install, no PATH dependency.
+//  Handles opus / m4a / ogg / wav / flac → mp3.
 // ─────────────────────────────────────────────
-let _decodeAudio = null;
-let _encode = null;
+function convertToMp3(inputPath, outputPath, bitrate = 192) {
+  return new Promise((resolve, reject) => {
+    if (!ffmpegPath) {
+      return reject(new Error('ffmpeg-static binary missing — run `npm install`'));
+    }
+    if (!fs.existsSync(inputPath)) {
+      return reject(new Error('input file does not exist'));
+    }
 
-async function getDecodeAudio() {
-  if (_decodeAudio) return _decodeAudio;
-  try {
-    const mod = await import('audio-decode');
-    _decodeAudio = mod.default || mod;
-    return _decodeAudio;
-  } catch (e) {
-    console.warn('[song] audio-decode unavailable:', e.message);
-    return null;
-  }
-}
+    const proc = require('node:child_process').spawn(ffmpegPath, [
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-i', inputPath,
+      '-vn',
+      '-codec:a', 'libmp3lame',
+      '-b:a', `${bitrate}k`,
+      '-y',
+      outputPath,
+    ]);
 
-async function getEncoder() {
-  if (_encode) return _encode;
-  try {
-    const mod = await import('@audio/encode');
-    _encode = mod.default || mod;
-    return _encode;
-  } catch (e) {
-    console.warn('[song] @audio/encode unavailable:', e.message);
-    return null;
-  }
-}
-
-/**
- * Convert any audio file to a proper MP3.
- * Returns the output path on success, throws on failure.
- */
-async function convertToMp3(inputPath, outputPath, bitrate = 192) {
-  const decodeAudio = await getDecodeAudio();
-  const encode = await getEncoder();
-
-  if (!decodeAudio || !encode) {
-    throw new Error('MP3 conversion libraries not available (audio-decode + @audio/encode)');
-  }
-
-  const buffer = fs.readFileSync(inputPath);
-  const audioBuffer = await decodeAudio(buffer);
-
-  const channelCount = audioBuffer.numberOfChannels;
-  const sampleRate = audioBuffer.sampleRate;
-  const length = audioBuffer.length;
-
-  if (!length) throw new Error('decoded audio is empty');
-
-  // Build Float32Array[] — one per channel
-  const channels = [];
-  for (let i = 0; i < channelCount; i++) {
-    channels.push(audioBuffer.getChannelData(i));
-  }
-
-  // Encode to MP3
-  const mp3 = await encode.mp3(channels, {
-    sampleRate,
-    bitrate,
+    let err = '';
+    proc.stderr.on('data', (d) => { err += d.toString(); });
+    proc.on('error', (e) => reject(new Error(`ffmpeg spawn failed: ${e.message}`)));
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        return reject(new Error(`ffmpeg exited ${code}: ${err.slice(-200) || 'unknown'}`));
+      }
+      try {
+        if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size < 1024) {
+          return reject(new Error('ffmpeg produced empty mp3'));
+        }
+        resolve(outputPath);
+      } catch (e) {
+        reject(e);
+      }
+    });
   });
-
-  fs.writeFileSync(outputPath, Buffer.from(mp3));
-
-  // Verify output
-  if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size < 1024) {
-    throw new Error('MP3 conversion produced empty output');
-  }
-
-  return outputPath;
 }
 
 // ─── SoundCloud client_id scrape ───
@@ -192,7 +135,7 @@ async function searchSoundcloud(query) {
   return data.collection[0];
 }
 
-// ─── SoundCloud download (raw) ───
+// ─── SoundCloud download (raw bytes) ───
 async function downloadViaSoundcloud(query, outFile) {
   if (!scdl) throw new Error('soundcloud-downloader not installed');
   const track = await searchSoundcloud(query);
@@ -213,32 +156,25 @@ async function downloadViaSoundcloud(query, outFile) {
   return track;
 }
 
-// ─── yt-dlp download from a specific URL (with live progress) ───
-function runYtDlp(url, outFile, onProgress) {
-  return new Promise((resolve, reject) => {
-    const args = [
-      url,
-      '-x',
-      '--audio-format', 'mp3',
-      '--audio-quality', '0',
-      '--newline',
-      '--no-playlist',
-      '--force-overwrites',
-      '-o', outFile
-    ];
-    const proc = spawn(YTDLP_BIN, args);
-    let err = '';
-    proc.stdout.on('data', (chunk) => {
-      const m = chunk.toString().match(/\[download\]\s+([\d.]+)%/);
-      if (m && onProgress) onProgress(parseFloat(m[1]));
-    });
-    proc.stderr.on('data', (d) => { err += d.toString(); });
-    proc.on('error', (e) => reject(new Error(`yt-dlp not found: ${e.message}`)));
-    proc.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(err.slice(-200) || `yt-dlp exited ${code}`));
-    });
+// ─────────────────────────────────────────────
+//  yt-dlp via @choewy/yt-dlp class API
+//  The class handles its own binary lookup — no
+//  PATH dependency, works inside containers.
+// ─────────────────────────────────────────────
+async function ytDlpDownload(url, outFile) {
+  const { YtDlp } = await import('@choewy/yt-dlp');
+  const ytDlp = new YtDlp({
+    url,
+    output: outFile.replace(/\.mp3$/i, '.%(ext)s'),
+    format: 'bestaudio/best',
+    quiet: true,
+    noWarnings: true,
+    noProgress: true,
+    playlist: false,
+    retries: 3,
   });
+  const result = await ytDlp.audioFormat('mp3').audio().download();
+  return result;
 }
 
 // ─────────────────────────────────────────────
@@ -255,20 +191,16 @@ export async function songCommand(sock, chat, msg, args) {
       text: `🎵 *Searching:* ${query}`
     }, { quoted: msg });
 
-    let rawFile = null;        // what SoundCloud downloader gave us
-    let mp3File = null;        // final MP3 to send
+    const stamp = Date.now();
+    let rawFile = path.join(TMP_DIR, `wraith-raw-${stamp}.bin`);
+    let mp3File = path.join(TMP_DIR, `wraith-${stamp}.mp3`);
     let usedSource = null;
 
     try {
       // ── Step 1: SoundCloud download ──
       await editMessage(sock, chat, status, `🎵 *Searching SoundCloud…*`);
 
-      const stamp = Date.now();
-      rawFile = path.join(TMP_DIR, `wraith-raw-${stamp}.bin`);
-      mp3File = path.join(TMP_DIR, `wraith-${stamp}.mp3`);
-
       let soundcloudOk = false;
-
       try {
         await editMessage(sock, chat, status, `🎵 *Downloading from SoundCloud…*`);
         const track = await downloadViaSoundcloud(query, rawFile);
@@ -282,7 +214,7 @@ export async function songCommand(sock, chat, msg, args) {
         rawFile = null;
       }
 
-      // ── Step 2: Convert to proper MP3 ──
+      // ── Step 2: Convert to proper MP3 with ffmpeg-static ──
       if (soundcloudOk && rawFile) {
         try {
           await convertToMp3(rawFile, mp3File, 192);
@@ -290,62 +222,58 @@ export async function songCommand(sock, chat, msg, args) {
             `🎵 *Downloaded from SoundCloud ✅*\n*Converted to MP3 ✅*\n\nUploading…`);
         } catch (convErr) {
           console.warn('[song] MP3 conversion failed:', convErr.message);
-          // Fall through to yt-dlp backup
           cleanFile(mp3File);
-          mp3File = null;
           soundcloudOk = false;
         }
       }
 
-      // ── Step 3: Backup — SoundCloud search → yt-dlp download ──
+      // ── Step 3: Backup — SoundCloud search → yt-dlp ──
       if (!soundcloudOk) {
-        usedSource = 'yt-dlp (SoundCloud URL)';
+        usedSource = 'yt-dlp';
         mp3File = path.join(TMP_DIR, `wraith-${Date.now()}.mp3`);
+        const before = Date.now();
 
         let trackUrl = null;
         try {
-          await editMessage(sock, chat, status, `🔍 *Searching SoundCloud for backup…*`);
+          await editMessage(sock, chat, status, `🔍 *Searching SoundCloud (backup)…*`);
           const track = await searchSoundcloud(query);
-          if (track?.permalink_url) {
-            trackUrl = track.permalink_url;
-          }
+          if (track?.permalink_url) trackUrl = track.permalink_url;
         } catch (e) {
           console.warn('[song] SoundCloud backup search failed:', e.message);
         }
 
         if (!trackUrl) {
-          // Last resort: let yt-dlp search SoundCloud itself
           trackUrl = `scsearch1:${query}`;
-          usedSource = 'yt-dlp (scsearch)';
         }
 
-        await editMessage(sock, chat, status,
-          `🎵 *Downloading via yt-dlp…*\n\n[${progressBar(0)}] 0%`);
+        await editMessage(sock, chat, status, `🎵 *Downloading via yt-dlp…*`);
+        await ytDlpDownload(trackUrl, mp3File);
 
-        let lastPct = -1;
-        await runYtDlp(trackUrl, mp3File, async (pct) => {
-          if (pct - lastPct < 5 && pct < 100) return;
-          lastPct = pct;
-          await editMessage(sock, chat, status,
-            `🎵 *Downloading via yt-dlp…*\n\n[${progressBar(pct)}] ${pct.toFixed(1)}%`);
-        });
-
-        // yt-dlp sometimes names the file differently
+        // yt-dlp may write to a slightly different name — find it
         if (!fs.existsSync(mp3File)) {
-          const alt = newestAudio(TMP_DIR);
-          if (!alt) throw new Error('No output file from yt-dlp');
+          const alt = newestAudio(TMP_DIR, before);
+          if (!alt) throw new Error('yt-dlp produced no output');
           if (alt !== mp3File) fs.renameSync(alt, mp3File);
+        }
+
+        // If yt-dlp gave us non-mp3, convert with ffmpeg-static
+        if (!/\.mp3$/i.test(mp3File) || !fs.existsSync(mp3File)) {
+          const alt = newestAudio(TMP_DIR, before);
+          if (alt) {
+            const converted = path.join(TMP_DIR, `wraith-conv-${Date.now()}.mp3`);
+            await convertToMp3(alt, converted, 192);
+            mp3File = converted;
+          }
         }
 
         await editMessage(sock, chat, status,
           `🎵 *Downloaded ✅*\n*Converted to MP3 ✅*\n\nUploading…`);
       }
 
-      // ── Step 4: size check ──
+      // ── Step 4: verify ──
       if (!mp3File || !fs.existsSync(mp3File)) {
         throw new Error('No audio file produced');
       }
-
       const stat = fs.statSync(mp3File);
       if (stat.size > AUDIO_MAX_BYTES) {
         const mb = (stat.size / 1024 / 1024).toFixed(2);
@@ -356,7 +284,6 @@ export async function songCommand(sock, chat, msg, args) {
         cleanFile(rawFile);
         return;
       }
-
       if (stat.size < 1024) {
         throw new Error('audio file is empty');
       }
