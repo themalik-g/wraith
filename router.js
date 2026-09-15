@@ -15,6 +15,7 @@ import { activityCommand, trackActivity } from './modules/activity.js';
 import { updateCommand } from './modules/update.js';
 import { prefixCommand } from './modules/prefix.js';
 import { songCommand as dlSongCommand } from './modules/song.js';
+import { urlCommand } from './modules/url.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 import { getPrefix } from './core/settings.js';
 import { isOwner } from './core/identity.js';
@@ -67,7 +68,7 @@ const CRITICAL_COMMANDS = new Set([
   'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
   'rejectcalls', 'setpp', 'setabout', 'chatstats',
   'ig', 'tiktok', 'fb', 'rmbg', 'remini',
-  'gitdl', 'mfdl', 'chatbot',
+  'gitdl', 'mfdl', 'chatbot', 'url',
 ]);
 
 const attachedSockets = new WeakSet();
@@ -246,6 +247,9 @@ export async function dispatch(sock, update) {
 
           // ── Phase 5 ──
           case 'stalk': await stalkCommand(sock, chat, msg, rest); break;
+
+          // ── url ──
+          case 'url': await urlCommand(sock, chat, msg, rest); break;
 
           default: break;
         }
