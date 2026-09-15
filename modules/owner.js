@@ -48,8 +48,8 @@ export async function setppCommand(sock, chat, msg, args) {
         if (Jimp) {
             try {
                 const img = await Jimp.read(buffer);
-                img.cover(640, 640);
-                buffer = await img.getBufferAsync(Jimp.MIME_JPEG);
+                  img.cover({ w: 640, h: 640 });
+                  buffer = await img.getBuffer('image/jpeg');
             } catch (e) {
                 console.warn('[setpp] jimp processing failed, sending raw:', e.message);
             }
