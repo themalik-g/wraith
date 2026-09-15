@@ -48,11 +48,12 @@ function sweepDir(dir, since) {
     }
   } catch {}
 }
-function newestFile(dir, since) {
+function producedFiles(dir, since) {
   return fs.readdirSync(dir)
     .map((f) => ({ full: path.join(dir, f), t: fs.statSync(path.join(dir, f)).mtimeMs }))
     .filter((x) => x.t >= since)
-    .sort((a, b) => b.t - a.t)[0]?.full || null;
+    .sort((a, b) => a.t - b.t)
+    .map((x) => x.full);
 }
 
 function bufferToMp3(inputBuffer, bitrate = 192) {
@@ -118,75 +119,88 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
       await withTimeout(
         yt.audioFormat('mp3').audio().download(),
         YTDLP_TIMEOUT,
-        'yt-dlp audio'
+        'audio download'
       );
     } else {
       await edit(sock, chat, status, '⬇️ *Downloading…*');
-      await withTimeout(
-        yt.format('bestvideo+bestaudio/best').mergeFormat('mp4').video().download(),
-        YTDLP_TIMEOUT,
-        'yt-dlp video'
-      );
+      try {
+        await withTimeout(
+          yt.format('bestvideo+bestaudio/best').mergeFormat('mp4').download(),
+          YTDLP_TIMEOUT,
+          'media download'
+        );
+      } catch {
+        // Fallback for photo/slideshow posts
+        await withTimeout(
+          yt.download(),
+          YTDLP_TIMEOUT,
+          'fallback download'
+        );
+      }
     }
 
-    produced = newestFile(TMP, runStart);
-    if (!produced || !fs.existsSync(produced)) throw new Error('yt-dlp produced no file');
-
-    let buffer = fs.readFileSync(produced);
-    cleanFile(produced);
-    produced = null;
-
-    let type = await classifyBuffer(buffer);
-
-    if (audioOnly && !(type.kind === 'audio' && type.ext === 'mp3')) {
-      await edit(sock, chat, status, '⚙️ *Converting to mp3…*');
-      buffer = await withTimeout(
-        bufferToMp3(buffer, 192),
-        CONVERT_TIMEOUT,
-        'mp3 conversion'
-      );
-      type = { kind: 'audio', ext: 'mp3', mime: 'audio/mpeg' };
-    }
-
-    const limit = type.kind === 'video' ? MAX_VIDEO : MAX_BYTES;
-    if (buffer.length > limit) {
-      throw new Error(`too big (${(buffer.length / 1048576).toFixed(1)} MB > ${(limit / 1048576).toFixed(0)} MB)`);
-    }
-    if (buffer.length < 1024) throw new Error('downloaded file is empty');
+    const files = producedFiles(TMP, runStart);
+    if (!files.length) throw new Error('No media file downloaded');
 
     const safeName = (query.replace(/[^\w\s-]/g, '').slice(0, 50).trim() || 'media');
+    let sentCount = 0;
 
-    if (type.kind === 'image') {
-      await sock.sendMessage(chat, {
-        image: buffer, mimetype: type.mime, caption: `🖼️ _${safeName}_`,
-      }, { quoted: msg });
-    } else if (type.kind === 'video') {
-      await sock.sendMessage(chat, {
-        video: buffer, mimetype: type.mime || 'video/mp4',
-        fileName: `${safeName}.${type.ext}`, caption: `🎬 _${safeName}_`,
-      }, { quoted: msg });
-    } else if (type.kind === 'audio') {
-      await sock.sendMessage(chat, {
-        audio: buffer, mimetype: type.mime || 'audio/mpeg',
-        fileName: `${safeName}.${type.ext}`, ptt: false,
-      }, { quoted: msg });
-    } else {
-      await sock.sendMessage(chat, {
-        document: buffer, mimetype: type.mime,
-        fileName: `${safeName}.${type.ext}`, caption: `📄 _${safeName}_`,
-      }, { quoted: msg });
+    for (const file of files.slice(0, 10)) {
+      if (!fs.existsSync(file)) continue;
+      let buffer = fs.readFileSync(file);
+      cleanFile(file);
+
+      if (buffer.length < 1024) continue;
+      let type = await classifyBuffer(buffer);
+
+      if (audioOnly && !(type.kind === 'audio' && type.ext === 'mp3')) {
+        await edit(sock, chat, status, '⚙️ *Converting to mp3…*');
+        buffer = await withTimeout(
+          bufferToMp3(buffer, 192),
+          CONVERT_TIMEOUT,
+          'mp3 conversion'
+        );
+        type = { kind: 'audio', ext: 'mp3', mime: 'audio/mpeg' };
+      }
+
+      const limit = type.kind === 'video' ? MAX_VIDEO : MAX_BYTES;
+      if (buffer.length > limit) continue;
+
+      if (type.kind === 'image') {
+        await sock.sendMessage(chat, {
+          image: buffer, mimetype: type.mime, caption: `🖼️ _${safeName}_\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`,
+        }, { quoted: msg });
+        sentCount++;
+      } else if (type.kind === 'video') {
+        await sock.sendMessage(chat, {
+          video: buffer, mimetype: type.mime || 'video/mp4',
+          fileName: `${safeName}.${type.ext}`, caption: `🎬 _${safeName}_\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`,
+        }, { quoted: msg });
+        sentCount++;
+      } else if (type.kind === 'audio') {
+        await sock.sendMessage(chat, {
+          audio: buffer, mimetype: type.mime || 'audio/mpeg',
+          fileName: `${safeName}.${type.ext}`, ptt: false,
+        }, { quoted: msg });
+        sentCount++;
+      } else {
+        await sock.sendMessage(chat, {
+          document: buffer, mimetype: type.mime,
+          fileName: `${safeName}.${type.ext}`, caption: `📄 _${safeName}_\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`,
+        }, { quoted: msg });
+        sentCount++;
+      }
     }
 
-    const via = audioOnly ? 'yt-dlp (audio)' : `yt-dlp (${type.kind})`;
-    await edit(sock, chat, status, `✅ *Done via ${via}*\n_${safeName}_`);
-    await react(sock, chat, msg, '☑');
+    if (sentCount === 0) throw new Error('Downloaded files were empty or exceeded size limits');
 
+    await edit(sock, chat, status, `✅ *Download complete*\n_${safeName}_\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`);
+    await react(sock, chat, msg, '☑');
   } catch (e) {
     console.error('[download]', e.message);
     await edit(sock, chat, status, `❌ *Failed:* ${e.message}`);
     await react(sock, chat, msg, '❌');
   } finally {
-    if (produced) cleanFile(produced);
     setTimeout(() => sweepDir(TMP, runStart), 10_000).unref?.();
   }
 }

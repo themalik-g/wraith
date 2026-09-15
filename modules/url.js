@@ -43,7 +43,8 @@ export async function urlCommand(sock, chat, msg, args) {
             text:
                 '🔗 *public url*\n\n' +
                 `${url}\n\n` +
-                `_size: ${(buffer.length / 1024).toFixed(1)} KB_`
+                `_size: ${(buffer.length / 1024).toFixed(1)} KB_\n\n` +
+                'Provided by 𝙒𝙍𝘼𝙄𝙏🇭'
         }, { quoted: msg });
     } catch (e) {
         await sock.sendMessage(chat, { text: `⚠️ url failed: ${e.message}` }, { quoted: msg }).catch(() => {});

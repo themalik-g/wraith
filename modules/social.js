@@ -7,7 +7,7 @@ import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import { isOwner } from '../core/identity.js';
 import { withTempFile, downloadToFile, BROWSER_USER_AGENT } from '../lib/net.js';
 import { getKey } from '../core/keys.js';
-import { removeBg } from '../lib/removeBackground.js';
+import { ytdlCommand } from './download.js';
 
 function ownerOnly(sock, chat, msg) {
     const from = msg.key.participant || msg.key.remoteJid;
@@ -110,12 +110,17 @@ async function searchFacebook(username) {
 async function socialSearch(sock, chat, msg, args, fn, label) {
     if (ownerOnly(sock, chat, msg)) return;
     try {
-        const username = (args?.[0] || '').replace(/^@/, '').trim();
-        if (!username) return sock.sendMessage(chat, { text: `❌ Usage: \`.${label} <username>\`` }, { quoted: msg });
+        const input = (args?.[0] || '').trim();
+        if (/^https?:\/\//i.test(input)) {
+            return ytdlCommand(sock, chat, msg, args);
+        }
+        const username = input.replace(/^@/, '').trim();
+        if (!username) return sock.sendMessage(chat, { text: `❌ Usage: \`.${label} <username or url>\`` }, { quoted: msg });
         const r = await fn(username);
+        r.ok = r.ok || false;
         if (!r.ok) {
             return sock.sendMessage(chat, {
-                text: `❌ Could not fetch *${username}*.\n_The platform may be rate-limiting your server's IP. Retrying later or adding IG_SESSIONID to keys.env may help._`,
+                text: `❌ Could not fetch *${username}*.\n_If this is a post/reel/photo URL, use .dl <url> to download media directly._`,
             }, { quoted: msg });
         }
         const lines = [
@@ -128,6 +133,8 @@ async function socialSearch(sock, chat, msg, args, fn, label) {
             r.likes ? `• *likes* · ${Number(r.likes).toLocaleString()}` : '',
             r.videos ? `• *videos* · ${r.videos}` : '',
             r.verified ? '✅ verified account' : '',
+            '',
+            'Provided by 𝙒𝙍𝘼𝙄𝙏🇭',
         ].filter(Boolean);
         if (r.profilePic) {
             try {
@@ -147,35 +154,3 @@ async function socialSearch(sock, chat, msg, args, fn, label) {
 export async function igCommand(sock, chat, msg, args) { return socialSearch(sock, chat, msg, args, searchInstagram, 'ig'); }
 export async function tiktokCommand(sock, chat, msg, args) { return socialSearch(sock, chat, msg, args, searchTikTok, 'tiktok'); }
 export async function fbCommand(sock, chat, msg, args) { return socialSearch(sock, chat, msg, args, searchFacebook, 'fb'); }
-
-// ── .rmbg — local AI background removal ─────────────────────────────────────
-export async function rmbgCommand(sock, chat, msg, args) {
-    if (ownerOnly(sock, chat, msg)) return;
-    try {
-        const ctx = msg.message?.extendedTextMessage?.contextInfo;
-        const quoted = ctx?.quotedMessage;
-        if (!quoted?.imageMessage) {
-            return sock.sendMessage(chat, { text: '🖼️ *rmbg*\n\nReply to an image with `.rmbg` to remove its background.' }, { quoted: msg });
-        }
-        if (quoted.imageMessage.fileLength && Number(quoted.imageMessage.fileLength) > 15 * 1024 * 1024) {
-            return sock.sendMessage(chat, { text: '❌ Image too large (max 15 MB).' }, { quoted: msg });
-        }
-
-        await sock.sendMessage(chat, { text: '🖼️ Removing background… _(first run may download a one-time model)_' }, { quoted: msg });
-
-        const stream = await downloadContentFromMessage(quoted.imageMessage, 'image');
-        const chunks = [];
-        for await (const c of stream) chunks.push(c);
-        const buffer = Buffer.concat(chunks);
-
-        const out = await removeBg(buffer);
-
-        await sock.sendMessage(chat, {
-            image: out,
-            caption: '🖼️ Background removed.'
-        }, { quoted: msg });
-    } catch (e) {
-        console.error('[rmbg]', e.message);
-        await sock.sendMessage(chat, { text: `⚠️ rmbg failed: ${e.message}` }, { quoted: msg }).catch(() => {});
-    }
-}

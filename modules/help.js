@@ -110,20 +110,6 @@ const REGISTRY = [
     ],
   },
   {
-    id: 'image-ai',
-    aliases: ['imgai', 'photo'],
-    icon: '🪄',
-    title: 'ɪᴍɢ ᴀɪ',
-    commands: [
-      c('.remini', true),
-      c('.remini <image_url>', true),
-      c('.rmbg', true),
-      c('.rmbg <image_url>', true),
-      c('.removebg', true),
-      c('.nobg', true),
-    ],
-  },
-  {
     id: 'download',
     aliases: ['dl'],
     icon: '⬇️',
@@ -147,17 +133,6 @@ const REGISTRY = [
       c('.ig <username>', true),
       c('.tiktok <username>', true),
       c('.fb <username>', true),
-    ],
-  },
-  {
-    id: 'ai',
-    aliases: ['chatbot'],
-    icon: '🤖',
-    title: 'ᴀɪ',
-    commands: [
-      c('.chatbot', true),
-      c('.chatbot on', true),
-      c('.chatbot off', true),
     ],
   },
   {

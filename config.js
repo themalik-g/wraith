@@ -17,11 +17,6 @@ const BASE = {
   reconnectDelay: 3000,
   repoUrl: "https://github.com/themalik-g/wraith",
   // Feature-specific defaults
-  chatbot: {
-    enabled: false,
-    instructions: "You are WRAITH, a helpful WhatsApp assistant. Reply concisely in the same language the user writes in. Be friendly but brief.",
-    cooldownMs: 5000,
-  },
   stalk: {
     maxEventsPerJid: 500,
   },
