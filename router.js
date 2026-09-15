@@ -14,7 +14,8 @@ import { presenceCommand, shouldReadReceipts, applyAutoPresence } from './module
 import { activityCommand, trackActivity } from './modules/activity.js';
 import { updateCommand } from './modules/update.js';
 import { prefixCommand } from './modules/prefix.js';
-import { songCommand as dlSongCommand } from './modules/song.js';
+import { songCommand } from './modules/song.js';
+import { ytdlCommand } from './modules/download.js';
 import { urlCommand } from './modules/url.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 import { getPrefix } from './core/settings.js';
@@ -130,7 +131,6 @@ export async function dispatch(sock, update) {
       const text = plainText(msg);
       const prefix = getPrefix();
 
-      // Non-command messages → chatbot auto-reply (only fires when .chatbot on in that chat)
       if (!text.startsWith(prefix)) {
         try { await maybeAutoReply(sock, chat, msg); } catch (e) { console.error('[router] chatbot', e.message); }
         continue;
@@ -156,7 +156,7 @@ export async function dispatch(sock, update) {
       }
 
       const KNOWN = new Set([...CRITICAL_COMMANDS,
-        'dl', 'download', 'song', 'songinfo', 'help', 'menu', 'ping',
+        'dl', 'download', 'mp3', 'song', 'songinfo', 'help', 'menu', 'ping',
         'currency', 'qr', 'define', 'weather', 'pwned', 'owner', 'script', 'repo',
         'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
         'welcome', 'goodbye', 'getpp', 'remini',
@@ -172,9 +172,15 @@ export async function dispatch(sock, update) {
           case 'peek': await peekCommand(sock, chat, msg, rest); break;
           case 'lurk': await lurkCommand(sock, chat, msg, rest); break;
           case 'ping': await pingCommand(sock, chat, msg); break;
+
+          // ── Song (SoundCloud → Apple → Deezer) ──
+          case 'song': await songCommand(sock, chat, msg, rest); break;
+
+          // ── Download (yt-dlp, all platforms) ──
           case 'dl':
           case 'download':
-          case 'song': await dlSongCommand(sock, chat, msg, rest); break;
+          case 'mp3': await ytdlCommand(sock, chat, msg, rest); break;
+
           case 'songinfo': await songInfoCommand(sock, chat, msg, rest); break;
           case 'prefix': await prefixCommand(sock, chat, msg, rest); break;
           case 'help':
@@ -282,4 +288,4 @@ export async function dispatchUpdate(sock, update) {
 
 export async function dispatchStatus(sock, payload) {
   try { await lurkTick(sock, payload); } catch (e) { console.error('[dispatchStatus]', e); }
-}
+                                             }
