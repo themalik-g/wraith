@@ -31,7 +31,9 @@ Built on [Baileys v7](https://github.com/WhiskeySockets/Baileys) with LID-aware 
 | 👁️ **Peek** | Reveals view-once images, videos, audio. |
 | 🌒 **Lurk** | Auto-view statuses, auto-react, silent download to owner DM. |
 | 📅 **Schedule** | Send any message later — numbers, @usernames, JIDs, newsletters. |
-| 👥 **Admin** | Kick, add, promote, demote + antilink, antispam, antisticker. |
+| 👥 **Admin / Group** | Kick, add, promote, demote, open/close group, schedule open/close, tagall, hidetag, setgpp, setgdesc + antilink, antispam, antisticker. |
+| 👤 **Owner / Block** | Block/unblock by reply/number/JID, blocklist, unblockall, setstatus, getstatus, getpair pairing session. |
+| 📚 **Media / Books** | Verified book downloading (Gutenberg/Archive.org), stock image search, lyrics, movies, song info. |
 | 🖼️ **Getpp** | Fetch profile pictures of any user, group, or chat. |
 | 📌 **Getjid** | PN + LID resolver, channel list, group members, current chat. |
 | ⚙️ **Presence** | Always online, auto-typing, auto-recording, read receipts. |

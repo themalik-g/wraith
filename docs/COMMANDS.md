@@ -73,6 +73,8 @@ All commands are **owner-only**. Prefix is a dot: `.`
 ```
 .schedule Hey! 923001234567 25,12,26 10 30 am
 .schedule 25,12,26 10 30 am        (reply to a message)
+.schedule open 25,12,26 10 30 am   (schedule opening current group)
+.schedule close 25,12,26 10 30 pm  (schedule closing current group)
 ```
 
 **Date formats supported:** `dd,mm,yy`, `dd/mm/yy`, `dd-mm-yy`, or `dd mm yy` (3 tokens).
@@ -85,6 +87,12 @@ All commands are **owner-only**. Prefix is a dot: `.`
 
 | Command | Description |
 |---|---|
+| `.open` | Open group so all members can send messages |
+| `.close` | Close group so only admins can send messages |
+| `.tagall [message]` | Tag all group participants explicitly |
+| `.hidetag [message]` | Tag all group participants silently |
+| `.setgpp` (reply image) | Change group profile picture |
+| `.setgdesc <text>` | Change group description |
 | `.kick` (reply) | Remove the replied user |
 | `.kick 923001234567` | Remove by number |
 | `.add 923001234567` | Add by number |
@@ -102,6 +110,20 @@ All commands are **owner-only**. Prefix is a dot: `.`
 | `.antisticker on\|off` | Block stickers |
 
 **Behavior:** Violating messages are deleted and the sender is mentioned.
+
+---
+
+## ⛔ Block & Status Management
+
+| Command | Description |
+|---|---|
+| `.block` (reply / num / JID) | Block user |
+| `.unblock` (reply / num / JID) | Unblock user |
+| `.blocklist` | Show current blocklist |
+| `.unblockall` | Unblock all blocked users |
+| `.setstatus <text>` / reply media | Post status update to `status@broadcast` |
+| `.getstatus <number/JID>` | Fetch status/about bio of user |
+| `.getpair <number>` | Generate pairing code session and retrieve `creds.json` |
 
 ---
 
