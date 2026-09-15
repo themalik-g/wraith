@@ -1,8 +1,7 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/song.js
-// .song → @snwfdhmp/soundcloud-downloader (priority)
-//      → @choewy/yt-dlp binary (fallback, live %)
-//      → final ☑ green tick react
+// Primary: @snwfdhmp/soundcloud-downloader → proper MP3 conversion
+// Backup : SoundCloud search → yt-dlp downloads the track URL
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
 import os from 'node:os';
@@ -55,12 +54,101 @@ function progressBar(pct) {
 function cleanFile(p) {
   try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch {}
 }
-function newestMp3(dir) {
+function newestAudio(dir) {
   const files = fs.readdirSync(dir)
-    .filter((f) => f.toLowerCase().endsWith('.mp3'))
+    .filter((f) => /\.(mp3|m4a|opus|ogg|wav|webm)$/i.test(f))
     .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
     .sort((a, b) => b.t - a.t);
   return files[0] ? path.join(dir, files[0].f) : null;
+}
+
+// ─── Format detection from file header ───
+function detectAudioFormat(buf) {
+  if (!buf || buf.length < 12) return { ext: 'mp3', mime: 'audio/mpeg' };
+  const a4 = buf.toString('ascii', 4, 8);
+  const a0 = buf.toString('ascii', 0, 4);
+  if (a4 === 'ftyp') return { ext: 'm4a', mime: 'audio/mp4' };
+  if (a0 === 'ID3' || (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) return { ext: 'mp3', mime: 'audio/mpeg' };
+  if (a0 === 'OggS') return { ext: 'ogg', mime: 'audio/ogg; codecs=opus' };
+  if (a0 === 'RIFF') return { ext: 'wav', mime: 'audio/wav' };
+  if (a0 === 'fLaC') return { ext: 'flac', mime: 'audio/flac' };
+  return { ext: 'mp3', mime: 'audio/mpeg' };
+}
+
+// ─────────────────────────────────────────────
+//  PROPER MP3 CONVERTER
+//  audio-decode (decode any format → PCM)
+//  @audio/encode (encode PCM → MP3 via WASM)
+//  No ffmpeg binary required.
+// ─────────────────────────────────────────────
+let _decodeAudio = null;
+let _encode = null;
+
+async function getDecodeAudio() {
+  if (_decodeAudio) return _decodeAudio;
+  try {
+    const mod = await import('audio-decode');
+    _decodeAudio = mod.default || mod;
+    return _decodeAudio;
+  } catch (e) {
+    console.warn('[song] audio-decode unavailable:', e.message);
+    return null;
+  }
+}
+
+async function getEncoder() {
+  if (_encode) return _encode;
+  try {
+    const mod = await import('@audio/encode');
+    _encode = mod.default || mod;
+    return _encode;
+  } catch (e) {
+    console.warn('[song] @audio/encode unavailable:', e.message);
+    return null;
+  }
+}
+
+/**
+ * Convert any audio file to a proper MP3.
+ * Returns the output path on success, throws on failure.
+ */
+async function convertToMp3(inputPath, outputPath, bitrate = 192) {
+  const decodeAudio = await getDecodeAudio();
+  const encode = await getEncoder();
+
+  if (!decodeAudio || !encode) {
+    throw new Error('MP3 conversion libraries not available (audio-decode + @audio/encode)');
+  }
+
+  const buffer = fs.readFileSync(inputPath);
+  const audioBuffer = await decodeAudio(buffer);
+
+  const channelCount = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const length = audioBuffer.length;
+
+  if (!length) throw new Error('decoded audio is empty');
+
+  // Build Float32Array[] — one per channel
+  const channels = [];
+  for (let i = 0; i < channelCount; i++) {
+    channels.push(audioBuffer.getChannelData(i));
+  }
+
+  // Encode to MP3
+  const mp3 = await encode.mp3(channels, {
+    sampleRate,
+    bitrate,
+  });
+
+  fs.writeFileSync(outputPath, Buffer.from(mp3));
+
+  // Verify output
+  if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size < 1024) {
+    throw new Error('MP3 conversion produced empty output');
+  }
+
+  return outputPath;
 }
 
 // ─── SoundCloud client_id scrape ───
@@ -104,7 +192,7 @@ async function searchSoundcloud(query) {
   return data.collection[0];
 }
 
-// ─── SoundCloud download ───
+// ─── SoundCloud download (raw) ───
 async function downloadViaSoundcloud(query, outFile) {
   if (!scdl) throw new Error('soundcloud-downloader not installed');
   const track = await searchSoundcloud(query);
@@ -125,11 +213,11 @@ async function downloadViaSoundcloud(query, outFile) {
   return track;
 }
 
-// ─── yt-dlp fallback ───
-function runYtDlp(query, outFile, onProgress) {
+// ─── yt-dlp download from a specific URL (with live progress) ───
+function runYtDlp(url, outFile, onProgress) {
   return new Promise((resolve, reject) => {
     const args = [
-      `scsearch1:${query}`,
+      url,
       '-x',
       '--audio-format', 'mp3',
       '--audio-quality', '0',
@@ -153,7 +241,9 @@ function runYtDlp(query, outFile, onProgress) {
   });
 }
 
-// ─── Main handler ───
+// ─────────────────────────────────────────────
+//  Main handler
+// ─────────────────────────────────────────────
 export async function songCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
   if (!query) {
@@ -165,69 +255,114 @@ export async function songCommand(sock, chat, msg, args) {
       text: `🎵 *Searching:* ${query}`
     }, { quoted: msg });
 
-    let outFile = null;
+    let rawFile = null;        // what SoundCloud downloader gave us
+    let mp3File = null;        // final MP3 to send
     let usedSource = null;
 
     try {
-      // ── SoundCloud first ──
+      // ── Step 1: SoundCloud download ──
       await editMessage(sock, chat, status, `🎵 *Searching SoundCloud…*`);
 
-      outFile = path.join(TMP_DIR, `wraith-${Date.now()}.mp3`);
+      const stamp = Date.now();
+      rawFile = path.join(TMP_DIR, `wraith-raw-${stamp}.bin`);
+      mp3File = path.join(TMP_DIR, `wraith-${stamp}.mp3`);
+
       let soundcloudOk = false;
 
       try {
         await editMessage(sock, chat, status, `🎵 *Downloading from SoundCloud…*`);
-        const track = await downloadViaSoundcloud(query, outFile);
+        const track = await downloadViaSoundcloud(query, rawFile);
         soundcloudOk = true;
         usedSource = 'SoundCloud';
         await editMessage(sock, chat, status,
-          `🎵 *Downloaded from SoundCloud ✅*\n\n_${(track.title || query).slice(0, 60)}_`);
+          `🎵 *Downloaded from SoundCloud ✅*\n\n_${(track.title || query).slice(0, 60)}_\n\n⚙️ Converting to MP3…`);
       } catch (scErr) {
-        console.warn('[song] SoundCloud failed:', scErr.message);
-        cleanFile(outFile);
-        outFile = null;
+        console.warn('[song] SoundCloud downloader failed:', scErr.message);
+        cleanFile(rawFile);
+        rawFile = null;
       }
 
-      // ── yt-dlp fallback with live progress ──
+      // ── Step 2: Convert to proper MP3 ──
+      if (soundcloudOk && rawFile) {
+        try {
+          await convertToMp3(rawFile, mp3File, 192);
+          await editMessage(sock, chat, status,
+            `🎵 *Downloaded from SoundCloud ✅*\n*Converted to MP3 ✅*\n\nUploading…`);
+        } catch (convErr) {
+          console.warn('[song] MP3 conversion failed:', convErr.message);
+          // Fall through to yt-dlp backup
+          cleanFile(mp3File);
+          mp3File = null;
+          soundcloudOk = false;
+        }
+      }
+
+      // ── Step 3: Backup — SoundCloud search → yt-dlp download ──
       if (!soundcloudOk) {
-        usedSource = 'yt-dlp';
-        outFile = path.join(TMP_DIR, `wraith-${Date.now()}.mp3`);
+        usedSource = 'yt-dlp (SoundCloud URL)';
+        mp3File = path.join(TMP_DIR, `wraith-${Date.now()}.mp3`);
+
+        let trackUrl = null;
+        try {
+          await editMessage(sock, chat, status, `🔍 *Searching SoundCloud for backup…*`);
+          const track = await searchSoundcloud(query);
+          if (track?.permalink_url) {
+            trackUrl = track.permalink_url;
+          }
+        } catch (e) {
+          console.warn('[song] SoundCloud backup search failed:', e.message);
+        }
+
+        if (!trackUrl) {
+          // Last resort: let yt-dlp search SoundCloud itself
+          trackUrl = `scsearch1:${query}`;
+          usedSource = 'yt-dlp (scsearch)';
+        }
 
         await editMessage(sock, chat, status,
-          `🎵 *Downloading using yt-dlp…*\n\n[${progressBar(0)}] 0%`);
+          `🎵 *Downloading via yt-dlp…*\n\n[${progressBar(0)}] 0%`);
 
         let lastPct = -1;
-        await runYtDlp(query, outFile, async (pct) => {
+        await runYtDlp(trackUrl, mp3File, async (pct) => {
           if (pct - lastPct < 5 && pct < 100) return;
           lastPct = pct;
           await editMessage(sock, chat, status,
-            `🎵 *Downloading using yt-dlp…*\n\n[${progressBar(pct)}] ${pct.toFixed(1)}%`);
+            `🎵 *Downloading via yt-dlp…*\n\n[${progressBar(pct)}] ${pct.toFixed(1)}%`);
         });
 
-        await editMessage(sock, chat, status,
-          `🎵 *Downloaded ✅*\n\nNow converting to MP3…`);
-
-        if (!fs.existsSync(outFile)) {
-          const alt = newestMp3(TMP_DIR);
+        // yt-dlp sometimes names the file differently
+        if (!fs.existsSync(mp3File)) {
+          const alt = newestAudio(TMP_DIR);
           if (!alt) throw new Error('No output file from yt-dlp');
-          if (alt !== outFile) fs.renameSync(alt, outFile);
+          if (alt !== mp3File) fs.renameSync(alt, mp3File);
         }
 
         await editMessage(sock, chat, status,
           `🎵 *Downloaded ✅*\n*Converted to MP3 ✅*\n\nUploading…`);
       }
 
-      const stat = fs.statSync(outFile);
+      // ── Step 4: size check ──
+      if (!mp3File || !fs.existsSync(mp3File)) {
+        throw new Error('No audio file produced');
+      }
+
+      const stat = fs.statSync(mp3File);
       if (stat.size > AUDIO_MAX_BYTES) {
         const mb = (stat.size / 1024 / 1024).toFixed(2);
         await editMessage(sock, chat, status,
           `⚠️ File too big (${mb} MB). WhatsApp limit ~15 MB.`);
         await react(sock, chat, msg, '❌');
-        cleanFile(outFile);
+        cleanFile(mp3File);
+        cleanFile(rawFile);
         return;
       }
 
-      const buffer = fs.readFileSync(outFile);
+      if (stat.size < 1024) {
+        throw new Error('audio file is empty');
+      }
+
+      // ── Step 5: send ──
+      const buffer = fs.readFileSync(mp3File);
       const safeName = query.replace(/[^\w\s-]/g, '').slice(0, 50).trim() || 'audio';
 
       await sock.sendMessage(chat, {
@@ -239,13 +374,15 @@ export async function songCommand(sock, chat, msg, args) {
 
       await editMessage(sock, chat, status, `✅ *Done via ${usedSource}*`);
       await react(sock, chat, msg, '☑');
-      cleanFile(outFile);
+      cleanFile(mp3File);
+      cleanFile(rawFile);
 
     } catch (err) {
       console.error('[song]', err.message);
       await editMessage(sock, chat, status, `❌ *Failed:* ${err.message}`);
       await react(sock, chat, msg, '❌');
-      if (outFile) cleanFile(outFile);
+      if (mp3File) cleanFile(mp3File);
+      if (rawFile) cleanFile(rawFile);
     }
   });
 }
