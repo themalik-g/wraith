@@ -1,9 +1,11 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/download.js
-// .dl / .download / .mp3  →  yt-dlp (all platforms)
-//   · URLs are used directly
-//   · text queries default to scsearch1: (SoundCloud)
-//     so YouTube cookies are never required
+// .dl / .download  →  yt-dlp, any platform, native media type
+// .mp3             →  yt-dlp audio extraction (-x --audio-format mp3)
+//
+//  · Media type auto-detected from magic bytes (file-type)
+//  · Everything deleted after send (short delay + sweep)
+//  · Leftovers never accumulate
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,11 +13,15 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import PQueue from 'p-queue';
 import ffmpegPath from 'ffmpeg-static';
+import { fileTypeFromBuffer } from 'file-type';
 
-const TMP = path.join(os.tmpdir(), 'wraith-song');
+const TMP = path.join(os.tmpdir(), 'wraith-dl');
 fs.mkdirSync(TMP, { recursive: true });
 
-const MAX_BYTES = 15 * 1024 * 1024;
+const MAX_BYTES      = 15 * 1024 * 1024;   // audio / image cap
+const MAX_VIDEO      = 60 * 1024 * 1024;   // video cap
+const YTDLP_TIMEOUT  = 120_000;
+const CONVERT_TIMEOUT = 60_000;
 const queue = new PQueue({ concurrency: 1 });
 
 async function react(sock, chat, msg, emoji) {
@@ -24,123 +30,175 @@ async function react(sock, chat, msg, emoji) {
 async function edit(sock, chat, key, text) {
   try { await sock.sendMessage(chat, { text, edit: key.key }); } catch {}
 }
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms/1000)}s`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 function cleanFile(p) {
   try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch {}
 }
-function newestAudio(dir, since) {
+function sweepDir(dir, since) {
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      const full = path.join(dir, f);
+      try { if (fs.statSync(full).mtimeMs >= since) fs.unlinkSync(full); } catch {}
+    }
+  } catch {}
+}
+function newestFile(dir, since) {
   return fs.readdirSync(dir)
-    .filter((f) => /\.(mp3|m4a|opus|ogg|wav|webm)$/i.test(f))
-    .map((f) => ({
-      full: path.join(dir, f),
-      t: fs.statSync(path.join(dir, f)).mtimeMs,
-    }))
-    .filter((x) => !since || x.t >= since)
+    .map((f) => ({ full: path.join(dir, f), t: fs.statSync(path.join(dir, f)).mtimeMs }))
+    .filter((x) => x.t >= since)
     .sort((a, b) => b.t - a.t)[0]?.full || null;
 }
 
-function convertToMp3(inp, out, bitrate = 192) {
+function bufferToMp3(inputBuffer, bitrate = 192) {
   return new Promise((resolve, reject) => {
-    if (!ffmpegPath) return reject(new Error('ffmpeg-static missing — run `npm install`'));
-    if (!fs.existsSync(inp)) return reject(new Error('input file missing'));
+    if (!ffmpegPath) return reject(new Error('ffmpeg-static missing'));
+    if (!inputBuffer || inputBuffer.length < 1024) return reject(new Error('input too small'));
 
-    const p = spawn(ffmpegPath, [
+    const ff = spawn(ffmpegPath, [
       '-hide_banner', '-loglevel', 'error',
-      '-i', inp,
-      '-vn',
-      '-codec:a', 'libmp3lame',
-      '-b:a', `${bitrate}k`,
-      '-y', out,
+      '-i', 'pipe:0', '-vn',
+      '-codec:a', 'libmp3lame', '-b:a', `${bitrate}k`,
+      '-f', 'mp3', 'pipe:1',
     ]);
 
-    let err = '';
-    p.stderr.on('data', (d) => { err += d.toString(); });
-    p.on('error', (e) => reject(new Error(`ffmpeg spawn: ${e.message}`)));
-    p.on('close', (code) => {
+    const chunks = []; let err = '';
+    ff.stdout.on('data', (c) => chunks.push(c));
+    ff.stderr.on('data', (d) => { err += d.toString(); });
+    ff.on('error', (e) => reject(new Error(`ffmpeg spawn: ${e.message}`)));
+    ff.on('close', (code) => {
       if (code !== 0) return reject(new Error(`ffmpeg ${code}: ${err.slice(-200)}`));
-      if (!fs.existsSync(out) || fs.statSync(out).size < 1024) {
-        return reject(new Error('ffmpeg produced empty mp3'));
-      }
+      const out = Buffer.concat(chunks);
+      if (out.length < 1024) return reject(new Error('ffmpeg produced empty mp3'));
       resolve(out);
     });
+    ff.stdin.on('error', () => {});
+    ff.stdin.write(inputBuffer);
+    ff.stdin.end();
   });
 }
 
-// ─────────────────────────────────────────────
-//  .dl / .download / .mp3  →  yt-dlp
-// ─────────────────────────────────────────────
+async function classifyBuffer(buffer) {
+  const ft = await fileTypeFromBuffer(buffer).catch(() => null);
+  if (!ft) return { kind: 'unknown', ext: 'bin', mime: 'application/octet-stream' };
+  if (ft.mime.startsWith('audio/')) return { kind: 'audio', ext: ft.ext, mime: ft.mime };
+  if (ft.mime.startsWith('video/')) return { kind: 'video', ext: ft.ext, mime: ft.mime };
+  if (ft.mime.startsWith('image/')) return { kind: 'image', ext: ft.ext, mime: ft.mime };
+  return { kind: 'unknown', ext: ft.ext, mime: ft.mime };
+}
+
+async function downloadMedia(sock, chat, msg, query, audioOnly) {
+  const verbLabel = audioOnly ? '.mp3' : '.dl';
+  const status = await sock.sendMessage(chat, {
+    text: `${audioOnly ? '🎵' : '⬇️'} *${verbLabel}:* ${query}`,
+  }, { quoted: msg });
+
+  const runStart = Date.now();
+  let produced = null;
+
+  try {
+    const { YtDlp } = await import('@choewy/yt-dlp');
+    const isUrl = /^https?:\/\//i.test(query);
+
+    const outTemplate = path.join(TMP, `wraith-%(id)s.%(ext)s`);
+    const yt = new YtDlp({
+      url: isUrl ? query : `scsearch1:${query}`,
+      output: outTemplate,
+      quiet: true, noWarnings: true, noProgress: true,
+      playlist: false, retries: 3,
+    });
+
+    if (audioOnly) {
+      await edit(sock, chat, status, '🎵 *Extracting audio…*');
+      await withTimeout(
+        yt.audioFormat('mp3').audio().download(),
+        YTDLP_TIMEOUT,
+        'yt-dlp audio'
+      );
+    } else {
+      await edit(sock, chat, status, '⬇️ *Downloading…*');
+      await withTimeout(
+        yt.format('bestvideo+bestaudio/best').mergeFormat('mp4').video().download(),
+        YTDLP_TIMEOUT,
+        'yt-dlp video'
+      );
+    }
+
+    produced = newestFile(TMP, runStart);
+    if (!produced || !fs.existsSync(produced)) throw new Error('yt-dlp produced no file');
+
+    let buffer = fs.readFileSync(produced);
+    cleanFile(produced);
+    produced = null;
+
+    let type = await classifyBuffer(buffer);
+
+    if (audioOnly && !(type.kind === 'audio' && type.ext === 'mp3')) {
+      await edit(sock, chat, status, '⚙️ *Converting to mp3…*');
+      buffer = await withTimeout(
+        bufferToMp3(buffer, 192),
+        CONVERT_TIMEOUT,
+        'mp3 conversion'
+      );
+      type = { kind: 'audio', ext: 'mp3', mime: 'audio/mpeg' };
+    }
+
+    const limit = type.kind === 'video' ? MAX_VIDEO : MAX_BYTES;
+    if (buffer.length > limit) {
+      throw new Error(`too big (${(buffer.length / 1048576).toFixed(1)} MB > ${(limit / 1048576).toFixed(0)} MB)`);
+    }
+    if (buffer.length < 1024) throw new Error('downloaded file is empty');
+
+    const safeName = (query.replace(/[^\w\s-]/g, '').slice(0, 50).trim() || 'media');
+
+    if (type.kind === 'image') {
+      await sock.sendMessage(chat, {
+        image: buffer, mimetype: type.mime, caption: `🖼️ _${safeName}_`,
+      }, { quoted: msg });
+    } else if (type.kind === 'video') {
+      await sock.sendMessage(chat, {
+        video: buffer, mimetype: type.mime || 'video/mp4',
+        fileName: `${safeName}.${type.ext}`, caption: `🎬 _${safeName}_`,
+      }, { quoted: msg });
+    } else if (type.kind === 'audio') {
+      await sock.sendMessage(chat, {
+        audio: buffer, mimetype: type.mime || 'audio/mpeg',
+        fileName: `${safeName}.${type.ext}`, ptt: false,
+      }, { quoted: msg });
+    } else {
+      await sock.sendMessage(chat, {
+        document: buffer, mimetype: type.mime,
+        fileName: `${safeName}.${type.ext}`, caption: `📄 _${safeName}_`,
+      }, { quoted: msg });
+    }
+
+    const via = audioOnly ? 'yt-dlp (audio)' : `yt-dlp (${type.kind})`;
+    await edit(sock, chat, status, `✅ *Done via ${via}*\n_${safeName}_`);
+    await react(sock, chat, msg, '☑');
+
+  } catch (e) {
+    console.error('[download]', e.message);
+    await edit(sock, chat, status, `❌ *Failed:* ${e.message}`);
+    await react(sock, chat, msg, '❌');
+  } finally {
+    if (produced) cleanFile(produced);
+    setTimeout(() => sweepDir(TMP, runStart), 10_000).unref?.();
+  }
+}
+
 export async function ytdlCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
-  if (!query) {
-    return sock.sendMessage(chat, { text: '❌ Usage: `.dl <url or query>`' }, { quoted: msg });
-  }
+  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.dl <url or query>`' }, { quoted: msg });
+  return queue.add(() => downloadMedia(sock, chat, msg, query, false));
+}
 
-  return queue.add(async () => {
-    const status = await sock.sendMessage(chat, {
-      text: `⬇️ *yt-dlp:* ${query}`,
-    }, { quoted: msg });
-
-    const stamp = Date.now();
-    let mp3 = path.join(TMP, `wraith-${stamp}.mp3`);
-
-    try {
-      const { YtDlp } = await import('@choewy/yt-dlp');
-
-      // If it's a URL, use it directly. Otherwise search SoundCloud
-      // (no YouTube → no cookies needed).
-      const url = /^https?:\/\//i.test(query)
-        ? query
-        : `scsearch1:${query}`;
-
-      const before = Date.now();
-      const yt = new YtDlp({
-        url,
-        output: mp3.replace(/\.mp3$/i, '.%(ext)s'),
-        format: 'bestaudio/best',
-        quiet: true,
-        noWarnings: true,
-        noProgress: true,
-        playlist: false,
-        retries: 3,
-      });
-
-      await yt.audioFormat('mp3').audio().download();
-
-      if (!fs.existsSync(mp3)) {
-        const alt = newestAudio(TMP, before);
-        if (!alt) throw new Error('yt-dlp produced no file');
-        if (/\.mp3$/i.test(alt)) {
-          fs.renameSync(alt, mp3);
-        } else {
-          await edit(sock, chat, status, '⚙️ converting to mp3…');
-          const conv = path.join(TMP, `wraith-conv-${Date.now()}.mp3`);
-          await convertToMp3(alt, conv, 192);
-          mp3 = conv;
-          cleanFile(alt);
-        }
-      }
-
-      const stat = fs.statSync(mp3);
-      if (stat.size > MAX_BYTES) {
-        throw new Error(`too big (${(stat.size / 1048576).toFixed(1)} MB > 15 MB)`);
-      }
-      if (stat.size < 1024) throw new Error('audio file is empty');
-
-      const safeName = (query.replace(/[^\w\s-]/g, '').slice(0, 50).trim() || 'audio');
-      await sock.sendMessage(chat, {
-        audio: fs.readFileSync(mp3),
-        mimetype: 'audio/mpeg',
-        fileName: `${safeName}.mp3`,
-        ptt: false,
-      }, { quoted: msg });
-
-      await edit(sock, chat, status, `✅ *Done via yt-dlp*\n_${query}_`);
-      await react(sock, chat, msg, '☑');
-      cleanFile(mp3);
-    } catch (e) {
-      console.error('[ytdl]', e.message);
-      await edit(sock, chat, status, `❌ *Failed:* ${e.message}`);
-      await react(sock, chat, msg, '❌');
-      cleanFile(mp3);
-    }
-  });
-  }
+export async function mp3Command(sock, chat, msg, args) {
+  const query = (args || []).join(' ').trim();
+  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.mp3 <url or query>`' }, { quoted: msg });
+  return queue.add(() => downloadMedia(sock, chat, msg, query, true));
+}
