@@ -15,7 +15,7 @@ const CHATBOT_FILE = path.join(here, '..', 'state', 'chatbot.json');
 function getChatbot() {
   return readJson(CHATBOT_FILE, {
     enabled: false,
-    groups: false, // ★ default: DMs only — prevents group spam
+    groups: false, // default: DMs only — prevents group spam
     instructions: CONFIG.chatbot?.instructions || 'You are WRAITH, a helpful WhatsApp assistant.',
     cooldownMs: CONFIG.chatbot?.cooldownMs || 5000,
   });
@@ -26,7 +26,6 @@ function saveChatbot(data) { writeJsonAtomic(CHATBOT_FILE, data); }
 const AI_ENDPOINTS = [
   {
     name: 'Pollinations',
-    // Free, keyless, OpenAI-compatible. Works from datacenter IPs.
     url: 'https://text.pollinations.ai/openai',
     build: (messages) => ({
       method: 'POST',
@@ -37,8 +36,7 @@ const AI_ENDPOINTS = [
   },
   {
     name: 'Pollinations-GET',
-    // Simplest possible fallback: plain-text GET.
-    url: null, // built dynamically in askAi
+    url: null,
     build: null,
     parse: null,
   },
@@ -54,6 +52,15 @@ const AI_ENDPOINTS = [
   },
 ];
 
+// ★ FIX: every AI call now has a hard timeout — a slow endpoint falls through
+//        to the next one instead of freezing the chatbot forever
+async function timedFetch(url, options = {}, timeout = 20000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try { return await fetch(url, { ...options, signal: controller.signal }); }
+  finally { clearTimeout(timer); }
+}
+
 async function askAi(userMessage, systemPrompt) {
   const messages = [
     { role: 'system', content: systemPrompt },
@@ -63,7 +70,7 @@ async function askAi(userMessage, systemPrompt) {
   for (const ep of AI_ENDPOINTS) {
     if (!ep.url || !ep.build) continue;
     try {
-      const res = await fetch(ep.url, ep.build(messages));
+      const res = await timedFetch(ep.url, ep.build(messages));
       if (!res.ok) continue;
       const data = await res.json();
       const reply = ep.parse(data);
@@ -74,7 +81,7 @@ async function askAi(userMessage, systemPrompt) {
   try {
     const prompt = encodeURIComponent(userMessage);
     const system = encodeURIComponent(systemPrompt);
-    const res = await fetch(`https://text.pollinations.ai/${prompt}?system=${system}&model=openai`);
+    const res = await timedFetch(`https://text.pollinations.ai/${prompt}?system=${system}&model=openai`, {}, 20000);
     if (res.ok) {
       const text = (await res.text()).trim();
       if (text && text.length > 0 && !/^\s*<html/i.test(text)) return { ok: true, reply: text, source: 'Pollinations-GET' };
@@ -95,11 +102,10 @@ export async function maybeAutoReply(sock, chat, msg) {
 
     const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
     if (!text) return false;
-    // ★ respect the configured prefix, not just '.' / '!'
     if (text.startsWith(getPrefix())) return false;
 
-    // ★ group guard: only reply in groups when explicitly enabled,
-    //   and only when the bot is @mentioned there
+    // group guard: only reply in groups when explicitly enabled,
+    // and only when the bot is @mentioned there
     if (chat.endsWith('@g.us')) {
       if (!cfg.groups) return false;
       const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
