@@ -160,28 +160,28 @@ function rttBar(ms) {
 
 // RTT quality — how fast WhatsApp is answering
 function rttQuality(ms) {
-    if (ms < 150) return '🟢 excellent';
-    if (ms < 400) return '🟡 good';
-    if (ms < 900) return '🟠 slow';
-    return '🔴 laggy';
+    if (ms < 150) return '🟢excellent';
+    if (ms < 400) return '🟡good';
+    if (ms < 900) return '🟠slow';
+    return '🔴laggy';
 }
 
 // CPU quality — how much of YOUR quota is being used
 // (based on actual utilisation %, not absolute cores)
 function cpuQuality(pct) {
-    if (pct < 10)  return '🟢 lightest';
-    if (pct < 40)  return '🟢 light';
-    if (pct < 70)  return '🟡 normal';
-    if (pct < 90)  return '🟠 busy';
-    return '🔴 saturated';
+    if (pct < 10)  return '🟢minute';
+    if (pct < 40)  return '🟢light';
+    if (pct < 70)  return '🟡normal';
+    if (pct < 90)  return '🟠busy';
+    return '🔴saturated';
 }
 
 // Memory quality — how close to the cgroup limit
 function memQuality(pct) {
-    if (pct < 60) return '🟢 healthy';
-    if (pct < 80) return '🟡 moderate';
-    if (pct < 92) return '🟠 high';
-    return '🔴 critical';
+    if (pct < 60) return '🟢healthy';
+    if (pct < 80) return '🟡normal';
+    if (pct < 92) return '🟠high';
+    return '🔴critical';
 }
 
 function uptime() {
@@ -240,7 +240,7 @@ export async function pingCommand(sock, chat, msg) {
         `🏓 *pong*`,
         ``,
         `*whatsapp rtt* · ${rtt} ms`,
-        `\`${rttBar(rtt)}\`  ${rttQuality(rtt)}`,
+        `\`${rttBar(rtt)}\` ${rttQuality(rtt)}`,
         ``,
         `*event loop* · ${eventLoopLag} ms`,
         ``,
@@ -253,7 +253,7 @@ export async function pingCommand(sock, chat, msg) {
             : cpu.cores.toFixed(2);
         lines.push(
             `*cpu* · ${quota} core${cpu.cores !== 1 ? 's' : ''}`,
-            `\`${bar(cpu.pct)}\`  ${cpu.pct.toFixed(1)}%  ${cpuQuality(cpu.pct)}`
+            `\`${bar(cpu.pct)}\` ${cpu.pct.toFixed(1)}% ${cpuQuality(cpu.pct)}`
         );
     } else {
         const cores = os.cpus()?.length || 1;
@@ -266,10 +266,6 @@ export async function pingCommand(sock, chat, msg) {
         `*memory*`,
         `\`${bar(memPct)}\`  ${memPct.toFixed(1)}%  ${memQuality(memPct)}`,
         `• used · ${mb(mem.used)} / ${mb(mem.limit)} MB`,
-        ``,
-        `*process*`,
-        `• rss  · ${mb(proc.rss)} MB`,
-        `• heap · ${mb(proc.heapUsed)} / ${mb(proc.heapTotal)} MB`,
         ``,
         `*uptime* · ${uptime()}`
     );
