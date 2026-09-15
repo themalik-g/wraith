@@ -14,6 +14,7 @@
   "dependencies": {
     "@cacheable/node-cache": "^1.4.0",
     "@choewy/yt-dlp": "^1.2.0",
+    "@snwfdhmp/soundcloud-downloader": "^1.0.6",
     "@hapi/boom": "^10.0.1",
     "@imgly/background-removal-node": "^1.4.5",
     "@whiskeysockets/baileys": "^7.0.0-rc.14",
