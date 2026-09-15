@@ -1,20 +1,167 @@
 // ─────────────────────────────────────────────
 //  WRAITH · modules/ping.js
-//  Latency probe + system vitals.
-//  Shows: WhatsApp RTT, event-loop lag, CPU load
-//         (load average + live usage), memory, uptime.
+//  Latency probe + container-aware system vitals.
+//
+//  Inside Docker/Pterodactyl, os.cpus() / os.totalmem()
+//  / os.loadavg() report the HOST, not your container.
+//  We read cgroup v1/v2 files instead so CPU% and
+//  memory reflect what your panel shows.
 // ─────────────────────────────────────────────
+import fs from 'node:fs';
 import os from 'node:os';
 import { isOwner } from '../core/identity.js';
 
-// Captured at module load — used for uptime
 const BOOT_TIME = Date.now();
+
+// ─────────────────────────────────────────────
+//  cgroup detection
+// ─────────────────────────────────────────────
+function readFileSafe(p) {
+    try { return fs.readFileSync(p, 'utf8').trim(); } catch { return null; }
+}
+
+function detectCgroupVersion() {
+    const cg = readFileSafe('/proc/self/cgroup');
+    if (!cg) return 0;
+    if (/^0::/m.test(cg)) return 2;
+    return 1;
+}
+
+function detectCgroupPath() {
+    const cg = readFileSafe('/proc/self/cgroup');
+    if (!cg) return '';
+    const v2 = cg.match(/^0::(.+)$/m);
+    if (v2) return v2[1];
+    const v1 = cg.match(/^\d+:[^:]*:(.+)$/m);
+    return v1 ? v1[1] : '';
+}
+
+const CG_VERSION = detectCgroupVersion();
+const CG_PATH    = detectCgroupPath();
+
+function cgReadV2(file) {
+    return readFileSafe(`/sys/fs/cgroup${CG_PATH}/${file}`)
+        ?? readFileSafe(`/sys/fs/cgroup/${file}`);
+}
+function cgReadV1(subsystem, file) {
+    return readFileSafe(`/sys/fs/cgroup/${subsystem}${CG_PATH}/${file}`)
+        ?? readFileSafe(`/sys/fs/cgroup/${subsystem}/${file}`);
+}
+
+// ─────────────────────────────────────────────
+//  Container memory
+//  Prefers cgroup current/max over host os.totalmem.
+// ─────────────────────────────────────────────
+function containerMemory() {
+    if (CG_VERSION === 2) {
+        const current = parseInt(cgReadV2('memory.current') || '0', 10);
+        const maxRaw  = cgReadV2('memory.max');
+        const limit   = (!maxRaw || maxRaw === 'max') ? 0 : parseInt(maxRaw, 10);
+        if (current > 0 && limit > 0) {
+            return { used: current, limit, source: 'cgroup v2' };
+        }
+    }
+
+    if (CG_VERSION === 1) {
+        const current = parseInt(cgReadV1('memory', 'memory.usage_in_bytes') || '0', 10);
+        const maxRaw  = cgReadV1('memory', 'memory.limit_in_bytes');
+        let limit     = parseInt(maxRaw || '0', 10);
+        // v1 uses a huge sentinel (~9.2e18) for "unlimited"
+        if (limit > 1e15) limit = 0;
+        if (current > 0 && limit > 0) {
+            return { used: current, limit, source: 'cgroup v1' };
+        }
+    }
+
+    // Not in a container — use host numbers
+    const total = os.totalmem();
+    const free  = os.freemem();
+    return { used: total - free, limit: total, source: 'host' };
+}
+
+// ─────────────────────────────────────────────
+//  Container CPU
+//  cpuacct.usage (v1) / cpu.stat usage_usec (v2)
+//  give cumulative CPU µs used by the container.
+//  Two samples = live usage %. cpu.max / cfs_quota
+//  tells us the effective core count.
+// ─────────────────────────────────────────────
+function cgCpuUsageUsec() {
+    if (CG_VERSION === 2) {
+        const stat = cgReadV2('cpu.stat');
+        if (stat) {
+            const m = stat.match(/^usage_usec\s+(\d+)/m);
+            if (m) return parseInt(m[1], 10);
+        }
+    }
+    if (CG_VERSION === 1) {
+        const raw = cgReadV1('cpuacct', 'cpuacct.usage');
+        if (raw) return Math.floor(parseInt(raw, 10) / 1000); // ns → µs
+    }
+    return null;
+}
+
+function cgCpuCores() {
+    if (CG_VERSION === 2) {
+        const raw = cgReadV2('cpu.max');
+        if (raw) {
+            const [quotaStr, periodStr] = raw.split(/\s+/);
+            if (quotaStr !== 'max') {
+                const quota  = parseInt(quotaStr, 10);
+                const period = parseInt(periodStr, 10);
+                if (quota > 0 && period > 0) return quota / period;
+            }
+        }
+    }
+    if (CG_VERSION === 1) {
+        const quotaStr  = cgReadV1('cpu', 'cpu.cfs_quota_us');
+        const periodStr = cgReadV1('cpu', 'cpu.cfs_period_us');
+        if (quotaStr && periodStr) {
+            const quota  = parseInt(quotaStr, 10);
+            const period = parseInt(periodStr, 10);
+            if (quota > 0 && period > 0) return quota / period;
+        }
+    }
+    return null;
+}
+
+async function sampleContainerCpu(gapMs = 300) {
+    const before = cgCpuUsageUsec();
+    if (before === null) return null;
+
+    const t0 = process.hrtime.bigint();
+    await new Promise((r) => setTimeout(r, gapMs));
+    const t1 = process.hrtime.bigint();
+
+    const after = cgCpuUsageUsec();
+    if (after === null) return null;
+
+    const deltaUsageUsec = after - before;
+    const deltaWallUsec  = Number(t1 - t0) / 1000;
+
+    if (deltaWallUsec <= 0) return { pct: 0, cores: cgCpuCores() || 1, coreFraction: 0 };
+
+    // Fraction of one CPU core used during the sample window
+    const coreFraction = deltaUsageUsec / deltaWallUsec;
+
+    // Container quota (cores). If 1 core = 100% at coreFraction 1.0.
+    const quotaCores = cgCpuCores();
+    const denom = (quotaCores && quotaCores > 0) ? quotaCores : 1;
+
+    const pct = (coreFraction / denom) * 100;
+    return {
+        pct: Math.max(0, Math.min(100, pct)),
+        cores: quotaCores || 1,
+        coreFraction,
+    };
+}
 
 // ─────────────────────────────────────────────
 //  Formatting helpers
 // ─────────────────────────────────────────────
 function bar(pct, width = 10) {
-    const filled = Math.max(0, Math.min(width, Math.round((pct / 100) * width)));
+    const p = Math.max(0, Math.min(100, pct));
+    const filled = Math.max(0, Math.min(width, Math.round((p / 100) * width)));
     return '█'.repeat(filled) + '░'.repeat(width - filled);
 }
 
@@ -45,10 +192,10 @@ function memQuality(pct) {
 }
 
 function uptime() {
-    const s = Math.floor((Date.now() - BOOT_TIME) / 1000);
-    const d = Math.floor(s / 86400);
-    const h = Math.floor((s % 86400) / 3600);
-    const m = Math.floor((s % 3600) / 60);
+    const s   = Math.floor((Date.now() - BOOT_TIME) / 1000);
+    const d   = Math.floor(s / 86400);
+    const h   = Math.floor((s % 86400) / 3600);
+    const m   = Math.floor((s % 3600) / 60);
     const sec = s % 60;
 
     const parts = [];
@@ -64,71 +211,7 @@ function mb(bytes) {
 }
 
 // ─────────────────────────────────────────────
-//  CPU sampling
-//  os.loadavg() is instant, but on Linux reflects the
-//  kernel's 1/5/15-min rolling averages (NOT instantaneous).
-//  For a "right now" number we sample os.cpus() twice
-//  with a short gap and compute the delta.
-// ─────────────────────────────────────────────
-function snapshotCpus() {
-    const cpus = os.cpus() || [];
-    return cpus.map((c) => {
-        const t = c.times;
-        const idle = t.idle;
-        const total = t.user + t.nice + t.sys + t.idle + t.irq;
-        return { idle, total };
-    });
-}
-
-function computeCpuUsage(before, after) {
-    if (!before.length || before.length !== after.length) return 0;
-
-    let idleDelta = 0;
-    let totalDelta = 0;
-
-    for (let i = 0; i < before.length; i++) {
-        idleDelta  += after[i].idle  - before[i].idle;
-        totalDelta += after[i].total - before[i].total;
-    }
-
-    if (totalDelta <= 0) return 0;
-    const usage = 100 * (1 - idleDelta / totalDelta);
-    return Math.max(0, Math.min(100, usage));
-}
-
-async function sampleCpuUsage(gapMs = 250) {
-    const before = snapshotCpus();
-    await new Promise((r) => setTimeout(r, gapMs));
-    const after = snapshotCpus();
-    return computeCpuUsage(before, after);
-}
-
-// ─────────────────────────────────────────────
-//  Memory
-// ─────────────────────────────────────────────
-function memoryStats() {
-    const proc = process.memoryUsage();
-    const total = os.totalmem();
-    const free = os.freemem();
-    const used = total - free;
-
-    return {
-        // Process-level
-        rss: proc.rss,
-        heapUsed: proc.heapUsed,
-        heapTotal: proc.heapTotal,
-        external: proc.external,
-
-        // System-level
-        sysTotal: total,
-        sysFree: free,
-        sysUsed: used,
-        sysUsedPct: (used / total) * 100,
-    };
-}
-
-// ─────────────────────────────────────────────
-//  .ping — command
+//  .ping
 // ─────────────────────────────────────────────
 export async function pingCommand(sock, chat, msg) {
     const from = msg.key.participant || msg.key.remoteJid;
@@ -149,17 +232,18 @@ export async function pingCommand(sock, chat, msg) {
     await new Promise((r) => setImmediate(r));
     const eventLoopLag = Date.now() - lagStart;
 
-    // ── 3. CPU sample (needs two snapshots ~250ms apart) ──
-    const cpuUsage = await sampleCpuUsage(250);
+    // ── 3. Container CPU sample ──
+    const cpu = await sampleContainerCpu(300);
+    const hostCores = os.cpus()?.length || 1;
 
-    // Load averages only exist on Unix — on Windows they're always 0
-    const [la1, la5, la15] = os.loadavg();
-    const cores = os.cpus()?.length || 1;
+    // ── 4. Container memory ──
+    const mem = containerMemory();
+    const memPct = (mem.used / mem.limit) * 100;
 
-    // ── 4. Memory ──
-    const mem = memoryStats();
+    // ── 5. Process memory ──
+    const proc = process.memoryUsage();
 
-    // ── 5. Render ──
+    // ── 6. Render ──
     const lines = [
         `🏓 *pong*`,
         ``,
@@ -168,28 +252,38 @@ export async function pingCommand(sock, chat, msg) {
         ``,
         `*event loop* · ${eventLoopLag} ms`,
         ``,
-        `*cpu* · ${cores} core${cores !== 1 ? 's' : ''}`,
-        `\`${bar(cpuUsage)}\`  ${cpuUsage.toFixed(1)}%  ${cpuQuality(cpuUsage)}`,
     ];
 
-    // Only show load averages if the OS reports them
-    if (la1 || la5 || la15) {
+    // ── CPU section ──
+    if (cpu) {
+        const coresLabel = cpu.cores < hostCores
+            ? `${cpu.cores} (limited, host has ${hostCores})`
+            : `${cpu.cores}`;
         lines.push(
-            `*load avg* · ${la1.toFixed(2)}  ${la5.toFixed(2)}  ${la15.toFixed(2)}`,
-            `             _1m    5m    15m_`
+            `*cpu* · ${coresLabel}`,
+            `\`${bar(cpu.pct)}\`  ${cpu.pct.toFixed(1)}%  ${cpuQuality(cpu.pct)}`
+        );
+    } else {
+        // Fallback — not in a cgroup, use host numbers
+        const [la1, la5, la15] = os.loadavg();
+        lines.push(
+            `*cpu* · ${hostCores} cores _(host)_`,
+            `*load avg* · ${la1.toFixed(2)}  ${la5.toFixed(2)}  ${la15.toFixed(2)}`
         );
     }
 
+    // ── Memory section ──
+    const memTag = mem.source === 'host' ? ' _(host)_' : ` _(container · ${mem.source})_`;
     lines.push(
         ``,
-        `*memory (process)*`,
-        `• rss    · ${mb(mem.rss)} MB`,
-        `• heap   · ${mb(mem.heapUsed)} / ${mb(mem.heapTotal)} MB`,
-        `• ext    · ${mb(mem.external)} MB`,
+        `*memory*${memTag}`,
+        `\`${bar(memPct)}\`  ${memPct.toFixed(1)}%  ${memQuality(memPct)}`,
+        `• used   · ${mb(mem.used)} / ${mb(mem.limit)} MB`,
         ``,
-        `*memory (system)*`,
-        `\`${bar(mem.sysUsedPct)}\`  ${mem.sysUsedPct.toFixed(1)}%  ${memQuality(mem.sysUsedPct)}`,
-        `• used   · ${mb(mem.sysUsed)} / ${mb(mem.sysTotal)} MB`,
+        `*memory (process)*`,
+        `• rss    · ${mb(proc.rss)} MB`,
+        `• heap   · ${mb(proc.heapUsed)} / ${mb(proc.heapTotal)} MB`,
+        `• ext    · ${mb(proc.external)} MB`,
         ``,
         `*uptime* · ${uptime()}`,
         `*platform* · ${os.platform()} ${os.arch()} · node ${process.version}`
@@ -197,12 +291,8 @@ export async function pingCommand(sock, chat, msg) {
 
     const body = lines.join('\n');
 
-    // ── 6. Edit placeholder into real reply ──
     try {
-        await sock.sendMessage(chat, {
-            text: body,
-            edit: sent.key
-        });
+        await sock.sendMessage(chat, { text: body, edit: sent.key });
     } catch {
         await sock.sendMessage(chat, { text: body });
     }
