@@ -3,10 +3,11 @@
 // Phase 3: Owner profile commands
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
+import path from 'node:path';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import { isOwner } from '../core/identity.js';
+import { readJson } from '../core/state-io.js';
 import { CONFIG } from '../config.js';
-import { withTempFile } from '../lib/net.js';
 
 function ownerOnly(sock, chat, msg) {
   const from = msg.key.participant || msg.key.remoteJid;
@@ -31,7 +32,10 @@ export async function setppCommand(sock, chat, msg, args) {
     for await (const c of stream) chunks.push(c);
     const buffer = Buffer.concat(chunks);
 
-    await sock.updateProfilePicture(sock.user.id, buffer);
+    // ★ FIX: strip the :device suffix so updateProfilePicture gets a clean JID
+    const me = (sock.user?.id || '').split(':')[0];
+    const meJid = me.includes('@') ? me : `${me}@s.whatsapp.net`;
+    await sock.updateProfilePicture(meJid, buffer);
     await sock.sendMessage(chat, { text: '✅ Bot profile picture updated.' }, { quoted: msg });
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ setpp failed: ${e.message}` }, { quoted: msg }).catch(() => {});
@@ -51,32 +55,63 @@ export async function setaboutCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .chatstats ──────────────────────────────────────────────────────────────
+// ── .chatstats ★ FIXED — uses the real activity.json schema ─────────────────
 export async function chatstatsCommand(sock, chat, msg, args) {
   try {
-    const target = args?.[0] ? args[0].replace(/\D/g, '') + '@s.whatsapp.net' : null;
-    if (!target) return sock.sendMessage(chat, { text: '📊 *chatstats*\n\nUsage: `.chatstats <number>`' }, { quoted: msg });
+    const digits = (args?.[0] || '').replace(/\D/g, '');
+    if (!digits) {
+      return sock.sendMessage(chat, {
+        text: '📊 *chatstats*\n\nUsage: `.chatstats <number>`\nShows aggregated activity for that contact across every chat the bot has seen.',
+      }, { quoted: msg });
+    }
 
-    // Use existing activity data from state/activity.json
-    const path = await import('node:path');
-    const { readJson } = await import('../core/state-io.js');
-    const activityFile = path.join(process.cwd(), 'state', 'activity.json');
-    const activity = readJson(activityFile, {});
+    const activity = readJson(path.join(process.cwd(), 'state', 'activity.json'), {});
 
-    const chatData = activity[target] || activity[chat] || {};
-    const totalMsgs = chatData.count || chatData.messages || 0;
-    const mediaCount = chatData.media || 0;
+    // Aggregate the contact across all tracked chats
+    let total = 0;
+    let firstSeen = 0;
+    let lastActive = 0;
+    const groupBreakdown = [];
+
+    for (const [jid, rec] of Object.entries(activity)) {
+      const contacts = rec?.contacts || {};
+      const hit = Object.entries(contacts).find(([sender]) => sender.replace(/\D/g, '').includes(digits));
+      if (!hit) continue;
+      const [, c] = hit;
+      total += c.count || 0;
+      if (!firstSeen || (rec.firstSeen && rec.firstSeen < firstSeen)) firstSeen = rec.firstSeen;
+      if ((c.last || 0) > lastActive) lastActive = c.last;
+      groupBreakdown.push({ jid, count: c.count || 0, last: c.last || 0 });
+    }
+
+    // Also check if the number itself is a tracked DM chat
+    const dmRec = activity[`${digits}@s.whatsapp.net`] || activity[`${digits}@lid`];
+    const dmTotal = dmRec?.total || 0;
+
+    if (!total && !dmTotal) {
+      return sock.sendMessage(chat, {
+        text: `❌ No recorded activity for \`${digits}\`.\n_The bot only sees messages from chats it has been active in since tracking started._`,
+      }, { quoted: msg });
+    }
+
+    groupBreakdown.sort((a, b) => b.count - a.count);
 
     const lines = [
-      `📊 *chatstats* — \`${target.split('@')[0]}\``,
+      `📊 *chatstats* — \`${digits}\``,
       '',
-      `• messages · ${totalMsgs}`,
-      `• media · ${mediaCount}`,
-      `• first seen · ${chatData.first || '—'}`,
-      `• last seen · ${chatData.last || '—'}`,
-      '',
-      '_Data collected from bot activity logs._',
+      `• messages (in groups) · *${total}*`,
+      `• messages (DM with bot) · *${dmTotal}*`,
     ];
+    if (firstSeen) lines.push(`• first seen · ${new Date(firstSeen).toLocaleDateString('en-GB', { timeZone: CONFIG.timezone || 'Asia/Karachi' })}`);
+    if (lastActive) lines.push(`• last active · ${new Date(lastActive).toLocaleString('en-GB', { timeZone: CONFIG.timezone || 'Asia/Karachi' })}`);
+    if (groupBreakdown.length) {
+      lines.push('', '*active in:*');
+      for (const g of groupBreakdown.slice(0, 10)) {
+        lines.push(`  \`${g.jid.split('@')[0]}\` — ${g.count} msgs`);
+      }
+    }
+    lines.push('', '_Per-message content analysis is not stored — only counts, for privacy and RAM._');
+
     await sock.sendMessage(chat, { text: lines.join('\n') }, { quoted: msg });
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ chatstats failed: ${e.message}` }, { quoted: msg }).catch(() => {});
