@@ -1,18 +1,14 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/help.js
 // Styled boxed menu — command list ONLY.
-// Renders commands with the CURRENT prefix.
-// Owner-only verbs are hidden from non-owners.
 // ─────────────────────────────────────────────
 import { CONFIG } from '../config.js';
 import { isOwner } from '../core/identity.js';
 import { getPrefix } from '../core/settings.js';
 import { getMode } from './utility.js';
 
-// ── command definition helper ────────────────
 const c = (cmd, ownerOnly = false) => ({ cmd, ownerOnly });
 
-// ── full command registry ────────────────────
 const REGISTRY = [
   {
     id: 'core',
@@ -111,7 +107,20 @@ const REGISTRY = [
       c('.songinfo <title> [artist]'),
       c('.lyrics <artist> - <title>'),
       c('.ppt <topic>'),
+    ],
+  },
+  {
+    id: 'image-ai',
+    aliases: ['imgai', 'photo'],
+    icon: '🪄',
+    title: 'ɪᴍɢ ᴀɪ',
+    commands: [
+      c('.remini', true),
+      c('.remini <image_url>', true),
       c('.rmbg', true),
+      c('.rmbg <image_url>', true),
+      c('.removebg', true),
+      c('.nobg', true),
     ],
   },
   {
@@ -149,9 +158,6 @@ const REGISTRY = [
       c('.chatbot', true),
       c('.chatbot on', true),
       c('.chatbot off', true),
-      c('.chatbot groups on', true),
-      c('.chatbot groups off', true),
-      c('.chatbot set <instructions>', true),
     ],
   },
   {
@@ -219,13 +225,11 @@ const REGISTRY = [
 
 const TAIL = '└─────────────┈⚝';
 
-// ── prefix helper (unchanged from old) ───────
 function applyPrefix(cmd, prefix) {
   if (prefix === '.') return cmd;
   return cmd.startsWith('.') ? prefix + cmd.slice(1) : cmd;
 }
 
-// ── box renderer (unchanged from old) ────────
 function renderBox(icon, title, rows, prefix) {
   const lines = [];
   lines.push(`┌──❮ ${icon} ${title} ❯`);
@@ -236,7 +240,6 @@ function renderBox(icon, title, rows, prefix) {
   return lines.join('\n');
 }
 
-// ── viewer-aware registry ────────────────────
 function visibleRegistry(isOwnerUser) {
   if (isOwnerUser) return REGISTRY;
   return REGISTRY
@@ -247,11 +250,9 @@ function visibleRegistry(isOwnerUser) {
     .filter((g) => g.commands.length > 0);
 }
 
-// ── full menu page ───────────────────────────
 function renderAll(prefix, isOwnerUser, mode) {
   const groups = visibleRegistry(isOwnerUser);
 
-  // Header — matches the OLD style exactly when owner / private mode.
   const headerLines = [
     '┌──❮ ⓌⓇⒶⒾⓉⒽ ❯',
     '│',
@@ -270,16 +271,13 @@ function renderAll(prefix, isOwnerUser, mode) {
 
   const header = headerLines.join('\n');
 
-  // Sections sit flush against each other — no blank lines between boxes.
   const sections = groups.map((g) =>
     renderBox(g.icon, g.title, g.commands.map((x) => x.cmd), prefix)
   );
 
-  // header, then boxes (flush), then one blank line, then closing brand.
   return [header, ...sections, '', 'ⓌⓇⒶⒾⓉ⓽'].join('\n');
 }
 
-// ── category lookup ──────────────────────────
 function findGroup(name) {
   const wanted = String(name || '').toLowerCase().replace(/[^a-z]/g, '');
   if (!wanted) return null;
@@ -293,7 +291,6 @@ function findGroup(name) {
   );
 }
 
-// ── chunked sender (safety for huge menus) ───
 async function sendSafe(sock, chat, msg, text) {
   const MAX = 3500;
   if (text.length <= MAX) {
@@ -315,7 +312,6 @@ async function sendSafe(sock, chat, msg, text) {
   }
 }
 
-// ── command entry ────────────────────────────
 export async function helpCommand(sock, chat, msg, args) {
   try {
     const from = msg.key.participant || msg.key.remoteJid;
@@ -323,19 +319,15 @@ export async function helpCommand(sock, chat, msg, args) {
     const prefix = getPrefix();
 
     let mode = 'private';
-    try {
-      mode = getMode();
-    } catch {}
+    try { mode = getMode(); } catch {}
 
     const target = (args?.[0] || '').toLowerCase().trim();
 
-    // ── no argument → full menu ──
     if (!target) {
       const text = renderAll(prefix, isOwnerUser, mode);
       return sendSafe(sock, chat, msg, text);
     }
 
-    // ── category requested ──
     const group = findGroup(target);
 
     if (!group) {
