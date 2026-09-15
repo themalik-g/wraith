@@ -2,8 +2,16 @@
 // WRAITH · modules/group.js
 // Phase 3: Group management commands
 // ─────────────────────────────────────────────
+import fs from 'node:fs';
+import path from 'node:path';
+import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import { isOwner } from '../core/identity.js';
+import { readJson, writeJsonAtomic } from '../core/state-io.js';
+import { withTempFile } from '../lib/net.js';
 import { chunkText } from '../lib/net.js';
+
+const WELCOME_FILE = path.join(process.cwd(), 'state', 'welcome.json');
+const CALLS_FILE = path.join(process.cwd(), 'state', 'calls.json');
 
 function ownerOnly(sock, chat, msg) {
   const from = msg.key.participant || msg.key.remoteJid;
@@ -20,11 +28,7 @@ async function sendChunked(sock, chat, msg, text) {
   for (const p of chunkText(text, 3800)) await sock.sendMessage(chat, { text: p }, { quoted: msg });
 }
 
-// ── .welcome ────────────────────────────────────────────────────────────────
-const WELCOME_FILE = path.join(process.cwd(), 'state', 'welcome.json');
-import path from 'node:path';
-import { readJson, writeJsonAtomic } from '../core/state-io.js';
-
+// ── Welcome / Goodbye config (read by core/groupEvents.js) ──────────────────
 export function getWelcomeConfig() {
   return readJson(WELCOME_FILE, {});
 }
@@ -49,7 +53,6 @@ export async function welcomeCommand(sock, chat, msg, args) {
   await sock.sendMessage(chat, { text: `👋 *welcome*\n\nstatus · *${cfg.welcome ? 'ON' : 'OFF'}*\n\n\`.welcome on\` / \`.welcome off\`` }, { quoted: msg });
 }
 
-// ── .goodbye ────────────────────────────────────────────────────────────────
 export async function goodbyeCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   const a0 = (args?.[0] || '').toLowerCase();
@@ -65,6 +68,33 @@ export async function goodbyeCommand(sock, chat, msg, args) {
   await sock.sendMessage(chat, { text: `👋 *goodbye*\n\nstatus · *${cfg.goodbye ? 'ON' : 'OFF'}*\n\n\`.goodbye on\` / \`.goodbye off\`` }, { quoted: msg });
 }
 
+// ── Pending join-request resolver ───────────────────────────────────────────
+// ★ FIX: pending requests are NOT in groupMetadata.participants.
+//   Baileys ≥6.7 exposes groupRequestParticipantsList; fall back to
+//   metadata flags on older/newer forks. Returns null when unsupported.
+async function listPending(sock, chat) {
+  if (typeof sock.groupRequestParticipantsList === 'function') {
+    try {
+      const res = await sock.groupRequestParticipantsList(chat);
+      const list = Array.isArray(res) ? res : (res?.participants || res?.requests || []);
+      const jids = list
+        .map((p) => (typeof p === 'string' ? p : (p?.jid || p?.id)))
+        .filter(Boolean);
+      if (jids.length) return jids;
+      return [];
+    } catch {}
+  }
+  try {
+    const meta = await sock.groupMetadata(chat);
+    const flagged = (meta.participants || [])
+      .filter((p) => p && (p.pending || p.request || p.membership === 'request' || p.joinApproval === false))
+      .map((p) => p.id)
+      .filter(Boolean);
+    return flagged;
+  } catch {}
+  return null;
+}
+
 // ── .kickall ────────────────────────────────────────────────────────────────
 export async function kickallCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
@@ -73,7 +103,7 @@ export async function kickallCommand(sock, chat, msg, args) {
     const meta = await sock.groupMetadata(chat);
     const botJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
     const targets = meta.participants
-      .filter((p) => p.id !== botJid && p.id !== meta.owner)
+      .filter((p) => p.id !== botJid && p.id !== meta.owner && p.admin == null)
       .map((p) => p.id);
     if (!targets.length) return sock.sendMessage(chat, { text: '❌ No members to remove.' }, { quoted: msg });
 
@@ -138,10 +168,6 @@ export async function setdescCommand(sock, chat, msg, args) {
 }
 
 // ── .setgpp ─────────────────────────────────────────────────────────────────
-import { downloadContentFromMessage } from '@whiskeysockets/baileys';
-import { withTempFile } from '../lib/net.js';
-import fs from 'node:fs';
-
 export async function setgppCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (ownerOnly(sock, chat, msg)) return;
@@ -162,17 +188,18 @@ export async function setgppCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .approveall / .declineall ───────────────────────────────────────────────
+// ── .approveall / .declineall ★ FIXED ──────────────────────────────────────
 export async function approveallCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (ownerOnly(sock, chat, msg)) return;
   try {
-    const meta = await sock.groupMetadata(chat);
-    const pending = meta.participants.filter((p) => p.admin === null && p.id);
+    const pending = await listPending(sock, chat);
+    if (pending === null) {
+      return sock.sendMessage(chat, { text: '❌ This Baileys build cannot list pending requests. Update `@whiskeysockets/baileys` to ≥ 6.7.' }, { quoted: msg });
+    }
     if (!pending.length) return sock.sendMessage(chat, { text: '❌ No pending join requests.' }, { quoted: msg });
-    const jids = pending.map((p) => p.id);
-    await sock.groupRequestParticipantsUpdate(chat, jids, 'approve');
-    await sock.sendMessage(chat, { text: `✅ Approved *${jids.length}* request${jids.length !== 1 ? 's' : ''}.` }, { quoted: msg });
+    await sock.groupRequestParticipantsUpdate(chat, pending, 'approve');
+    await sock.sendMessage(chat, { text: `✅ Approved *${pending.length}* request${pending.length !== 1 ? 's' : ''}.` }, { quoted: msg });
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ approveall failed: ${e.message}` }, { quoted: msg }).catch(() => {});
   }
@@ -182,12 +209,13 @@ export async function declineallCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (ownerOnly(sock, chat, msg)) return;
   try {
-    const meta = await sock.groupMetadata(chat);
-    const pending = meta.participants.filter((p) => p.admin === null && p.id);
+    const pending = await listPending(sock, chat);
+    if (pending === null) {
+      return sock.sendMessage(chat, { text: '❌ This Baileys build cannot list pending requests. Update `@whiskeysockets/baileys` to ≥ 6.7.' }, { quoted: msg });
+    }
     if (!pending.length) return sock.sendMessage(chat, { text: '❌ No pending join requests.' }, { quoted: msg });
-    const jids = pending.map((p) => p.id);
-    await sock.groupRequestParticipantsUpdate(chat, jids, 'reject');
-    await sock.sendMessage(chat, { text: `✅ Declined *${jids.length}* request${jids.length !== 1 ? 's' : ''}.` }, { quoted: msg });
+    await sock.groupRequestParticipantsUpdate(chat, pending, 'reject');
+    await sock.sendMessage(chat, { text: `✅ Declined *${pending.length}* request${pending.length !== 1 ? 's' : ''}.` }, { quoted: msg });
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ declineall failed: ${e.message}` }, { quoted: msg }).catch(() => {});
   }
@@ -274,7 +302,6 @@ export async function clearchatCommand(sock, chat, msg) {
 }
 
 // ── .rejectcalls ────────────────────────────────────────────────────────────
-const CALLS_FILE = path.join(process.cwd(), 'state', 'calls.json');
 export function getCallsConfig() { return readJson(CALLS_FILE, { reject: false }); }
 export function setCallsConfig(patch) { writeJsonAtomic(CALLS_FILE, { ...getCallsConfig(), ...patch }); }
 
