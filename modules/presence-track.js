@@ -76,11 +76,20 @@ export async function stalkCommand(sock, chat, msg, args) {
     }
 
     if (a0 === 'stop') {
-      const target = args[1]?.replace(/\D/g, '') + '@s.whatsapp.net';
-      if (!target) return sock.sendMessage(chat, { text: '❌ Usage: `.stalk stop <number>`' }, { quoted: msg });
+      // ★ FIX: validate digits instead of concatenating 'undefined'
+      const digits = (args?.[1] || '').replace(/\D/g, '');
+      if (!digits) return sock.sendMessage(chat, { text: '❌ Usage: `.stalk stop <number>`' }, { quoted: msg });
+      const target = `${digits}@s.whatsapp.net`;
       const store = readStore();
-      if (store[target]) { store[target].subscribed = false; writeStore(store); }
-      return sock.sendMessage(chat, { text: `👁️ Stopped tracking \`${target.split('@')[0]}\`.` }, { quoted: msg });
+      let stopped = false;
+      for (const jid of Object.keys(store)) {
+        if (jid.replace(/\D/g, '').includes(digits)) {
+          store[jid].subscribed = false;
+          stopped = true;
+        }
+      }
+      if (stopped) writeStore(store);
+      return sock.sendMessage(chat, { text: stopped ? `👁️ Stopped tracking \`${digits}\`.` : `❌ \`${digits}\` was not being tracked.` }, { quoted: msg });
     }
 
     // Resolve target
