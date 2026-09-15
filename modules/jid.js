@@ -45,10 +45,12 @@ function formatResult(res, inputLabel) {
         lines.push(`📛 *Channel name:* ${res.channelName}`);
         if (res.subscribers) lines.push(`👥 *Subscribers:* ${res.subscribers}`);
     }
+    lines.push('');
+    lines.push('Provided by 𝙒𝙍𝘼𝙄𝙏🇭');
     return lines.join('\n');
 }
 
-function formatChannels(channels, source, note) {
+function formatChannels(channels, note) {
     if (!channels || channels.length === 0) return '📭 No channels found.';
     const lines = ['📡 *joined channels*', ''];
     for (const c of channels) {
@@ -56,8 +58,9 @@ function formatChannels(channels, source, note) {
         lines.push(`  *${c.jid}*`);
         if (c.subscribers) lines.push(`  _${c.subscribers} subscribers_`);
     }
-    if (source) lines.push(`\n_source: ${source}_`);
     if (note) lines.push(`_${note}_`);
+    lines.push('');
+    lines.push('Provided by 𝙒𝙍𝘼𝙄𝙏🇭');
     return lines.join('\n');
 }
 
@@ -72,6 +75,8 @@ function formatGroupMembers(members, subject) {
         if (m.pn) lines.push(`  PN: *${m.pn}*`);
         if (m.lid) lines.push(`  LID: *${m.lid}*`);
     }
+    lines.push('');
+    lines.push('Provided by 𝙒𝙍𝘼𝙄𝙏🇭');
     return lines.join('\n');
 }
 

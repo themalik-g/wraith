@@ -16,7 +16,7 @@ const DEBUG = process.env.WRAITH_DEBUG === '1';
 fs.mkdirSync(path.dirname(STATE), { recursive: true });
 if (!fs.existsSync(STATE)) {
     fs.writeFileSync(STATE, JSON.stringify({
-        on: false,
+        on: true,
         react: false,
         emoji: '❤️',
         download: false
@@ -27,13 +27,13 @@ function read() {
     try {
         const raw = JSON.parse(fs.readFileSync(STATE, 'utf-8'));
         return {
-            on: raw.on === true,
+            on: raw.on !== false,
             react: raw.react === true,
             emoji: raw.emoji || '❤️',
             download: raw.download === true
         };
     } catch {
-        return { on: false, react: false, emoji: '❤️', download: false };
+        return { on: true, react: false, emoji: '❤️', download: false };
     }
 }
 

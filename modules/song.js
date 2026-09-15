@@ -42,7 +42,7 @@ export async function songCommand(sock, chat, msg, args) {
       }, { quoted: msg });
 
       await edit(sock, chat, status,
-        `✅ *Done via ${result.provider}*\n_${result.title}${result.artist ? ' — ' + result.artist : ''}_`);
+        `🎵 *_${result.title}${result.artist ? ' — ' + result.artist : ''}_*\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`);
       await react(sock, chat, msg, '☑');
     } catch (e) {
       console.error('[song]', e.message);

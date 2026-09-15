@@ -61,16 +61,65 @@ async function downloadQuotedMedia(msg) {
 
 // ── .currency ───────────────────────────────────────────────────────────────
 const ALIASES = {
+  // Asia & Middle East
   pakistan: 'PKR', pkr: 'PKR', india: 'INR', inr: 'INR', nepal: 'NPR', npr: 'NPR',
-  usa: 'USD', us: 'USD', america: 'USD', usd: 'USD',
-  uk: 'GBP', gb: 'GBP', gbp: 'GBP', britain: 'GBP', england: 'GBP',
-  uae: 'AED', aed: 'AED', emirates: 'AED', saudi: 'SAR', sar: 'SAR', ksa: 'SAR',
-  euro: 'EUR', eur: 'EUR', europe: 'EUR', japan: 'JPY', jpy: 'JPY',
-  china: 'CNY', cny: 'CNY', bangladesh: 'BDT', bdt: 'BDT', srilanka: 'LKR', lkr: 'LKR',
-  canada: 'CAD', cad: 'CAD', australia: 'AUD', aud: 'AUD', turkey: 'TRY', try: 'TRY',
-  malaysia: 'MYR', myr: 'MYR', indonesia: 'IDR', idr: 'IDR',
+  bangladesh: 'BDT', bdt: 'BDT', srilanka: 'LKR', lkr: 'LKR', afghanistan: 'AFN', afn: 'AFN',
+  china: 'CNY', cny: 'CNY', rmb: 'CNY', japan: 'JPY', jpy: 'JPY',
+  southkorea: 'KRW', korea: 'KRW', krw: 'KRW', northkorea: 'KPW',
+  singapore: 'SGD', sgd: 'SGD', malaysia: 'MYR', myr: 'MYR', indonesia: 'IDR', idr: 'IDR',
+  philippines: 'PHP', php: 'PHP', vietnam: 'VND', vnd: 'VND', thailand: 'THB', thb: 'THB',
+  taiwan: 'TWD', twd: 'TWD', hongkong: 'HKD', hkd: 'HKD', macau: 'MOP', mop: 'MOP',
+  myanmar: 'MMK', mmk: 'MMK', cambodia: 'KHR', khr: 'KHR', laos: 'LAK', lak: 'LAK',
+  maldives: 'MVR', mvr: 'MVR', bhutan: 'BTN', btn: 'BTN',
+  uae: 'AED', aed: 'AED', emirates: 'AED', dubai: 'AED',
+  saudi: 'SAR', sar: 'SAR', ksa: 'SAR', saudiarabia: 'SAR',
   qatar: 'QAR', qar: 'QAR', kuwait: 'KWD', kwd: 'KWD',
   bahrain: 'BHD', bhd: 'BHD', oman: 'OMR', omr: 'OMR',
+  iraq: 'IQD', iqd: 'IQD', iran: 'IRR', irr: 'IRR',
+  jordan: 'JOD', jod: 'JOD', lebanon: 'LBP', lbp: 'LBP',
+  syria: 'SYP', syp: 'SYP', yemen: 'YER', yer: 'YER',
+  israel: 'ILS', ils: 'ILS', palestine: 'ILS',
+  turkey: 'TRY', try: 'TRY', turkiye: 'TRY',
+
+  // Americas
+  usa: 'USD', us: 'USD', america: 'USD', usd: 'USD',
+  canada: 'CAD', cad: 'CAD', mexico: 'MXN', mxn: 'MXN',
+  brazil: 'BRL', brl: 'BRL', argentina: 'ARS', ars: 'ARS',
+  colombia: 'COP', cop: 'COP', chile: 'CLP', clp: 'CLP',
+  peru: 'PEN', pen: 'PEN', venezuela: 'VES', ves: 'VES',
+  uruguay: 'UYU', uyu: 'UYU', bolivia: 'BOB', bob: 'BOB',
+  paraguay: 'PYG', pyg: 'PYG', ecuador: 'USD',
+  costarica: 'CRC', crc: 'CRC', panama: 'PAB', pab: 'PAB',
+  guatemala: 'GTQ', gtq: 'GTQ', dominican: 'DOP', dop: 'DOP',
+  cuba: 'CUP', cup: 'CUP', jamaica: 'JMD', jmd: 'JMD',
+
+  // Europe
+  uk: 'GBP', gb: 'GBP', gbp: 'GBP', britain: 'GBP', england: 'GBP',
+  euro: 'EUR', eur: 'EUR', europe: 'EUR', germany: 'EUR', france: 'EUR',
+  italy: 'EUR', spain: 'EUR', netherlands: 'EUR', belgium: 'EUR',
+  austria: 'EUR', portugal: 'EUR', ireland: 'EUR', finland: 'EUR',
+  greece: 'EUR', slovakia: 'EUR', slovenia: 'EUR', estonia: 'EUR',
+  latvia: 'EUR', lithuania: 'EUR', cyprus: 'EUR', malta: 'EUR',
+  switzerland: 'CHF', swiss: 'CHF', chf: 'CHF',
+  russia: 'RUB', rub: 'RUB', ukraine: 'UAH', uah: 'UAH',
+  sweden: 'SEK', sek: 'SEK', norway: 'NOK', nok: 'NOK', denmark: 'DKK', dkk: 'DKK',
+  poland: 'PLN', pln: 'PLN', czech: 'CZK', czk: 'CZK', hungary: 'HUF', huf: 'HUF',
+  romania: 'RON', ron: 'RON', bulgaria: 'BGN', bgn: 'BGN', croatia: 'EUR',
+  serbia: 'RSD', rsd: 'RSD', iceland: 'ISK', isk: 'ISK',
+
+  // Africa & Oceania
+  australia: 'AUD', aud: 'AUD', newzealand: 'NZD', nzd: 'NZD', fiji: 'FJD', fjd: 'FJD',
+  southafrica: 'ZAR', zar: 'ZAR', egypt: 'EGP', egp: 'EGP',
+  nigeria: 'NGN', ngn: 'NGN', kenya: 'KES', kes: 'KES',
+  morocco: 'MAD', mad: 'MAD', algeria: 'DZD', dzd: 'DZD', tunisia: 'TND', tnd: 'TND',
+  ghana: 'GHS', ghs: 'GHS', ethiopia: 'ETB', etb: 'ETB', tanzania: 'TZS', tzs: 'TZS',
+  uganda: 'UGX', ugx: 'UGX', sudan: 'SDG', sdg: 'SDG', libya: 'LYD', lyd: 'LYD',
+  senegal: 'XOF', ivorycoast: 'XOF', cameroon: 'XAF', zimbabwe: 'ZWL',
+  mauritius: 'MUR', mur: 'MUR', seychelles: 'SCR', scr: 'SCR',
+
+  // Central Asia & Caucasus
+  kazakhstan: 'KZT', kzt: 'KZT', uzbekistan: 'UZS', uzs: 'UZS',
+  azerbaijan: 'AZN', azn: 'AZN', georgia: 'GEL', gel: 'GEL',
 };
 function resolveCurrency(s) {
   const k = String(s || '').trim().toLowerCase();
@@ -98,7 +147,7 @@ export async function currencyCommand(sock, chat, msg, args) {
     const rate = r.rate;
     const converted = amount * rate;
     await sock.sendMessage(chat, {
-      text: `💱 *currency*\n\n*${amount} ${from}*  →  *${converted.toFixed(4)} ${to}*\n_1 ${from} = ${rate} ${to}_\n_1 ${to} = ${(1 / rate).toFixed(6)} ${from}_\n\n_source: ${r.source.replace('https://', '').split('?')[0]}_`,
+      text: `💱 *currency*\n\n*${amount} ${from}*  →  *${converted.toFixed(4)} ${to}*\n_1 ${from} = ${rate} ${to}_\n_1 ${to} = ${(1 / rate).toFixed(6)} ${from}_\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`,
     }, { quoted: msg });
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ currency failed: ${e.message}` }, { quoted: msg }).catch(() => {});
@@ -212,6 +261,8 @@ export async function weatherCommand(sock, chat, msg, args) {
       lines.push(`• humidity · ${r.current.humidity}%`);
       lines.push(`• wind · ${r.current.wind} km/h`);
     }
+    lines.push('');
+    lines.push('Provided by 𝙒𝙍𝘼𝙄𝙏🇭');
     await sendChunked(sock, chat, msg, lines.join('\n'));
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ weather failed: ${e.message}` }, { quoted: msg }).catch(() => {});

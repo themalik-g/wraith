@@ -34,7 +34,6 @@ import {
   coupleppCommand,
 } from './modules/media.js';
 import { pptCommand } from './modules/ppt.js';
-import { chatbotCommand, maybeAutoReply, reminiCommand } from './modules/ai.js';
 
 // ── Phase 3 ──
 import {
@@ -48,7 +47,7 @@ import { setppCommand, setaboutCommand, chatstatsCommand } from './modules/owner
 
 // ── Phase 4 ──
 import { gitdlCommand, mfdlCommand } from './modules/downloader.js';
-import { igCommand, tiktokCommand, fbCommand, rmbgCommand } from './modules/social.js';
+import { igCommand, tiktokCommand, fbCommand } from './modules/social.js';
 
 // ── Phase 5 ──
 import { attachPresenceTracker, stalkCommand } from './modules/presence-track.js';
@@ -63,8 +62,7 @@ const CRITICAL_COMMANDS = new Set([
   'approveall', 'declineall', 'leave', 'join',
   'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
   'rejectcalls', 'setpp', 'setabout', 'chatstats',
-  'ig', 'tiktok', 'fb', 'rmbg', 'remini',
-  'gitdl', 'mfdl', 'chatbot', 'url',
+  'gitdl', 'mfdl', 'url',
 ]);
 
 const attachedSockets = new WeakSet();
@@ -126,7 +124,6 @@ export async function dispatch(sock, update) {
       const prefix = getPrefix();
 
       if (!text.startsWith(prefix)) {
-        try { await maybeAutoReply(sock, chat, msg); } catch (e) { console.error('[router] chatbot', e.message); }
         continue;
       }
 
@@ -152,7 +149,7 @@ export async function dispatch(sock, update) {
         'dl', 'download', 'mp3', 'song', 'songinfo', 'help', 'menu', 'ping',
         'currency', 'qr', 'define', 'weather', 'pwned', 'owner', 'script', 'repo',
         'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
-        'welcome', 'goodbye', 'getpp', 'remini',
+        'welcome', 'goodbye', 'getpp', 'ig', 'tiktok', 'fb',
       ]);
       if (KNOWN.has(verb)) {
         try { await sock.sendMessage(chat, { react: { text: '⌛', key: msg.key } }); } catch (e) { console.error('[router] react', e.message); }
@@ -212,7 +209,6 @@ export async function dispatch(sock, update) {
           case 'lyrics': await lyricsCommand(sock, chat, msg, rest); break;
           case 'ppt': await pptCommand(sock, chat, msg, rest); break;
           case 'couplepp': await coupleppCommand(sock, chat, msg, rest); break;
-          case 'chatbot': await chatbotCommand(sock, chat, msg, rest); break;
 
           // ── Phase 3 ──
           case 'welcome': await welcomeCommand(sock, chat, msg, rest); break;
@@ -241,8 +237,6 @@ export async function dispatch(sock, update) {
           case 'ig': await igCommand(sock, chat, msg, rest); break;
           case 'tiktok': await tiktokCommand(sock, chat, msg, rest); break;
           case 'fb': await fbCommand(sock, chat, msg, rest); break;
-          case 'rmbg': await rmbgCommand(sock, chat, msg, rest); break;
-          case 'remini': await reminiCommand(sock, chat, msg, rest); break;
 
           // ── Phase 5 ──
           case 'stalk': await stalkCommand(sock, chat, msg, rest); break;
@@ -258,10 +252,6 @@ export async function dispatch(sock, update) {
       }
     } catch (e) { console.error('[dispatch:outer]', e); }
   }
-}
-
-export async function maybeAutoChatbot(sock, chat, msg) {
-  try { return await maybeAutoReply(sock, chat, msg); } catch { return false; }
 }
 
 export async function dispatchUpdate(sock, update) {

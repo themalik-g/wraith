@@ -278,6 +278,14 @@ async function ignite() {
   });
 }
 
+// ── process level crash guards ──
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+
 // ── graceful shutdown ──
 function quiet(sig) {
   console.log(tag, grey(`${sig} — shutting down`));

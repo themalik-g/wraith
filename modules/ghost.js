@@ -222,7 +222,7 @@ export function classifyMessage(msg) {
 //  State
 // ─────────────────────────────────────────────
 function read() {
-    return { on: false, edit: true, ...readJson(STATE, {}) };
+    return { on: true, edit: true, ...readJson(STATE, {}) };
 }
 function write(o) {
     writeJsonAtomic(STATE, o);
