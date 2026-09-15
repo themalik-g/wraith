@@ -1,18 +1,19 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/ai.js
 // Chatbot (uncensored, last 10) + rmbg + remini
-// All ESM, native fetch, no external HTTP libs
+// Exports: handleChatbotCommand, handleChatbotResponse,
+//          removeBgCommand, reminiCommand
+// Aliases (kept for router compat):
+//          chatbotCommand, maybeAutoReply, rmbgCommand
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// ─── uploadImage (CJS util) ───
-import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
 let uploadImage = null;
@@ -24,9 +25,8 @@ try {
 }
 
 const DATA_FILE = path.join(__dirname, '..', 'data', 'userGroupData.json');
-
-// ─── In-memory history (last 10 per user) ───
 const HISTORY_MAX = 10;
+
 const chatMemory = {
   messages: new Map(),
   userInfo: new Map()
@@ -43,9 +43,7 @@ function saveUserGroupData(d) {
 }
 
 // ─── Helpers ───
-function getRandomDelay() {
-  return 2000 + Math.floor(Math.random() * 3000);
-}
+function getRandomDelay() { return 2000 + Math.floor(Math.random() * 3000); }
 
 async function showTyping(sock, chat) {
   try {
@@ -147,7 +145,7 @@ You:
 }
 
 // ─── .chatbot on / off ───
-export async function handleChatbotCommand(sock, chat, message, match) {
+async function handleChatbotCommand(sock, chat, message, match) {
   if (!match) {
     await showTyping(sock, chat);
     return sock.sendMessage(chat, {
@@ -163,9 +161,9 @@ export async function handleChatbotCommand(sock, chat, message, match) {
     message.participant ||
     message.pushName ||
     message.key.remoteJid;
-  const isOwner = senderId === botNumber;
+  const isOwnerUser = senderId === botNumber;
 
-  if (isOwner) {
+  if (isOwnerUser) {
     if (match === 'on') {
       await showTyping(sock, chat);
       if (data.chatbot[chat]) {
@@ -196,7 +194,7 @@ export async function handleChatbotCommand(sock, chat, message, match) {
     } catch {}
   }
 
-  if (!isAdmin && !isOwner) {
+  if (!isAdmin && !isOwnerUser) {
     await showTyping(sock, chat);
     return sock.sendMessage(chat, {
       text: '❌ Only group admins or the bot owner can use this command.',
@@ -224,8 +222,8 @@ export async function handleChatbotCommand(sock, chat, message, match) {
   return sock.sendMessage(chat, { text: '*Invalid command. Use .chatbot to see usage*', quoted: message });
 }
 
-// ─── Auto-reply on incoming messages ───
-export async function handleChatbotResponse(sock, chat, message, userMessage, senderId) {
+// ─── Auto-reply ───
+async function handleChatbotResponse(sock, chat, message, userMessage, senderId) {
   const data = loadUserGroupData();
   if (!data.chatbot[chat]) return;
 
@@ -317,9 +315,7 @@ export async function handleChatbotResponse(sock, chat, message, userMessage, se
   }
 }
 
-// ─────────────────────────────────────────────
-// .rmbg / .removebg / .nobg — remove background
-// ─────────────────────────────────────────────
+// ─── Image utils ───
 function isUrl(s) {
   try { new URL(s); return true; } catch { return false; }
 }
@@ -335,7 +331,8 @@ async function grabImageUrl(msg) {
   return uploadImage(Buffer.concat(chunks));
 }
 
-export async function removeBgCommand(sock, chat, msg, args) {
+// ─── .rmbg / .removebg / .nobg ───
+async function removeBgCommand(sock, chat, msg, args) {
   try {
     let url = null;
     const argText = (args || []).join(' ').trim();
@@ -367,7 +364,7 @@ export async function removeBgCommand(sock, chat, msg, args) {
 
     await sock.sendMessage(chat, {
       image: buf,
-      caption: '✨ *Background removed*\n\n— wraith'
+      caption: '✨ *Background removed*\n\n— 𝗞𝗡𝗜𝗚𝗛𝗧-𝗕𝗢𝗧'
     }, { quoted: msg });
 
   } catch (e) {
@@ -382,10 +379,8 @@ export async function removeBgCommand(sock, chat, msg, args) {
   }
 }
 
-// ─────────────────────────────────────────────
-// .remini — AI image enhancement
-// ─────────────────────────────────────────────
-export async function reminiCommand(sock, chat, msg, args) {
+// ─── .remini ───
+async function reminiCommand(sock, chat, msg, args) {
   try {
     let url = null;
     const argText = (args || []).join(' ').trim();
@@ -425,7 +420,7 @@ export async function reminiCommand(sock, chat, msg, args) {
 
     await sock.sendMessage(chat, {
       image: buf,
-      caption: '✨ *Image enhanced*\n\n— wraith'
+      caption: '✨ *Image enhanced*\n\n— 𝗞𝗡𝗜𝗚𝗛𝗧-𝗕𝗢𝗧'
     }, { quoted: msg });
 
   } catch (e) {
@@ -439,3 +434,35 @@ export async function reminiCommand(sock, chat, msg, args) {
     await sock.sendMessage(chat, { text: errMsg }, { quoted: msg });
   }
 }
+
+// ─────────────────────────────────────────────
+// Router-compatible wrappers (old signatures)
+// ─────────────────────────────────────────────
+async function chatbotCommand(sock, chat, msg, rest) {
+  const joined = Array.isArray(rest) ? rest.join(' ').trim() : String(rest || '').trim();
+  const match = joined === 'on' || joined === 'off' ? joined : (joined || null);
+  return handleChatbotCommand(sock, chat, msg, match);
+}
+
+async function maybeAutoReply(sock, chat, msg) {
+  const userMessage =
+    msg.message?.conversation ||
+    msg.message?.extendedTextMessage?.text ||
+    '';
+  if (!userMessage.trim()) return false;
+  const senderId = msg.key.participant || msg.key.remoteJid;
+  return handleChatbotResponse(sock, chat, msg, userMessage, senderId);
+}
+
+const rmbgCommand = removeBgCommand;
+
+export {
+  handleChatbotCommand,
+  handleChatbotResponse,
+  removeBgCommand,
+  reminiCommand,
+  // backward-compat aliases
+  chatbotCommand,
+  maybeAutoReply,
+  rmbgCommand,
+};
