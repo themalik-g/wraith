@@ -1,43 +1,72 @@
 // ─────────────────────────────────────────────
-// WRAITH · router.js
-// Unified message dispatcher.
-// Prefix is read dynamically from settings.
+// WRAITH · router.js — Full router with all phases
 // ─────────────────────────────────────────────
-import { remember, revealDelete, revealEdit, revealSecretEdit, ghostCommand, classifyMessage, } from './modules/ghost.js';
+import { remember, revealDelete, revealEdit, revealSecretEdit, ghostCommand, classifyMessage } from './modules/ghost.js';
 import { peekCommand, autoPeek, watchQuotedViewOnce } from './modules/peek.js';
 import { lurkCommand, lurkTick } from './modules/lurk.js';
 import { pingCommand } from './modules/ping.js';
 import { helpCommand } from './modules/help.js';
 import { scheduleCommand } from './modules/schedule.js';
-import { adminAction, toggleProtection, handleProtection, } from './modules/admin.js';
+import { adminAction, toggleProtection, handleProtection } from './modules/admin.js';
 import { getppCommand } from './modules/profile.js';
 import { getjidCommand } from './modules/jid.js';
-import { presenceCommand, shouldReadReceipts, applyAutoPresence, } from './modules/presence.js';
+import { presenceCommand, shouldReadReceipts, applyAutoPresence } from './modules/presence.js';
 import { activityCommand, trackActivity } from './modules/activity.js';
 import { updateCommand } from './modules/update.js';
 import { prefixCommand } from './modules/prefix.js';
-import { downloadCommand, songCommand, } from './modules/download.js';
+import { downloadCommand, songCommand as dlSongCommand } from './modules/download.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 import { getPrefix } from './core/settings.js';
 import { isOwner } from './core/identity.js';
+import { CONFIG } from './config.js';
+
+// ── Phase 1: Utility ────────────────────────────────────────────────────────
 import {
   currencyCommand, qrCommand, defineCommand, weatherCommand, pwnedCommand,
-  ownerCommand, scriptCommand, modeCommand, stalkCommand,
-  getMode, attachPresenceTracker,
+  ownerCommand, scriptCommand, modeCommand, getMode,
 } from './modules/utility.js';
 
+// ── Phase 2: Media + AI ─────────────────────────────────────────────────────
+import {
+  bookCommand, imageCommand, movieCommand, songCommand, lyricsCommand,
+  pptCommand, coupleppCommand,
+} from './modules/media.js';
+import { chatbotCommand, maybeAutoReply } from './modules/ai.js';
+
+// ── Phase 3: Group + Owner ──────────────────────────────────────────────────
+import {
+  welcomeCommand, goodbyeCommand, kickallCommand, kickccCommand,
+  setdescCommand, setgppCommand, approveallCommand, declineallCommand,
+  leaveCommand, joinCommand, muteCommand, unmuteCommand,
+  archiveCommand, unarchiveCommand, clearchatCommand,
+  rejectcallsCommand, attachCallRejector, getWelcomeConfig,
+} from './modules/group.js';
+import { setppCommand, setaboutCommand, chatstatsCommand } from './modules/owner.js';
+
+// ── Phase 4: Downloaders + Social ───────────────────────────────────────────
+import { gitdlCommand, mfdlCommand } from './modules/downloader.js';
+import { igCommand, tiktokCommand, fbCommand, rmbgCommand } from './modules/social.js';
+
+// ── Phase 5: Presence / Stalk ───────────────────────────────────────────────
+import { attachPresenceTracker, stalkCommand } from './modules/presence-track.js';
+
 // Commands that are ALWAYS owner-only, even in public mode.
-// Keep this list tight — anything that controls the bot or reveals private data.
 const CRITICAL_COMMANDS = new Set([
   'ghost', 'peek', 'lurk', 'schedule',
   'kick', 'add', 'promote', 'demote',
   'antilink', 'antispam', 'antisticker',
   'getjid', 'presence', 'activity',
   'stalk', 'mode', 'prefix', 'update',
-  'debug', 'mute', 'archive', 'leave', 'join', 'clearchat',
+  'kickall', 'kickcc', 'setdesc', 'setgpp',
+  'approveall', 'declineall', 'leave', 'join',
+  'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
+  'rejectcalls', 'setpp', 'setabout', 'chatstats',
+  'ig', 'tiktok', 'fb', 'rmbg',
+  'gitdl', 'mfdl', 'chatbot',
 ]);
 
 let presenceTrackerAttached = false;
+let callRejectorAttached = false;
 
 function plainText(msg) {
   return (
@@ -50,14 +79,12 @@ function plainText(msg) {
 }
 
 export async function dispatch(sock, update) {
-  // Attach the presence tracker exactly once per socket.
+  // Attach background listeners exactly once per socket
   if (!presenceTrackerAttached) {
-    try {
-      attachPresenceTracker(sock);
-      presenceTrackerAttached = true;
-    } catch (e) {
-      console.error('[router] attachPresenceTracker failed:', e.message);
-    }
+    try { attachPresenceTracker(sock); presenceTrackerAttached = true; } catch (e) { console.error('[router] attachPresenceTracker', e.message); }
+  }
+  if (!callRejectorAttached) {
+    try { attachCallRejector(sock); callRejectorAttached = true; } catch (e) { console.error('[router] attachCallRejector', e.message); }
   }
 
   if (update.type && update.type !== 'notify' && update.type !== 'append') return;
@@ -97,11 +124,8 @@ export async function dispatch(sock, update) {
 
       const text = plainText(msg);
       const prefix = getPrefix();
-
-      // Fast reject: doesn't start with the current prefix
       if (!text.startsWith(prefix)) continue;
 
-      // Guard against bare prefix with no command (e.g. user just sent ".")
       const withoutPrefix = text.slice(prefix.length);
       if (!withoutPrefix.trim()) continue;
 
@@ -110,34 +134,29 @@ export async function dispatch(sock, update) {
       const rest = firstSpace === -1 ? [] : withoutPrefix.slice(firstSpace + 1).trim().split(/\s+/);
 
       // ── Mode gate ──────────────────────────────────────────────────────
-      // Private mode → only owner can run anything.
-      // Public mode  → non-owner blocked only on CRITICAL commands.
       const sender = msg.key.participant || msg.key.remoteJid;
       const senderIsOwner = msg.key.fromMe || isOwner(sender);
       const mode = getMode();
       if (!senderIsOwner) {
-        if (mode === 'private') continue;                    // silent ignore
+        if (mode === 'private') continue;
         if (CRITICAL_COMMANDS.has(verb)) {
-          try {
-            await sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
-          } catch {}
+          try { await sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg }); } catch {}
           continue;
         }
       }
 
-      try {
-        await sock.sendMessage(chat, { react: { text: '⌛', key: msg.key } });
-      } catch (e) { console.error('[router] react', e.message); }
+      try { await sock.sendMessage(chat, { react: { text: '⌛', key: msg.key } }); } catch (e) { console.error('[router] react', e.message); }
 
       try {
         switch (verb) {
+          // ── Existing ──
           case 'ghost': await ghostCommand(sock, chat, msg, rest); break;
           case 'peek': await peekCommand(sock, chat, msg, rest); break;
           case 'lurk': await lurkCommand(sock, chat, msg, rest); break;
           case 'ping': await pingCommand(sock, chat, msg); break;
           case 'dl':
           case 'download': await downloadCommand(sock, chat, msg, rest); break;
-          case 'song': await songCommand(sock, chat, msg, rest); break;
+          case 'song': await dlSongCommand(sock, chat, msg, rest); break;
           case 'prefix': await prefixCommand(sock, chat, msg, rest); break;
           case 'help':
           case 'menu': await helpCommand(sock, chat, msg, rest); break;
@@ -155,7 +174,7 @@ export async function dispatch(sock, update) {
           case 'activity': await activityCommand(sock, chat, msg, rest); break;
           case 'update': await updateCommand(sock, chat, msg, rest); break;
 
-          // ── Phase 1 additions ──
+          // ── Phase 1 ──
           case 'currency': await currencyCommand(sock, chat, msg, rest); break;
           case 'qr': await qrCommand(sock, chat, msg, rest); break;
           case 'define': await defineCommand(sock, chat, msg, rest); break;
@@ -165,36 +184,70 @@ export async function dispatch(sock, update) {
           case 'script':
           case 'repo': await scriptCommand(sock, chat, msg); break;
           case 'mode': await modeCommand(sock, chat, msg, rest); break;
+
+          // ── Phase 2 ──
+          case 'book':
+          case 'books': await bookCommand(sock, chat, msg, rest); break;
+          case 'img':
+          case 'image': await imageCommand(sock, chat, msg, rest); break;
+          case 'movie': await movieCommand(sock, chat, msg, rest); break;
+          case 'lyrics': await lyricsCommand(sock, chat, msg, rest); break;
+          case 'ppt': await pptCommand(sock, chat, msg, rest); break;
+          case 'couplepp': await coupleppCommand(sock, chat, msg, rest); break;
+          case 'chatbot': await chatbotCommand(sock, chat, msg, rest); break;
+
+          // ── Phase 3 ──
+          case 'welcome': await welcomeCommand(sock, chat, msg, rest); break;
+          case 'goodbye': await goodbyeCommand(sock, chat, msg, rest); break;
+          case 'kickall': await kickallCommand(sock, chat, msg, rest); break;
+          case 'kickcc': await kickccCommand(sock, chat, msg, rest); break;
+          case 'setdesc': await setdescCommand(sock, chat, msg, rest); break;
+          case 'setgpp': await setgppCommand(sock, chat, msg, rest); break;
+          case 'approveall': await approveallCommand(sock, chat, msg, rest); break;
+          case 'declineall': await declineallCommand(sock, chat, msg, rest); break;
+          case 'leave': await leaveCommand(sock, chat, msg, rest); break;
+          case 'join': await joinCommand(sock, chat, msg, rest); break;
+          case 'mute': await muteCommand(sock, chat, msg, rest); break;
+          case 'unmute': await unmuteCommand(sock, chat, msg); break;
+          case 'archive': await archiveCommand(sock, chat, msg); break;
+          case 'unarchive': await unarchiveCommand(sock, chat, msg); break;
+          case 'clearchat': await clearchatCommand(sock, chat, msg); break;
+          case 'rejectcalls': await rejectcallsCommand(sock, chat, msg, rest); break;
+          case 'setpp': await setppCommand(sock, chat, msg, rest); break;
+          case 'setabout': await setaboutCommand(sock, chat, msg, rest); break;
+          case 'chatstats': await chatstatsCommand(sock, chat, msg, rest); break;
+
+          // ── Phase 4 ──
+          case 'gitdl': await gitdlCommand(sock, chat, msg, rest); break;
+          case 'mfdl': await mfdlCommand(sock, chat, msg, rest); break;
+          case 'ig': await igCommand(sock, chat, msg, rest); break;
+          case 'tiktok': await tiktokCommand(sock, chat, msg, rest); break;
+          case 'fb': await fbCommand(sock, chat, msg, rest); break;
+          case 'rmbg': await rmbgCommand(sock, chat, msg, rest); break;
+
+          // ── Phase 5 ──
           case 'stalk': await stalkCommand(sock, chat, msg, rest); break;
 
           default: break;
         }
       } catch (e) {
         console.error('[dispatch]', verb, e);
-        try {
-          await sock.sendMessage(chat, {
-            text: `⚠️ *command failed*\n\n\`${verb}\` — ${e.message}`,
-          }, { quoted: msg });
-        } catch {}
+        try { await sock.sendMessage(chat, { text: `⚠️ *command failed*\n\n\`${verb}\` — ${e.message}` }, { quoted: msg }); } catch {}
       }
-    } catch (e) {
-      console.error('[dispatch:outer]', e);
-    }
+    } catch (e) { console.error('[dispatch:outer]', e); }
   }
+}
+
+// Auto-chatbot hook: called for every message that isn't a command
+export async function maybeAutoChatbot(sock, chat, msg) {
+  try { return await maybeAutoReply(sock, chat, msg); } catch { return false; }
 }
 
 export async function dispatchUpdate(sock, update) {
   if (!update?.key) return;
-  const editNode =
-    update.update?.message?.protocolMessage ||
-    update.update?.message ||
-    update.message?.protocolMessage;
+  const editNode = update.update?.message?.protocolMessage || update.update?.message || update.message?.protocolMessage;
   if (!editNode) return;
-  const envelope = {
-    key: update.key,
-    participant: update.participant || update.key.participant,
-    message: { protocolMessage: editNode },
-  };
+  const envelope = { key: update.key, participant: update.participant || update.key.participant, message: { protocolMessage: editNode } };
   const t = editNode.type;
   if (t === 14 || t === 'MESSAGE_EDIT') await revealEdit(sock, envelope);
   else if (t === 0 || t === 'REVOKE') await revealDelete(sock, envelope);
