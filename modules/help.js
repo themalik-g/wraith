@@ -1,206 +1,372 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/help.js
-// Full command menu across all phases.
+// Styled boxed menu — command list ONLY.
+// Renders commands with the CURRENT prefix.
+// Owner-only verbs are hidden from non-owners.
 // ─────────────────────────────────────────────
 import { CONFIG } from '../config.js';
-import { getPrefix } from '../core/settings.js';
 import { isOwner } from '../core/identity.js';
+import { getPrefix } from '../core/settings.js';
 import { getMode } from './utility.js';
-import { chunkText } from '../lib/net.js';
 
-function catalog() {
-  return {
-    '🛡️ core': [
-      ['ping', 'check bot latency'],
-      ['help / menu', 'show this menu'],
-      ['prefix', 'show/set command prefix'],
-      ['mode', 'show/set public or private mode'],
-      ['update', 'check for updates'],
-      ['script / repo', 'repo URL'],
-      ['owner', 'send owner contact card'],
+// ── command definition helper ────────────────
+const c = (cmd, ownerOnly = false) => ({ cmd, ownerOnly });
+
+// ── full command registry ────────────────────
+// Preserves your old ghost/peek/lurk/schedule detail,
+// merges every new command from the updated bot.
+const REGISTRY = [
+  {
+    id: 'core',
+    icon: '🛡️',
+    title: 'ᴄᴏʀᴇ',
+    commands: [
+      c('.ping'),
+      c('.help'),
+      c('.menu'),
+      c('.prefix', true),
+      c('.mode', true),
+      c('.update', true),
+      c('.script'),
+      c('.repo'),
+      c('.owner'),
     ],
-    '🎭 ghost · peek · lurk': [
-      ['ghost', 'ghost-mode configuration'],
-      ['peek', 'reveal view-once / deleted media'],
-      ['lurk', 'watch status updates'],
-      ['schedule', 'schedule text or media for later (reply to schedule it)'],
+  },
+  {
+    id: 'ghost',
+    icon: '👻',
+    title: 'ɢʜᴏꜱᴛ',
+    commands: [
+      c('.ghost', true),
+      c('.ghost on', true),
+      c('.ghost off', true),
+      c('.ghost edit on', true),
+      c('.ghost edit off', true),
     ],
-    '🔧 utility': [
-      ['currency <from> <to> [amount]', 'live exchange rate (aliases ok)'],
-      ['qr <text>', 'generate QR code'],
-      ['qr read', 'reply to a QR image to decode'],
-      ['define <word>', 'dictionary definition'],
-      ['weather <city>', 'forecast + rain/storm warning'],
-      ['pwned <password>', 'check if password leaked (HIBP)'],
+  },
+  {
+    id: 'peek',
+    icon: '👀',
+    title: 'ᴘᴇᴇᴋ',
+    commands: [
+      c('.peek', true),
+      c('.peek auto on', true),
+      c('.peek auto off', true),
+      c('.peek dest owner', true),
+      c('.peek dest same', true),
+      c('.peek dest both', true),
     ],
-    '📚 media': [
-      ['book <query>', 'search Project Gutenberg / Open Library'],
-      ['book dl <number>', 'download from last search results'],
-      ['img <query> [count]', 'stock images (max 10)'],
-      ['couplepp [count]', 'couple profile pictures (max 5)'],
-      ['movie <title>', 'movie info'],
-      ['songinfo <title> [artist]', 'song info (Deezer/MusicBrainz)'],
-      ['lyrics <artist> - <title>', 'song lyrics'],
-      ['ppt <topic>', 'download a .pptx presentation'],
-      ['rmbg', 'reply to image — remove background'],
+  },
+  {
+    id: 'lurk',
+    icon: '🕵️',
+    title: 'ʟᴜʀᴋ',
+    commands: [
+      c('.lurk', true),
+      c('.lurk on', true),
+      c('.lurk off', true),
+      c('.lurk react on', true),
+      c('.lurk react off', true),
+      c('.lurk download on', true),
+      c('.lurk download off', true),
+      c('.lurk emoji ❤️', true),
+      c('.lurk emoji random', true),
+      c('.lurk emoji none', true),
     ],
-    '⬇️ downloaders': [
-      ['dl / download <url>', 'generic downloader'],
-      ['song <query>', 'audio downloader'],
-      ['gitdl <github-url>', 'download GitHub repo as zip'],
-      ['mfdl <mediafire-url>', 'download from MediaFire'],
+  },
+  {
+    id: 'schedule',
+    icon: '⏰',
+    title: 'ꜱᴄʜᴇᴅᴜʟᴇ',
+    commands: [
+      c('.schedule', true),
+      c('.schedule txt date am/pm', true),
+      c('.schedule list', true),
+      c('.schedule cancel <id>', true),
+      c('.schedule media date am/pm (reply)', true),
     ],
-    '🔍 social search': [
-      ['ig <username>', 'Instagram profile info'],
-      ['tiktok <username>', 'TikTok profile info'],
-      ['fb <username>', 'Facebook profile info'],
+  },
+  {
+    id: 'utility',
+    aliases: ['tools'],
+    icon: '🔧',
+    title: 'ᴜᴛɪʟɪᴛʏ',
+    commands: [
+      c('.currency <from> <to> [amount]'),
+      c('.qr <text>'),
+      c('.qr read'),
+      c('.define <word>'),
+      c('.weather <city>'),
+      c('.pwned <password>'),
     ],
-    '🤖 ai': [
-      ['chatbot', 'show chatbot status'],
-      ['chatbot on / off', 'enable/disable auto-reply'],
-      ['chatbot groups on / off', 'reply in groups when @mentioned'],
-      ['chatbot set <instructions>', 'set custom AI instructions'],
+  },
+  {
+    id: 'media',
+    icon: '📚',
+    title: 'ᴍᴇᴅɪᴀ',
+    commands: [
+      c('.book <query>'),
+      c('.book dl <number>'),
+      c('.img <query> [count]'),
+      c('.couplepp [count]'),
+      c('.movie <title>'),
+      c('.songinfo <title> [artist]'),
+      c('.lyrics <artist> - <title>'),
+      c('.ppt <topic>'),
+      c('.rmbg', true),
     ],
-    '👥 group admin': [
-      ['welcome on / off', 'welcome messages'],
-      ['goodbye on / off', 'goodbye messages'],
-      ['kickall', 'remove all non-admin members'],
-      ['kickcc <code>', 'remove members by country code'],
-      ['setdesc <text>', 'set group description'],
-      ['setgpp', 'reply to image — set group picture'],
-      ['approveall', 'approve all pending join requests'],
-      ['declineall', 'decline all pending join requests'],
-      ['leave', 'leave the current group'],
-      ['join <link>', 'join group via invite link'],
+  },
+  {
+    id: 'download',
+    aliases: ['dl'],
+    icon: '⬇️',
+    title: 'ᴅᴏᴡɴʟᴏᴀᴅ',
+    commands: [
+      c('.dl <url>'),
+      c('.dl audio <url>'),
+      c('.dl mp3 <url>'),
+      c('.download <url>'),
+      c('.song <query>'),
+      c('.gitdl <github-url>', true),
+      c('.mfdl <mediafire-url>', true),
     ],
-    '👤 owner profile': [
-      ['setpp', 'reply to image — set bot profile picture'],
-      ['setabout <text>', 'set bot about/status'],
-      ['rejectcalls on / off', 'auto-reject incoming calls'],
-      ['stalk <number>', 'presence tracker for a contact'],
-      ['stalk list', 'list tracked contacts'],
-      ['stalk stop <number>', 'stop tracking a contact'],
-      ['chatstats <number>', 'chat statistics across groups'],
+  },
+  {
+    id: 'social',
+    aliases: ['socialsearch'],
+    icon: '🔍',
+    title: 'ꜱᴏᴄɪᴀʟ ꜱᴇᴀʀᴄʜ',
+    commands: [
+      c('.ig <username>', true),
+      c('.tiktok <username>', true),
+      c('.fb <username>', true),
     ],
-    '💬 chat controls': [
-      ['mute [8h|1d|forever]', 'mute this chat'],
-      ['unmute', 'unmute this chat'],
-      ['archive', 'archive this chat'],
-      ['unarchive', 'unarchive this chat'],
-      ['clearchat', 'clear this chat'],
+  },
+  {
+    id: 'ai',
+    aliases: ['chatbot'],
+    icon: '🤖',
+    title: 'ᴀɪ',
+    commands: [
+      c('.chatbot', true),
+      c('.chatbot on', true),
+      c('.chatbot off', true),
+      c('.chatbot groups on', true),
+      c('.chatbot groups off', true),
+      c('.chatbot set <instructions>', true),
     ],
-    '🧭 jid / profile': [
-      ['getjid', 'get JIDs of chats/users'],
-      ['getpp', 'fetch profile picture'],
-      ['presence', 'presence configuration'],
-      ['activity', 'activity stats'],
+  },
+  {
+    id: 'group',
+    aliases: ['admin', 'groupadmin'],
+    icon: '👥',
+    title: 'ɢʀᴏᴜᴘ ᴀᴅᴍɪɴ',
+    commands: [
+      c('.welcome on'),
+      c('.welcome off'),
+      c('.goodbye on'),
+      c('.goodbye off'),
+      c('.kickall', true),
+      c('.kickcc <code>', true),
+      c('.setdesc <text>', true),
+      c('.setgpp', true),
+      c('.approveall', true),
+      c('.declineall', true),
+      c('.leave', true),
+      c('.join <link>', true),
     ],
-  };
+  },
+  {
+    id: 'owner',
+    aliases: ['profile', 'ownerprofile'],
+    icon: '👤',
+    title: 'ᴏᴡɴᴇʀ ᴘʀᴏꜰɪʟᴇ',
+    commands: [
+      c('.setpp', true),
+      c('.setabout <text>', true),
+      c('.rejectcalls on', true),
+      c('.rejectcalls off', true),
+      c('.stalk <number>', true),
+      c('.stalk list', true),
+      c('.stalk stop <number>', true),
+      c('.chatstats <number>', true),
+    ],
+  },
+  {
+    id: 'chat',
+    aliases: ['chatcontrols'],
+    icon: '💬',
+    title: 'ᴄʜᴀᴛ ᴄᴏɴᴛʀᴏʟꜱ',
+    commands: [
+      c('.mute [8h|1d|forever]', true),
+      c('.unmute', true),
+      c('.archive', true),
+      c('.unarchive', true),
+      c('.clearchat', true),
+    ],
+  },
+  {
+    id: 'jid',
+    aliases: ['jidprofile'],
+    icon: '🧭',
+    title: 'ᴊɪᴅ / ᴘʀᴏꜰɪʟᴇ',
+    commands: [
+      c('.getjid', true),
+      c('.getpp'),
+      c('.presence', true),
+      c('.activity', true),
+    ],
+  },
+];
+
+const TAIL = '└─────────────┈⚝';
+
+// ── prefix helper (unchanged from old) ───────
+function applyPrefix(cmd, prefix) {
+  if (prefix === '.') return cmd;
+  return cmd.startsWith('.') ? prefix + cmd.slice(1) : cmd;
 }
 
-async function sendChunked(sock, chat, msg, text) {
-  for (const p of chunkText(text, 3800)) await sock.sendMessage(chat, { text: p }, { quoted: msg });
+// ── box renderer (unchanged from old) ────────
+function renderBox(icon, title, rows, prefix) {
+  const lines = [];
+  lines.push(`┌──❮ ${icon} ${title} ❯`);
+  lines.push('│');
+  for (const r of rows) lines.push(`│ ◈ ${applyPrefix(r, prefix)}`);
+  lines.push('│');
+  lines.push(TAIL);
+  return lines.join('\n');
 }
 
+// ── viewer-aware registry ────────────────────
+function visibleRegistry(isOwnerUser) {
+  if (isOwnerUser) return REGISTRY;
+  return REGISTRY
+    .map((g) => ({
+      ...g,
+      commands: g.commands.filter((x) => !x.ownerOnly),
+    }))
+    .filter((g) => g.commands.length > 0);
+}
+
+// ── full menu page ───────────────────────────
+function renderAll(prefix, isOwnerUser) {
+  const groups = visibleRegistry(isOwnerUser);
+  const sections = groups.map((g) =>
+    renderBox(g.icon, g.title, g.commands.map((x) => x.cmd), prefix)
+  );
+
+  const total = groups.reduce((n, g) => n + g.commands.length, 0);
+
+  let mode = 'private';
+  try {
+    mode = getMode();
+  } catch {}
+
+  const botName = CONFIG?.botName || CONFIG?.codename || 'WRAITH';
+  const version = CONFIG?.version || '1.3.2';
+
+  const header = [
+    '┌──❮ ⓌⓇⒶⒾⓉⒽ ❯',
+    '│',
+    `│ ${botName} · v${version} · ᴍᴏᴅᴇ ${mode}`,
+    `│ ᴘʀᴇꜰɪx · ${prefix}`,
+    `│ ᴄᴏᴍᴍᴀɴᴅꜱ · ${total}`,
+    `│ ℹ️ ${prefix}help <category> ꜰᴏʀ ᴅᴇᴛᴀɪʟꜱ`,
+    '│',
+    TAIL,
+  ].join('\n');
+
+  return [header, '', ...sections, '', 'ⓌⓇⒶⒾⓉⒽ'].join('\n');
+}
+
+// ── category lookup ──────────────────────────
+function findGroup(name) {
+  const wanted = String(name || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (!wanted) return null;
+  return (
+    REGISTRY.find((g) => {
+      const ids = [g.id, ...(g.aliases || [])];
+      if (ids.some((x) => x.toLowerCase() === wanted)) return true;
+      const cleanedTitle = g.title.replace(/[^a-z]/gi, '').toLowerCase();
+      return cleanedTitle === wanted;
+    }) || null
+  );
+}
+
+// ── chunked sender (safety for huge menus) ───
+async function sendSafe(sock, chat, msg, text) {
+  const MAX = 3500;
+  if (text.length <= MAX) {
+    return sock.sendMessage(chat, { text }, { quoted: msg });
+  }
+  const parts = [];
+  let buf = '';
+  for (const line of text.split('\n')) {
+    if ((buf + '\n' + line).length > MAX) {
+      if (buf) parts.push(buf);
+      buf = line;
+    } else {
+      buf = buf ? buf + '\n' + line : line;
+    }
+  }
+  if (buf) parts.push(buf);
+  for (const p of parts) {
+    await sock.sendMessage(chat, { text: p }, { quoted: msg });
+  }
+}
+
+// ── command entry ────────────────────────────
 export async function helpCommand(sock, chat, msg, args) {
   try {
-    const prefix = getPrefix();
     const from = msg.key.participant || msg.key.remoteJid;
     const isOwnerUser = msg.key.fromMe || isOwner(from);
-    const mode = getMode();
-    const all = catalog();
+    const prefix = getPrefix();
+    const target = (args?.[0] || '').toLowerCase().trim();
 
-    const OWNER_ONLY_VERBS = new Set([
-      'ghost', 'peek', 'lurk', 'schedule',
-      'kickall', 'kickcc', 'setdesc', 'setgpp',
-      'approveall', 'declineall', 'leave', 'join',
-      'mode', 'prefix', 'update', 'getjid', 'presence', 'activity',
-      'stalk', 'chatbot', 'setpp', 'setabout', 'rejectcalls', 'chatstats',
-      'ig', 'tiktok', 'fb', 'rmbg',
-      'gitdl', 'mfdl',
-      'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
-    ]);
-
-    function filterForViewer(groups) {
-      if (isOwnerUser) return groups;
-      const out = {};
-      for (const [groupName, cmds] of Object.entries(groups)) {
-        const kept = cmds.filter(([cmd]) => {
-          const verb = cmd.split(/\s+/)[0].toLowerCase();
-          return !OWNER_ONLY_VERBS.has(verb);
-        });
-        if (kept.length) out[groupName] = kept;
-      }
-      return out;
+    // ── no argument → full menu ──
+    if (!target) {
+      const text = renderAll(prefix, isOwnerUser);
+      return sendSafe(sock, chat, msg, text);
     }
 
-    const requested = (args || []).join(' ').trim().toLowerCase();
-    let groupsToShow = filterForViewer(all);
+    // ── category requested ──
+    const group = findGroup(target);
 
-    if (requested) {
-      const match = Object.keys(groupsToShow).find(
-        (k) => k.toLowerCase().includes(requested) ||
-               k.replace(/[^\w\s]/g, '').trim().toLowerCase() === requested
+    if (!group) {
+      const avail = visibleRegistry(isOwnerUser)
+        .map((g) => `• ${g.id}`)
+        .join(' · ');
+      return sock.sendMessage(
+        chat,
+        {
+          text: `❓ no menu page called _${target}_.\n\n${avail}`,
+        },
+        { quoted: msg }
       );
-      if (match) {
-        groupsToShow = { [match]: groupsToShow[match] };
-      } else {
-        const lines = [
-          `📖 *help* — no category matching "${requested}"`,
-          '',
-          '*Available categories:*',
-          ...Object.keys(all).map((k) => `• ${k}  _(use_ \`${prefix}help ${k.replace(/[^\w\s]/g, '').trim()}\`_)`),
-        ];
-        return sendChunked(sock, chat, msg, lines.join('\n'));
-      }
     }
 
-    const lines = [];
-    lines.push(`╭━━━〔 *${CONFIG.botName || 'WRAITH'}* 〕━━━╮`);
-    lines.push(`│  v${CONFIG.version || '1.3.2'} · mode *${mode}*`);
-    lines.push(`│  prefix \`${prefix}\``);
-    lines.push(`│  commands · ${Object.values(all).reduce((n, arr) => n + arr.length, 0)}`);
-    lines.push(`╰━━━━━━━━━━━━━━━━━━╯`);
-    lines.push('');
+    const visible = isOwnerUser
+      ? group.commands.map((x) => x.cmd)
+      : group.commands.filter((x) => !x.ownerOnly).map((x) => x.cmd);
 
-    if (!requested) {
-      lines.push('*categories:*');
-      for (const [name, cmds] of Object.entries(groupsToShow)) {
-        lines.push(`• ${name}  ·  ${cmds.length} cmd${cmds.length > 1 ? 's' : ''}`);
-      }
-      lines.push('');
-      lines.push(`_Type_ \`${prefix}help <category>\` _for details._`);
-      lines.push(`_Example:_ \`${prefix}help media\``);
-
-      if (isOwnerUser) {
-        lines.push('');
-        lines.push('_Owner: showing all categories below._');
-        lines.push('');
-        for (const [name, cmds] of Object.entries(groupsToShow)) {
-          lines.push(`— *${name}* —`);
-          for (const [cmd, desc] of cmds) {
-            const ownerTag = OWNER_ONLY_VERBS.has(cmd.split(/\s+/)[0].toLowerCase()) ? ' 🔒' : '';
-            lines.push(`  \`${prefix}${cmd}\`${ownerTag} — _${desc}_`);
-          }
-          lines.push('');
-        }
-      }
-      return sendChunked(sock, chat, msg, lines.join('\n'));
+    if (!visible.length) {
+      return sock.sendMessage(
+        chat,
+        { text: `🔒 _${group.title}_ is owner-only.` },
+        { quoted: msg }
+      );
     }
 
-    for (const [name, cmds] of Object.entries(groupsToShow)) {
-      lines.push(`— *${name}* —`);
-      for (const [cmd, desc] of cmds) {
-        const ownerTag = OWNER_ONLY_VERBS.has(cmd.split(/\s+/)[0].toLowerCase()) ? ' 🔒' : '';
-        lines.push(`  \`${prefix}${cmd}\`${ownerTag} — _${desc}_`);
-      }
-      lines.push('');
-    }
-    lines.push('_🔒 = owner only._');
-    return sendChunked(sock, chat, msg, lines.join('\n'));
+    const box = renderBox(group.icon, group.title, visible, prefix);
+    return sendSafe(sock, chat, msg, box);
   } catch (e) {
     try {
-      await sock.sendMessage(chat, { text: `⚠️ help failed: ${e.message}` }, { quoted: msg });
+      await sock.sendMessage(
+        chat,
+        { text: `⚠️ help failed: ${e.message}` },
+        { quoted: msg }
+      );
     } catch {}
   }
 }
