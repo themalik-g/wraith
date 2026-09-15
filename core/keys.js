@@ -38,4 +38,3 @@ function load() {
 }
 
 export function getKey(name) { return load()[name] || null; }
-export function hasAnyKey(...names) { return names.some((n) => !!load()[n]); }
