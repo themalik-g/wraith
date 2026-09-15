@@ -1,10 +1,20 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/ai.js
-// Chatbot: uncensored, Hinglish, last 10 messages
+// Chatbot (uncensored, last 10) + rmbg + remini
 // ─────────────────────────────────────────────
 const fs = require('fs');
 const path = require('path');
 const fetch = require('node-fetch');
+const axios = require('axios');
+const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+
+let uploadImage;
+try {
+  ({ uploadImage } = require('../lib/uploadImage'));
+} catch (e) {
+  console.warn('[ai] uploadImage not available:', e.message);
+  uploadImage = async () => { throw new Error('uploadImage unavailable'); };
+}
 
 const DATA_FILE = path.join(__dirname, '..', 'data', 'userGroupData.json');
 
@@ -104,7 +114,6 @@ You:
 
     return data.result
       .trim()
-      // Emoji names → real emojis
       .replace(/winks?/g, '😉')
       .replace(/eye roll(s)?/g, '🙄')
       .replace(/shrugs?/g, '🤷‍♂️')
@@ -114,7 +123,6 @@ You:
       .replace(/cries|crying/g, '😢')
       .replace(/thinks?|thinking/g, '🤔')
       .replace(/sleeps?|sleeping/g, '😴')
-      // Strip prompt leakage
       .replace(/Remember:.*$/g, '')
       .replace(/IMPORTANT:.*$/g, '')
       .replace(/^[A-Z\s]+:.*$/gm, '')
@@ -294,7 +302,133 @@ async function handleChatbotResponse(sock, chat, message, userMessage, senderId)
   }
 }
 
+// ─────────────────────────────────────────────
+// .rmbg / .removebg / .nobg — remove background
+// ─────────────────────────────────────────────
+function isUrl(s) {
+  try { new URL(s); return true; } catch { return false; }
+}
+
+async function grabImageUrl(msg) {
+  const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+  const imgMsg = quoted?.imageMessage || msg.message?.imageMessage;
+  if (!imgMsg) return null;
+
+  const stream = await downloadContentFromMessage(imgMsg, 'image');
+  const chunks = [];
+  for await (const c of stream) chunks.push(c);
+  return uploadImage(Buffer.concat(chunks));
+}
+
+async function removeBgCommand(sock, chat, msg, args) {
+  try {
+    let url = null;
+    const argText = (args || []).join(' ').trim();
+
+    if (argText) {
+      if (!isUrl(argText)) {
+        return sock.sendMessage(chat, {
+          text: '❌ Invalid URL.\n\nUse `.rmbg <url>` or reply to an image with `.rmbg`.'
+        }, { quoted: msg });
+      }
+      url = argText;
+    } else {
+      url = await grabImageUrl(msg);
+      if (!url) {
+        return sock.sendMessage(chat, {
+          text: '🖼️ *Background Remover*\n\nUsage:\n• `.rmbg <image_url>`\n• Reply to an image with `.rmbg`\n• Send image with `.rmbg` as caption'
+        }, { quoted: msg });
+      }
+    }
+
+    const api = `https://api.siputzx.my.id/api/iloveimg/removebg?image=${encodeURIComponent(url)}`;
+
+    const res = await axios.get(api, {
+      responseType: 'arraybuffer',
+      timeout: 30000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+
+    await sock.sendMessage(chat, {
+      image: Buffer.from(res.data),
+      caption: '✨ *Background removed*\n\n— wraith'
+    }, { quoted: msg });
+
+  } catch (e) {
+    console.error('[rmbg]', e.message);
+    let errMsg = '❌ Could not remove the background.';
+    if (e.response?.status === 429) errMsg = '⏰ Rate-limited. Try later.';
+    else if (e.response?.status === 400) errMsg = '❌ Invalid image.';
+    else if (e.response?.status === 500) errMsg = '🔧 Server error.';
+    else if (e.code === 'ECONNABORTED') errMsg = '⏰ Timed out.';
+    else if (/ENOTFOUND|ECONNREFUSED/.test(e.message)) errMsg = '🌐 Network error.';
+
+    await sock.sendMessage(chat, { text: errMsg }, { quoted: msg });
+  }
+}
+
+// ─────────────────────────────────────────────
+// .remini — AI image enhancement
+// ─────────────────────────────────────────────
+async function reminiCommand(sock, chat, msg, args) {
+  try {
+    let url = null;
+    const argText = (args || []).join(' ').trim();
+
+    if (argText) {
+      if (!isUrl(argText)) {
+        return sock.sendMessage(chat, {
+          text: '❌ That is not a valid URL.\n\nUse `.remini <url>` or reply to an image with `.remini`.'
+        }, { quoted: msg });
+      }
+      url = argText;
+    } else {
+      url = await grabImageUrl(msg);
+      if (!url) {
+        return sock.sendMessage(chat, {
+          text: '📸 *Remini — Image Enhancer*\n\nUsage:\n• `.remini <image_url>`\n• Reply to an image with `.remini`\n• Send image with `.remini` as caption'
+        }, { quoted: msg });
+      }
+    }
+
+    const api = `https://api.princetechn.com/api/tools/remini?apikey=prince_tech_api_azfsbshfb&url=${encodeURIComponent(url)}`;
+
+    const res = await axios.get(api, {
+      timeout: 60000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+
+    const result = res.data?.result;
+    if (!res.data?.success || !result?.image_url) {
+      throw new Error(result?.message || 'Enhancer rejected the image');
+    }
+
+    const imgRes = await axios.get(result.image_url, {
+      responseType: 'arraybuffer',
+      timeout: 30000
+    });
+
+    await sock.sendMessage(chat, {
+      image: Buffer.from(imgRes.data),
+      caption: '✨ *Image enhanced*\n\n— Wraith'
+    }, { quoted: msg });
+
+  } catch (e) {
+    console.error('[remini]', e.message);
+    let errMsg = '❌ Could not enhance that image.';
+    if (e.response?.status === 429) errMsg = '⏰ Rate-limited. Try again shortly.';
+    else if (e.response?.status === 400) errMsg = '❌ Invalid image or format.';
+    else if (e.response?.status === 500) errMsg = '🔧 Server error. Try again later.';
+    else if (e.code === 'ECONNABORTED') errMsg = '⏰ Timed out. Try again.';
+    else if (/ENOTFOUND|ECONNREFUSED/.test(e.message)) errMsg = '🌐 Network error.';
+
+    await sock.sendMessage(chat, { text: errMsg }, { quoted: msg });
+  }
+}
+
 module.exports = {
   handleChatbotCommand,
-  handleChatbotResponse
+  handleChatbotResponse,
+  removeBgCommand,
+  reminiCommand
 };
