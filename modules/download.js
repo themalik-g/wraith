@@ -1,47 +1,47 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/download.js
 // .song → @snwfdhmp/soundcloud-downloader (priority)
-//      → yt-dlp (fallback, live % edits)
+//      → @choewy/yt-dlp binary (fallback, live %)
 //      → final ☑ green tick react
 // ─────────────────────────────────────────────
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawn } = require('child_process');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import PQueue from 'p-queue';
 
-// SoundCloud downloader (scoped fork)
-let scdl;
+const require = createRequire(import.meta.url);
+
+// ─── SoundCloud downloader (CJS, defensive) ───
+let scdl = null;
 try {
-  scdl = require('@snwfdhmp/soundcloud-downloader');
-  scdl = scdl.default || scdl;
+  const mod = require('@snwfdhmp/soundcloud-downloader');
+  scdl = mod?.default || mod;
 } catch (e) {
-  console.warn('[song] @snwfdhmp/soundcloud-downloader not loaded:', e.message);
-  scdl = null;
+  console.warn('[song] @snwfdhmp/soundcloud-downloader unavailable:', e.message);
+}
+
+// ─── yt-dlp binary resolver (@choewy/yt-dlp) ───
+let YTDLP_BIN = 'yt-dlp';
+try {
+  const ytdlp = require('@choewy/yt-dlp');
+  const candidate =
+    ytdlp?.path ||
+    ytdlp?.binary ||
+    ytdlp?.default?.path ||
+    ytdlp?.default?.binary ||
+    null;
+  if (candidate && fs.existsSync(candidate)) YTDLP_BIN = candidate;
+} catch {
+  // Package not resolvable — assume yt-dlp is on PATH
 }
 
 const TMP_DIR = path.join(os.tmpdir(), 'wraith-song');
-if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+fs.mkdirSync(TMP_DIR, { recursive: true });
 
 const AUDIO_MAX_BYTES = 15 * 1024 * 1024;
-
-// ─── Serial queue ───
-const _queue = [];
-let _running = false;
-function enqueue(task) {
-  return new Promise((resolve, reject) => {
-    _queue.push({ task, resolve, reject });
-    _drain();
-  });
-}
-async function _drain() {
-  if (_running) return;
-  const next = _queue.shift();
-  if (!next) return;
-  _running = true;
-  try { next.resolve(await next.task()); }
-  catch (e) { next.reject(e); }
-  finally { _running = false; setImmediate(_drain); }
-}
+const queue = new PQueue({ concurrency: 1 });
 
 // ─── Helpers ───
 async function react(sock, chat, msg, emoji) {
@@ -54,11 +54,13 @@ function progressBar(pct) {
   const filled = Math.max(0, Math.min(20, Math.round(pct / 5)));
   return '█'.repeat(filled) + '░'.repeat(20 - filled);
 }
-function cleanFile(p) { try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch {} }
+function cleanFile(p) {
+  try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch {}
+}
 function newestMp3(dir) {
   const files = fs.readdirSync(dir)
-    .filter(f => f.toLowerCase().endsWith('.mp3'))
-    .map(f => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+    .filter((f) => f.toLowerCase().endsWith('.mp3'))
+    .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
     .sort((a, b) => b.t - a.t);
   return files[0] ? path.join(dir, files[0].f) : null;
 }
@@ -74,8 +76,8 @@ async function getSoundcloudClientId() {
   const html = await res.text();
 
   const candidates = [
-    ...[...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map(m => m[1]),
-    ...[...html.matchAll(/https:\/\/a-v2\.sndcdn\.com\/assets\/[^"']+\.js/g)].map(m => m[0])
+    ...[...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1]),
+    ...[...html.matchAll(/https:\/\/a-v2\.sndcdn\.com\/assets\/[^"']+\.js/g)].map((m) => m[0])
   ];
 
   for (const src of candidates) {
@@ -97,16 +99,14 @@ async function searchSoundcloud(query) {
   const url =
     `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}` +
     `&client_id=${clientId}&limit=1&app_locale=en`;
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' }
-  });
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
   if (!res.ok) throw new Error(`SoundCloud search HTTP ${res.status}`);
   const data = await res.json();
   if (!data.collection || !data.collection.length) return null;
   return data.collection[0];
 }
 
-// ─── SoundCloud download path ───
+// ─── SoundCloud download ───
 async function downloadViaSoundcloud(query, outFile) {
   if (!scdl) throw new Error('soundcloud-downloader not installed');
 
@@ -141,15 +141,15 @@ function runYtDlp(query, outFile, onProgress) {
       '--force-overwrites',
       '-o', outFile
     ];
-    const proc = spawn('yt-dlp', args);
+    const proc = spawn(YTDLP_BIN, args);
     let err = '';
-    proc.stdout.on('data', chunk => {
+    proc.stdout.on('data', (chunk) => {
       const m = chunk.toString().match(/\[download\]\s+([\d.]+)%/);
       if (m && onProgress) onProgress(parseFloat(m[1]));
     });
-    proc.stderr.on('data', d => { err += d.toString(); });
-    proc.on('error', e => reject(new Error(`yt-dlp not found: ${e.message}`)));
-    proc.on('close', code => {
+    proc.stderr.on('data', (d) => { err += d.toString(); });
+    proc.on('error', (e) => reject(new Error(`yt-dlp not found: ${e.message}`)));
+    proc.on('close', (code) => {
       if (code === 0) resolve();
       else reject(new Error(err.slice(-200) || `yt-dlp exited ${code}`));
     });
@@ -157,15 +157,13 @@ function runYtDlp(query, outFile, onProgress) {
 }
 
 // ─── Main handler ───
-async function songCommand(sock, chat, msg, args) {
+export async function songCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
   if (!query) {
-    return sock.sendMessage(chat, {
-      text: '❌ Usage: `.song <song name>`'
-    }, { quoted: msg });
+    return sock.sendMessage(chat, { text: '❌ Usage: `.song <song name>`' }, { quoted: msg });
   }
 
-  return enqueue(async () => {
+  return queue.add(async () => {
     const status = await sock.sendMessage(chat, {
       text: `🎵 *Searching:* ${query}`
     }, { quoted: msg });
@@ -174,16 +172,14 @@ async function songCommand(sock, chat, msg, args) {
     let usedSource = null;
 
     try {
-      // ── Step 1: SoundCloud (priority) ──
-      await editMessage(sock, chat, status,
-        `🎵 *Searching SoundCloud…*`);
+      // ── Step 1: SoundCloud first ──
+      await editMessage(sock, chat, status, `🎵 *Searching SoundCloud…*`);
 
       outFile = path.join(TMP_DIR, `wraith-${Date.now()}.mp3`);
       let soundcloudOk = false;
 
       try {
-        await editMessage(sock, chat, status,
-          `🎵 *Downloading from SoundCloud…*`);
+        await editMessage(sock, chat, status, `🎵 *Downloading from SoundCloud…*`);
         const track = await downloadViaSoundcloud(query, outFile);
         soundcloudOk = true;
         usedSource = 'SoundCloud';
@@ -258,5 +254,3 @@ async function songCommand(sock, chat, msg, args) {
     }
   });
 }
-
-module.exports = { songCommand };
