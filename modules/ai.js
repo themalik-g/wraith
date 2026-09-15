@@ -1,10 +1,7 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/ai.js
-// Chatbot (uncensored, last 10) + rmbg + remini
-// Exports: handleChatbotCommand, handleChatbotResponse,
-//          removeBgCommand, reminiCommand
-// Aliases (kept for router compat):
-//          chatbotCommand, maybeAutoReply, rmbgCommand
+// Chatbot (uncensored, last 10) + remini
+// Exports: chatbotCommand, maybeAutoReply, reminiCommand
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
 import path from 'node:path';
@@ -331,54 +328,6 @@ async function grabImageUrl(msg) {
   return uploadImage(Buffer.concat(chunks));
 }
 
-// ─── .rmbg / .removebg / .nobg ───
-async function removeBgCommand(sock, chat, msg, args) {
-  try {
-    let url = null;
-    const argText = (args || []).join(' ').trim();
-
-    if (argText) {
-      if (!isUrl(argText)) {
-        return sock.sendMessage(chat, {
-          text: '❌ Invalid URL.\n\nUse `.rmbg <url>` or reply to an image with `.rmbg`.'
-        }, { quoted: msg });
-      }
-      url = argText;
-    } else {
-      url = await grabImageUrl(msg);
-      if (!url) {
-        return sock.sendMessage(chat, {
-          text: '🖼️ *Background Remover*\n\nUsage:\n• `.rmbg <image_url>`\n• Reply to an image with `.rmbg`\n• Send image with `.rmbg` as caption'
-        }, { quoted: msg });
-      }
-    }
-
-    const api = `https://api.siputzx.my.id/api/iloveimg/removebg?image=${encodeURIComponent(url)}`;
-
-    const res = await fetch(api, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const buf = Buffer.from(await res.arrayBuffer());
-
-    await sock.sendMessage(chat, {
-      image: buf,
-      caption: '✨ *Background removed*\n\n— 𝗞𝗡𝗜𝗚𝗛𝗧-𝗕𝗢𝗧'
-    }, { quoted: msg });
-
-  } catch (e) {
-    console.error('[rmbg]', e.message);
-    let errMsg = '❌ Could not remove the background.';
-    if (/429/.test(e.message)) errMsg = '⏰ Rate-limited. Try later.';
-    else if (/400/.test(e.message)) errMsg = '❌ Invalid image.';
-    else if (/500/.test(e.message)) errMsg = '🔧 Server error.';
-    else if (/ENOTFOUND|ECONNREFUSED|fetch failed/i.test(e.message)) errMsg = '🌐 Network error.';
-
-    await sock.sendMessage(chat, { text: errMsg }, { quoted: msg });
-  }
-}
-
 // ─── .remini ───
 async function reminiCommand(sock, chat, msg, args) {
   try {
@@ -420,7 +369,7 @@ async function reminiCommand(sock, chat, msg, args) {
 
     await sock.sendMessage(chat, {
       image: buf,
-      caption: '✨ *Image enhanced*\n\n— 𝗞𝗡𝗜𝗚𝗛𝗧-𝗕𝗢𝗧'
+      caption: '✨ *Image enhanced*\n\n— 𝙒𝙍𝘼𝙄𝙏𝙃'
     }, { quoted: msg });
 
   } catch (e) {
@@ -436,7 +385,7 @@ async function reminiCommand(sock, chat, msg, args) {
 }
 
 // ─────────────────────────────────────────────
-// Router-compatible wrappers (old signatures)
+// Router-compatible wrappers
 // ─────────────────────────────────────────────
 async function chatbotCommand(sock, chat, msg, rest) {
   const joined = Array.isArray(rest) ? rest.join(' ').trim() : String(rest || '').trim();
@@ -454,15 +403,8 @@ async function maybeAutoReply(sock, chat, msg) {
   return handleChatbotResponse(sock, chat, msg, userMessage, senderId);
 }
 
-const rmbgCommand = removeBgCommand;
-
 export {
-  handleChatbotCommand,
-  handleChatbotResponse,
-  removeBgCommand,
-  reminiCommand,
-  // backward-compat aliases
   chatbotCommand,
   maybeAutoReply,
-  rmbgCommand,
+  reminiCommand,
 };
