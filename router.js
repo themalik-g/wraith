@@ -14,7 +14,6 @@ import { presenceCommand, shouldReadReceipts, applyAutoPresence } from './module
 import { activityCommand, trackActivity } from './modules/activity.js';
 import { updateCommand } from './modules/update.js';
 import { prefixCommand } from './modules/prefix.js';
-import { downloadCommand } from './modules/download.js';
 import { songCommand as dlSongCommand } from './modules/song.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 import { getPrefix } from './core/settings.js';
@@ -36,7 +35,6 @@ import { pptCommand } from './modules/ppt.js';
 import {
   chatbotCommand,
   maybeAutoReply,
-  rmbgCommand,
   reminiCommand,
 } from './modules/ai.js';
 
@@ -52,7 +50,7 @@ import { setppCommand, setaboutCommand, chatstatsCommand } from './modules/owner
 
 // ── Phase 4: Downloaders + Social ───────────────────────────────────────────
 import { gitdlCommand, mfdlCommand } from './modules/downloader.js';
-import { igCommand, tiktokCommand, fbCommand } from './modules/social.js';
+import { igCommand, tiktokCommand, fbCommand, rmbgCommand } from './modules/social.js';
 
 // ── Phase 5: Presence / Stalk ───────────────────────────────────────────────
 import { attachPresenceTracker, stalkCommand } from './modules/presence-track.js';
@@ -174,7 +172,7 @@ export async function dispatch(sock, update) {
           case 'lurk': await lurkCommand(sock, chat, msg, rest); break;
           case 'ping': await pingCommand(sock, chat, msg); break;
           case 'dl':
-          case 'download': await downloadCommand(sock, chat, msg, rest); break;
+          case 'download':
           case 'song': await dlSongCommand(sock, chat, msg, rest); break;
           case 'songinfo': await songInfoCommand(sock, chat, msg, rest); break;
           case 'prefix': await prefixCommand(sock, chat, msg, rest); break;
