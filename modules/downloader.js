@@ -63,11 +63,25 @@ export async function mfdlCommand(sock, chat, msg, args) {
     const maxMB = CONFIG.media?.maxDownloadMB || 100;
     await sock.sendMessage(chat, { text: '📥 Resolving MediaFire link…' }, { quoted: msg });
 
+    // ★ FIX: the page fetch now has a hard timeout — a hung MediaFire page
+    //        returns an error instead of freezing the command
+    let html;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
+      try {
+        const r = await fetch(url, { signal: controller.signal });
+        if (!r.ok) throw new Error(`MediaFire page HTTP ${r.status}`);
+        html = await r.text();
+      } finally { clearTimeout(timer); }
+    } catch (e) {
+      return sock.sendMessage(chat, { text: `❌ Could not reach MediaFire: ${e.message}` }, { quoted: msg });
+    }
+
     // Resolve direct download link via MediaFire page scrape
     let directUrl = null;
     let fileName = 'mediafire_file';
     try {
-      const html = await fetch(url).then((r) => r.text());
       const dlMatch = html.match(/href="(https?:\/\/download[^"]+mediafire[^"]+)"/);
       if (dlMatch) directUrl = dlMatch[1].replace(/&amp;/g, '&');
       const nameMatch = html.match(/<title>([^<]+)<\/title>/);
