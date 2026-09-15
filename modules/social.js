@@ -7,6 +7,7 @@ import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import { isOwner } from '../core/identity.js';
 import { withTempFile, downloadToFile, BROWSER_USER_AGENT } from '../lib/net.js';
 import { getKey } from '../core/keys.js';
+import { removeBg } from '../lib/removeBackground.js';
 
 function ownerOnly(sock, chat, msg) {
     const from = msg.key.participant || msg.key.remoteJid;
@@ -37,8 +38,6 @@ async function timedFetchText(url, headers, timeout = 15000) {
 }
 
 // ── Social search helpers ───────────────────────────────────────────────────
-// ★ FIX: endpoint still works but REQUIRES the full header set the web
-//        client sends (verified working per instaloader maintainer, 2026).
 async function searchInstagram(username) {
     const headers = {
         'X-IG-App-ID': '936619743392459',
@@ -69,8 +68,6 @@ async function searchInstagram(username) {
 }
 
 async function searchTikTok(username) {
-    // ★ FIX: keyless API that works from servers (the HTML scrape usually
-    //        returns empty from datacenter IPs)
     try {
         const data = await timedFetchJson(`https://www.tikwm.com/api/user/info?unique_id=${encodeURIComponent(username)}`, {});
         const st = data?.data?.stats;
@@ -84,7 +81,6 @@ async function searchTikTok(username) {
             };
         }
     } catch {}
-    // Legacy HTML scrape fallback
     try {
         const html = await timedFetchText(`https://www.tiktok.com/@${encodeURIComponent(username)}`, {});
         const followers = html.match(/"followerCount":(\d+)/)?.[1];
@@ -152,63 +148,7 @@ export async function igCommand(sock, chat, msg, args) { return socialSearch(soc
 export async function tiktokCommand(sock, chat, msg, args) { return socialSearch(sock, chat, msg, args, searchTikTok, 'tiktok'); }
 export async function fbCommand(sock, chat, msg, args) { return socialSearch(sock, chat, msg, args, searchFacebook, 'fb'); }
 
-// ── .rmbg ───────────────────────────────────────────────────────────────────
-// ★ FIX: primary = LOCAL keyless AI removal (@imgly/background-removal-node).
-//        Runs on your server, no API, no 401s. First run downloads a ~40MB
-//        model (one time, then cached). Keys in keys.env are OPTIONAL fast paths.
-async function removeBackground(buffer) {
-    // 1) Bria cloud (only if key provided)
-    const briaKey = getKey('BRIA_API_KEY');
-    if (briaKey) {
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 30000);
-            let data;
-            try {
-                const res = await fetch('https://api.bria.ai/api/v1/image/edit/remove_background', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${briaKey}` },
-                    body: JSON.stringify({ image: buffer.toString('base64') }),
-                    signal: controller.signal,
-                });
-                if (res.ok) data = await res.json();
-            } finally { clearTimeout(timer); }
-            const b64 = data?.image || data?.result;
-            if (b64) return Buffer.from(b64, 'base64');
-        } catch {}
-    }
-
-    // 2) Hugging Face (works better with HF_TOKEN in keys.env)
-    const hfToken = getKey('HF_TOKEN');
-    try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 45000);
-        try {
-            const res = await fetch('https://api-inference.huggingface.co/models/briaai/RMBG-1.4', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/octet-stream', ...(hfToken ? { Authorization: `Bearer ${hfToken}` } : {}) },
-                body: buffer,
-                signal: controller.signal,
-            });
-            if (res.ok) {
-                const out = Buffer.from(await res.arrayBuffer());
-                if (out.length > 500) return out;
-            }
-        } finally { clearTimeout(timer); }
-    } catch {}
-
-    // 3) LOCAL keyless removal — always works, no key, first call preloads model
-    try {
-        const mod = await import('@imgly/background-removal-node');
-        const blob = await mod.removeBackground(buffer);
-        const out = Buffer.from(await blob.arrayBuffer());
-        if (out.length > 500) return out;
-    } catch (e) {
-        console.warn('[rmbg] local removal failed:', e.message);
-    }
-    return null;
-}
-
+// ── .rmbg — local AI background removal ─────────────────────────────────────
 export async function rmbgCommand(sock, chat, msg, args) {
     if (ownerOnly(sock, chat, msg)) return;
     try {
@@ -220,18 +160,22 @@ export async function rmbgCommand(sock, chat, msg, args) {
         if (quoted.imageMessage.fileLength && Number(quoted.imageMessage.fileLength) > 15 * 1024 * 1024) {
             return sock.sendMessage(chat, { text: '❌ Image too large (max 15 MB).' }, { quoted: msg });
         }
+
         await sock.sendMessage(chat, { text: '🖼️ Removing background… _(first run may download a one-time model)_' }, { quoted: msg });
+
         const stream = await downloadContentFromMessage(quoted.imageMessage, 'image');
         const chunks = [];
         for await (const c of stream) chunks.push(c);
         const buffer = Buffer.concat(chunks);
 
-        const out = await removeBackground(buffer);
-        if (!out) {
-            return sock.sendMessage(chat, { text: '❌ Background removal failed. Try a smaller/clearer image.' }, { quoted: msg });
-        }
-        await sock.sendMessage(chat, { image: out, caption: '🖼️ Background removed.' }, { quoted: msg });
+        const out = await removeBg(buffer);
+
+        await sock.sendMessage(chat, {
+            image: out,
+            caption: '🖼️ Background removed.'
+        }, { quoted: msg });
     } catch (e) {
+        console.error('[rmbg]', e.message);
         await sock.sendMessage(chat, { text: `⚠️ rmbg failed: ${e.message}` }, { quoted: msg }).catch(() => {});
     }
 }
