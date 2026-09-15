@@ -17,6 +17,41 @@ const LEDGER_FILE = path.join(here, '..', 'state', 'ghost-ledger.json');
 const DEBUG = process.env.WRAITH_DEBUG === '1';
 
 // ─────────────────────────────────────────────
+//  Self-event guard
+//  Returns true when the incoming delete/edit event
+//  OR its target message originated from US:
+//    · our own linked device (fromMe)
+//    · a "note to self" / self-chat message
+//    · the bot's own outgoing sends (peek forwards, etc.)
+//  We NEVER report these — the whole point of ghost is
+//  to catch OTHER people, not ourselves.
+// ─────────────────────────────────────────────
+function isSelfEvent(sock, msg, targetKey = null) {
+    // 1) The event itself came from our device
+    if (msg?.key?.fromMe) return true;
+
+    // 2) The target message (the one being edited/revoked) was ours
+    if (targetKey?.fromMe) return true;
+
+    // 3) Sender digits match our own PN or LID
+    const selfPn  = digitsOf(sock?.user?.id  || '');
+    const selfLid = digitsOf(sock?.user?.lid || '');
+    const culprit =
+        msg?.participant ||
+        msg?.key?.participant ||
+        msg?.key?.remoteJid;
+    if (culprit) {
+        const cd = digitsOf(culprit);
+        if (cd && (cd === selfPn || (selfLid && cd === selfLid))) return true;
+    }
+
+    // 4) The chat is our own DM-with-self
+    if (isOwnerChat(msg?.key?.remoteJid)) return true;
+
+    return false;
+}
+
+// ─────────────────────────────────────────────
 //  Persistent ledger
 // ─────────────────────────────────────────────
 const ledger = new Map();
@@ -47,7 +82,7 @@ function scheduleSave() {
 loadLedger();
 
 // ─────────────────────────────────────────────
-//  FIX #2 — Reveal dedupe.
+//  Reveal dedupe.
 //  The same delete/edit can arrive via BOTH
 //  messages.upsert AND messages.update — without
 //  this, the owner gets duplicate reports.
@@ -204,7 +239,7 @@ async function grab(node, kind) {
 }
 
 // ─────────────────────────────────────────────
-//  Timestamp helper (FIX: timezone from config)
+//  Timestamp helper
 // ─────────────────────────────────────────────
 function stamp(ts = Date.now()) {
     return new Date(ts).toLocaleString('en-GB', {
@@ -272,22 +307,22 @@ export async function ghostCommand(sock, chat, msg, args) {
 // ─────────────────────────────────────────────
 //  REMEMBER — store every inbound message
 //
-//  FIX #7:
-//   • skips your own outgoing messages (fromMe)
-//   • skips status@broadcast posts
-//   • media is only downloaded when antidelete is
-//     armed (media is useless for pure antiedit)
+//  Skips:
+//   · our own outgoing messages (fromMe)
+//   · messages where the sender IS us (self-chat quirk)
+//   · status@broadcast
+//   · owner DM (prevents report feedback loop)
+//   · protocol / secretEncrypted control messages
 // ─────────────────────────────────────────────
 export async function remember(sock, msg) {
     const s = read();
     if (!s.on && !s.edit) return;
 
-    // Don't store our own messages or status posts
-if (msg.key?.fromMe) return;
-if (msg.key?.remoteJid === 'status@broadcast') return;
+    // Never store our own activity
+    if (isSelfEvent(sock, msg)) return;
 
-// ── Skip owner DM entirely — prevents report feedback loop ──
-if (isOwnerChat(msg.key?.remoteJid)) return;
+    if (msg.key?.remoteJid === 'status@broadcast') return;
+
     const id = msg.key?.id;
     if (!id) return;
 
@@ -302,6 +337,10 @@ if (isOwnerChat(msg.key?.remoteJid)) return;
         file: null,
         at: Date.now()
     };
+
+    // Final safety: if the resolved sender is still us, skip
+    const selfPn = digitsOf(sock?.user?.id || '');
+    if (record.from && selfPn && digitsOf(record.from) === selfPn) return;
 
     try {
         const vo = extractViewOnce(msg.message);
@@ -401,21 +440,32 @@ export async function revealDelete(sock, msg) {
     const { pm } = unwrapProtocol(msg);
     if (!pm?.key?.id) return;
 
+    // Never report our own deletions
+    if (isSelfEvent(sock, msg, pm.key)) {
+        if (DEBUG) console.log('[ghost] self-delete ignored');
+        return;
+    }
+
     const targetId = pm.key.id;
     const culprit = msg.participant || msg.key?.participant || msg.key?.remoteJid;
 
-    const selfNum = digitsOf(sock.user?.id || '');
-    if (culprit && digitsOf(culprit) === selfNum) return;
+    const rec = ledger.get(targetId);
+    if (!rec) return;
 
-    // FIX #2 — suppress duplicate deliveries of the same revoke
+    // Belt & braces: the stored record's sender must not be us
+    const selfPn = digitsOf(sock?.user?.id || '');
+    if (rec.from && selfPn && digitsOf(rec.from) === selfPn) {
+        ledger.delete(targetId);
+        scheduleSave();
+        return;
+    }
+
+    // Suppress duplicate deliveries of the same revoke
     const dk = `del:${msg.key?.remoteJid || ''}:${targetId}:${digitsOf(culprit)}`;
     if (wasRevealed(dk)) {
         if (DEBUG) console.log('[ghost] duplicate revoke suppressed:', dk);
         return;
     }
-
-    const rec = ledger.get(targetId);
-    if (!rec) return;
 
     const owner = ownerJid();
 
@@ -471,6 +521,12 @@ export async function revealEdit(sock, msg) {
     const { pm } = unwrapProtocol(msg);
     if (!pm) return;
 
+    // Never report our own edits
+    if (isSelfEvent(sock, msg, pm.key)) {
+        if (DEBUG) console.log('[ghost] self-edit ignored');
+        return;
+    }
+
     const targetId = pm.key?.id;
 
     const afterText =
@@ -481,12 +537,16 @@ export async function revealEdit(sock, msg) {
 
     const rec = targetId ? ledger.get(targetId) : null;
 
+    // If somehow we stored our own message, drop it and skip
+    const selfPn = digitsOf(sock?.user?.id || '');
+    if (rec?.from && selfPn && digitsOf(rec.from) === selfPn) {
+        if (targetId) { ledger.delete(targetId); scheduleSave(); }
+        return;
+    }
+
     const editor = msg.participant || msg.key?.participant || msg.key?.remoteJid;
 
-    const selfNum = digitsOf(sock.user?.id || '');
-    if (editor && digitsOf(editor) === selfNum) return;
-
-    // FIX #2 — suppress duplicate deliveries of the same edit
+    // Suppress duplicate deliveries of the same edit
     const ek = `edit:${msg.key?.remoteJid || ''}:${targetId}:${digitsOf(editor)}`;
     if (wasRevealed(ek)) {
         if (DEBUG) console.log('[ghost] duplicate edit suppressed:', ek);
@@ -555,9 +615,15 @@ export async function revealSecretEdit(sock, msg) {
     if (!sem) return;
 
     const targetId = sem.targetMessageKey?.id;
+
+    // Never report our own edits
+    if (isSelfEvent(sock, msg, sem.targetMessageKey)) {
+        if (DEBUG) console.log('[ghost] self secret-edit ignored');
+        return;
+    }
+
     const editor = msg.key?.participant || msg.key?.remoteJid;
 
-    // FIX #11 — was unconditional console spam; now DEBUG-gated
     if (DEBUG) {
         console.log('\n[ghost:secret-edit] →', JSON.stringify({
             targetId,
@@ -568,10 +634,7 @@ export async function revealSecretEdit(sock, msg) {
         }, null, 2));
     }
 
-    const selfNum = digitsOf(sock.user?.id || '');
-    if (editor && digitsOf(editor) === selfNum) return;
-
-    // FIX #2 — suppress duplicates
+    // Suppress duplicates
     const ek = `sedit:${msg.key?.remoteJid || ''}:${targetId}:${digitsOf(editor)}`;
     if (wasRevealed(ek)) {
         if (DEBUG) console.log('[ghost] duplicate secret-edit suppressed:', ek);
@@ -579,6 +642,14 @@ export async function revealSecretEdit(sock, msg) {
     }
 
     const rec = targetId ? ledger.get(targetId) : null;
+
+    // If somehow we stored our own message, drop it and skip
+    const selfPn = digitsOf(sock?.user?.id || '');
+    if (rec?.from && selfPn && digitsOf(rec.from) === selfPn) {
+        if (targetId) { ledger.delete(targetId); scheduleSave(); }
+        return;
+    }
+
     const originalText = rec?.text || '';
     const originalSender = rec?.from || editor;
 
