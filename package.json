@@ -10,17 +10,17 @@
     "pm2:logs": "pm2 logs",
     "pm2:restart": "pm2 restart ecosystem.config.cjs"
   },
-  "engines": {
-    "node": ">=20"
-  },
+  "engines": { "node": ">=20" },
   "dependencies": {
     "@cacheable/node-cache": "^1.4.0",
     "@choewy/yt-dlp": "^1.2.0",
     "@hapi/boom": "^10.0.1",
+    "@imgly/background-removal-node": "^1.4.5",
     "@whiskeysockets/baileys": "^7.0.0-rc.14",
     "async-mutex": "^0.5.0",
     "audio-decode": "^2.2.3",
     "awesome-phonenumber": "^7.8.0",
+    "jimp": "^0.22.12",
     "lamejs": "^1.2.1",
     "libsignal": "^6.0.0",
     "lru-cache": "^11.1.0",
