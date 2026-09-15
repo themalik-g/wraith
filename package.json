@@ -22,7 +22,7 @@
     "audio-decode": "^2.2.3",
     "ffmpeg-static": "^5.2.0",
     "awesome-phonenumber": "^7.8.0",
-    "jimp": "^1.6.0"
+    "jimp": "^1.6.0", 
     "lamejs": "^1.2.1",
     "libsignal": "^6.0.0",
     "lru-cache": "^11.1.0",
