@@ -2,10 +2,9 @@
 //  WRAITH · modules/ping.js
 //  Latency probe + container-aware system vitals.
 //
-//  Inside Docker/Pterodactyl, os.cpus() / os.totalmem()
-//  / os.loadavg() report the HOST, not your container.
-//  We read cgroup v1/v2 files instead so CPU% and
-//  memory reflect what your panel shows.
+//  Reads cgroup v1/v2 directly so CPU% and memory
+//  reflect the CONTAINER, not the host — matching
+//  what your panel shows.
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
 import os from 'node:os';
@@ -50,7 +49,6 @@ function cgReadV1(subsystem, file) {
 
 // ─────────────────────────────────────────────
 //  Container memory
-//  Prefers cgroup current/max over host os.totalmem.
 // ─────────────────────────────────────────────
 function containerMemory() {
     if (CG_VERSION === 2) {
@@ -66,14 +64,12 @@ function containerMemory() {
         const current = parseInt(cgReadV1('memory', 'memory.usage_in_bytes') || '0', 10);
         const maxRaw  = cgReadV1('memory', 'memory.limit_in_bytes');
         let limit     = parseInt(maxRaw || '0', 10);
-        // v1 uses a huge sentinel (~9.2e18) for "unlimited"
         if (limit > 1e15) limit = 0;
         if (current > 0 && limit > 0) {
             return { used: current, limit, source: 'cgroup v1' };
         }
     }
 
-    // Not in a container — use host numbers
     const total = os.totalmem();
     const free  = os.freemem();
     return { used: total - free, limit: total, source: 'host' };
@@ -81,10 +77,6 @@ function containerMemory() {
 
 // ─────────────────────────────────────────────
 //  Container CPU
-//  cpuacct.usage (v1) / cpu.stat usage_usec (v2)
-//  give cumulative CPU µs used by the container.
-//  Two samples = live usage %. cpu.max / cfs_quota
-//  tells us the effective core count.
 // ─────────────────────────────────────────────
 function cgCpuUsageUsec() {
     if (CG_VERSION === 2) {
@@ -96,7 +88,7 @@ function cgCpuUsageUsec() {
     }
     if (CG_VERSION === 1) {
         const raw = cgReadV1('cpuacct', 'cpuacct.usage');
-        if (raw) return Math.floor(parseInt(raw, 10) / 1000); // ns → µs
+        if (raw) return Math.floor(parseInt(raw, 10) / 1000);
     }
     return null;
 }
@@ -141,16 +133,12 @@ async function sampleContainerCpu(gapMs = 300) {
 
     if (deltaWallUsec <= 0) return { pct: 0, cores: cgCpuCores() || 1, coreFraction: 0 };
 
-    // Fraction of one CPU core used during the sample window
     const coreFraction = deltaUsageUsec / deltaWallUsec;
-
-    // Container quota (cores). If 1 core = 100% at coreFraction 1.0.
     const quotaCores = cgCpuCores();
     const denom = (quotaCores && quotaCores > 0) ? quotaCores : 1;
 
-    const pct = (coreFraction / denom) * 100;
     return {
-        pct: Math.max(0, Math.min(100, pct)),
+        pct: Math.max(0, Math.min(100, (coreFraction / denom) * 100)),
         cores: quotaCores || 1,
         coreFraction,
     };
@@ -170,20 +158,25 @@ function rttBar(ms) {
     return '█'.repeat(filled) + '░'.repeat(10 - filled);
 }
 
-function quality(ms) {
+// RTT quality — how fast WhatsApp is answering
+function rttQuality(ms) {
     if (ms < 150) return '🟢 excellent';
     if (ms < 400) return '🟡 good';
     if (ms < 900) return '🟠 slow';
     return '🔴 laggy';
 }
 
+// CPU quality — how much of YOUR quota is being used
+// (based on actual utilisation %, not absolute cores)
 function cpuQuality(pct) {
-    if (pct < 25) return '🟢 idle';
-    if (pct < 60) return '🟡 normal';
-    if (pct < 85) return '🟠 busy';
-    return '🔴 heavy';
+    if (pct < 10)  return '🟢 lightest';
+    if (pct < 40)  return '🟢 light';
+    if (pct < 70)  return '🟡 normal';
+    if (pct < 90)  return '🟠 busy';
+    return '🔴 saturated';
 }
 
+// Memory quality — how close to the cgroup limit
 function memQuality(pct) {
     if (pct < 60) return '🟢 healthy';
     if (pct < 80) return '🟡 moderate';
@@ -234,7 +227,6 @@ export async function pingCommand(sock, chat, msg) {
 
     // ── 3. Container CPU sample ──
     const cpu = await sampleContainerCpu(300);
-    const hostCores = os.cpus()?.length || 1;
 
     // ── 4. Container memory ──
     const mem = containerMemory();
@@ -243,50 +235,43 @@ export async function pingCommand(sock, chat, msg) {
     // ── 5. Process memory ──
     const proc = process.memoryUsage();
 
-    // ── 6. Render ──
+    // ── 6. Build compact message ──
     const lines = [
         `🏓 *pong*`,
         ``,
         `*whatsapp rtt* · ${rtt} ms`,
-        `\`${rttBar(rtt)}\`  ${quality(rtt)}`,
+        `\`${rttBar(rtt)}\`  ${rttQuality(rtt)}`,
         ``,
         `*event loop* · ${eventLoopLag} ms`,
         ``,
     ];
 
-    // ── CPU section ──
+    // CPU line — quota only, no host noise
     if (cpu) {
-        const coresLabel = cpu.cores < hostCores
-            ? `${cpu.cores} (limited, host has ${hostCores})`
-            : `${cpu.cores}`;
+        const quota = Number.isInteger(cpu.cores)
+            ? cpu.cores
+            : cpu.cores.toFixed(2);
         lines.push(
-            `*cpu* · ${coresLabel}`,
+            `*cpu* · ${quota} core${cpu.cores !== 1 ? 's' : ''}`,
             `\`${bar(cpu.pct)}\`  ${cpu.pct.toFixed(1)}%  ${cpuQuality(cpu.pct)}`
         );
     } else {
-        // Fallback — not in a cgroup, use host numbers
-        const [la1, la5, la15] = os.loadavg();
-        lines.push(
-            `*cpu* · ${hostCores} cores _(host)_`,
-            `*load avg* · ${la1.toFixed(2)}  ${la5.toFixed(2)}  ${la15.toFixed(2)}`
-        );
+        const cores = os.cpus()?.length || 1;
+        lines.push(`*cpu* · ${cores} cores _(host)_`);
     }
 
-    // ── Memory section ──
-    const memTag = mem.source === 'host' ? ' _(host)_' : ` _(container · ${mem.source})_`;
+    // Memory line
     lines.push(
         ``,
-        `*memory*${memTag}`,
+        `*memory*`,
         `\`${bar(memPct)}\`  ${memPct.toFixed(1)}%  ${memQuality(memPct)}`,
-        `• used   · ${mb(mem.used)} / ${mb(mem.limit)} MB`,
+        `• used · ${mb(mem.used)} / ${mb(mem.limit)} MB`,
         ``,
-        `*memory (process)*`,
-        `• rss    · ${mb(proc.rss)} MB`,
-        `• heap   · ${mb(proc.heapUsed)} / ${mb(proc.heapTotal)} MB`,
-        `• ext    · ${mb(proc.external)} MB`,
+        `*process*`,
+        `• rss  · ${mb(proc.rss)} MB`,
+        `• heap · ${mb(proc.heapUsed)} / ${mb(proc.heapTotal)} MB`,
         ``,
-        `*uptime* · ${uptime()}`,
-        `*platform* · ${os.platform()} ${os.arch()} · node ${process.version}`
+        `*uptime* · ${uptime()}`
     );
 
     const body = lines.join('\n');
