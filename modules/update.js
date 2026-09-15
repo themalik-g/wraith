@@ -3,7 +3,11 @@
 //  .update — re-fetch bot files from the repo,
 //  keep session/state folders untouched,
 //  auto-install if dependencies changed,
-//  then restart cleanly (launcher auto-reboots).
+//  then restart cleanly.
+//
+//  On Pterodactyl / pm2, exit code 0 = clean stop
+//  and the panel does NOT restart. We exit with
+//  a non-zero code to force a restart.
 // ─────────────────────────────────────────────
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -18,8 +22,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 let _busy = false;
 
-// The launcher (index.js) passes WRAITH_REPO_ROOT explicitly.
-// Fallback: one level up from modules/ → repo root.
 function repoRoot() {
     if (process.env.WRAITH_REPO_ROOT && fs.existsSync(process.env.WRAITH_REPO_ROOT)) {
         return process.env.WRAITH_REPO_ROOT;
@@ -32,14 +34,12 @@ function hash(file) {
     catch { return ''; }
 }
 
-// ── async subprocess helpers (non-blocking) ──
 function run(cmd, args, opts = {}) {
     return execFileAsync(cmd, args, {
         cwd: opts.cwd ?? repoRoot(),
         encoding: 'utf-8',
         timeout: opts.timeout ?? 120_000,
         maxBuffer: 8 * 1024 * 1024,
-        // never hang on an interactive git credential prompt
         env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     });
 }
@@ -94,6 +94,7 @@ export async function updateCommand(sock, chat, msg) {
         await send('🔄 *update* — fetching latest files from repository…');
 
         if (!fs.existsSync(path.join(root, '.git'))) {
+            _busy = false;
             return send('❌ this deployment is not a git clone — update is only available for git-based installs.');
         }
 
@@ -101,7 +102,7 @@ export async function updateCommand(sock, chat, msg) {
         const pkgBefore  = hash(path.join(root, 'package.json'));
         const lockBefore = hash(path.join(root, 'package-lock.json'));
 
-        // 1) fetch with retry (handles transient network blips)
+        // 1) fetch with retry
         try {
             await withRetry(async () => {
                 const r = await tryRun('git', ['fetch', '--prune', 'origin', branch]);
@@ -109,10 +110,11 @@ export async function updateCommand(sock, chat, msg) {
                 return r;
             }, 3, 1500);
         } catch (e) {
+            _busy = false;
             return send(`❌ fetch failed after retries:\n\`\`\`\n${String(e.message).slice(0, 400)}\n\`\`\``);
         }
 
-        // 2) stash local changes so pull doesn't abort on a dirty tree
+        // 2) stash local changes
         let stashed = false;
         if (await isDirty()) {
             await send('📦 local changes detected — stashing…');
@@ -120,13 +122,14 @@ export async function updateCommand(sock, chat, msg) {
             if (s.ok && !/No local changes/i.test(s.stdout)) stashed = true;
         }
 
-        // 3) pull with fallback chain: ff-only → rebase → hard reset
+        // 3) pull with fallback chain
         let pull = await tryRun('git', ['pull', '--ff-only', 'origin', branch]);
         if (!pull.ok) pull = await tryRun('git', ['pull', '--rebase', 'origin', branch]);
         if (!pull.ok) pull = await tryRun('git', ['reset', '--hard', `origin/${branch}`]);
 
         if (!pull.ok) {
             if (stashed) await tryRun('git', ['stash', 'pop']);
+            _busy = false;
             const err = ((pull.stderr || '') + '\n' + (pull.stdout || '') + '\n' + (pull.error || '')).trim();
             return send(
                 `❌ update failed:\n\`\`\`\n${err.slice(0, 600)}\n\`\`\`\n\n` +
@@ -147,32 +150,50 @@ export async function updateCommand(sock, chat, msg) {
         // 5) install deps if package.json OR package-lock.json changed
         const pkgAfter  = hash(path.join(root, 'package.json'));
         const lockAfter = hash(path.join(root, 'package-lock.json'));
+        const depsChanged = pkgBefore !== pkgAfter || lockBefore !== lockAfter;
 
-        if (pkgBefore !== pkgAfter || lockBefore !== lockAfter) {
-            await send('📦 dependencies changed — installing…');
+        if (depsChanged) {
+            await send('📦 dependencies changed — installing (this may take a minute)…');
             const inst = await tryRun(
                 'npm',
                 ['install', '--omit=dev', '--no-audit', '--no-fund', '--loglevel=error'],
                 { timeout: 300_000 }
             );
             if (!inst.ok) {
+                _busy = false;
                 return send('⚠️ code updated but dependency install failed — check logs, then restart manually.');
             }
-        } else if (/already up to date/i.test(out)) {
-            return send('✅ wraith is already up to date.');
+        } else if (/already up to date/i.test(out) && !depsChanged) {
+            // Nothing changed. Don't restart — avoid pointless downtime.
+            _busy = false;
+            return send('✅ wraith is already up to date. Nothing to restart.');
         }
 
+        // 6) Tell the user what happens next, THEN trigger restart
         await send(
             `✅ *update complete*\n\n` +
             `\`\`\`\n${(out || 'pulled latest').slice(0, 500)}\n\`\`\`\n\n` +
-            `sessions & settings untouched · restarting…`
+            `_sessions & settings untouched_\n` +
+            `_restarting in 6 seconds — the panel will bring the bot back automatically_`
         );
 
-        setTimeout(() => process.exit(0), 5000);
+        // 7) Give time for message delivery, then exit non-zero so the
+        //    panel / pm2 treats it as a crash and auto-restarts.
+        //
+        //    Pterodactyl: exit 0 = "stopped on purpose, don't restart".
+        //                 exit != 0 = "crashed, restart me".
+        //    pm2:         always restarts by default.
+        setTimeout(() => {
+            try { process.exit(1); }
+            catch {
+                try { process.kill(process.pid, 'SIGTERM'); }
+                catch { process.exit(1); }
+            }
+        }, 6000);
+
     } catch (e) {
         console.error('[update] error:', e?.message);
-        await send(`❌ update error: ${String(e?.message || e).slice(0, 200)}`).catch(() => {});
-    } finally {
         _busy = false;
+        await send(`❌ update error: ${String(e?.message || e).slice(0, 200)}`).catch(() => {});
     }
 }
