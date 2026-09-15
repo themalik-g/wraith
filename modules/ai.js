@@ -1,18 +1,25 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/ai.js
 // Chatbot (uncensored, last 10) + rmbg + remini
+// All ESM, native fetch, no external HTTP libs
 // ─────────────────────────────────────────────
-const fs = require('fs');
-const path = require('path');
-const fetch = require('node-fetch');
-const axios = require('axios');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 
-let uploadImage;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// ─── uploadImage (CJS util) ───
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+
+let uploadImage = null;
 try {
   ({ uploadImage } = require('../lib/uploadImage'));
 } catch (e) {
-  console.warn('[ai] uploadImage not available:', e.message);
+  console.warn('[ai] uploadImage util missing:', e.message);
   uploadImage = async () => { throw new Error('uploadImage unavailable'); };
 }
 
@@ -44,7 +51,7 @@ async function showTyping(sock, chat) {
   try {
     await sock.presenceSubscribe(chat);
     await sock.sendPresenceUpdate('composing', chat);
-    await new Promise(r => setTimeout(r, getRandomDelay()));
+    await new Promise((r) => setTimeout(r, getRandomDelay()));
   } catch {}
 }
 
@@ -96,7 +103,7 @@ TONE MATCHING (strict):
 You are NOT an assistant. You are a person. You don't "assist". You chat.
 
 Recent chat (last 10 messages):
-${ctx.messages.slice(-10).map(m => `${m.role === 'user' ? 'User' : 'You'}: ${m.content}`).join('\n')}
+${ctx.messages.slice(-10).map((m) => `${m.role === 'user' ? 'User' : 'You'}: ${m.content}`).join('\n')}
 
 User info (if known):
 ${JSON.stringify(ctx.userInfo || {})}
@@ -107,7 +114,9 @@ You:
 `.trim();
 
   try {
-    const res = await fetch('https://zellapi.autos/ai/chatbot?text=' + encodeURIComponent(prompt));
+    const res = await fetch(
+      'https://zellapi.autos/ai/chatbot?text=' + encodeURIComponent(prompt)
+    );
     if (!res.ok) throw new Error(`API ${res.status}`);
     const data = await res.json();
     if (!data.status || !data.result) throw new Error('Invalid API response');
@@ -138,7 +147,7 @@ You:
 }
 
 // ─── .chatbot on / off ───
-async function handleChatbotCommand(sock, chat, message, match) {
+export async function handleChatbotCommand(sock, chat, message, match) {
   if (!match) {
     await showTyping(sock, chat);
     return sock.sendMessage(chat, {
@@ -149,7 +158,11 @@ async function handleChatbotCommand(sock, chat, message, match) {
 
   const data = loadUserGroupData();
   const botNumber = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-  const senderId = message.key.participant || message.participant || message.pushName || message.key.remoteJid;
+  const senderId =
+    message.key.participant ||
+    message.participant ||
+    message.pushName ||
+    message.key.remoteJid;
   const isOwner = senderId === botNumber;
 
   if (isOwner) {
@@ -177,7 +190,9 @@ async function handleChatbotCommand(sock, chat, message, match) {
   if (chat.endsWith('@g.us')) {
     try {
       const meta = await sock.groupMetadata(chat);
-      isAdmin = meta.participants.some(p => p.id === senderId && (p.admin === 'admin' || p.admin === 'superadmin'));
+      isAdmin = meta.participants.some(
+        (p) => p.id === senderId && (p.admin === 'admin' || p.admin === 'superadmin')
+      );
     } catch {}
   }
 
@@ -209,8 +224,8 @@ async function handleChatbotCommand(sock, chat, message, match) {
   return sock.sendMessage(chat, { text: '*Invalid command. Use .chatbot to see usage*', quoted: message });
 }
 
-// ─── Auto-reply (called on every incoming message) ───
-async function handleChatbotResponse(sock, chat, message, userMessage, senderId) {
+// ─── Auto-reply on incoming messages ───
+export async function handleChatbotResponse(sock, chat, message, userMessage, senderId) {
   const data = loadUserGroupData();
   if (!data.chatbot[chat]) return;
 
@@ -234,14 +249,14 @@ async function handleChatbotResponse(sock, chat, message, userMessage, senderId)
       const mentionedJid = message.message.extendedTextMessage.contextInfo?.mentionedJid || [];
       const quotedParticipant = message.message.extendedTextMessage.contextInfo?.participant;
 
-      isBotMentioned = mentionedJid.some(jid => {
+      isBotMentioned = mentionedJid.some((jid) => {
         const n = jid.split('@')[0].split(':')[0];
-        return botJids.some(b => b.split('@')[0].split(':')[0] === n);
+        return botJids.some((b) => b.split('@')[0].split(':')[0] === n);
       });
 
       if (quotedParticipant) {
         const q = quotedParticipant.replace(/[:@].*$/, '');
-        isReplyToBot = botJids.some(b => b.replace(/[:@].*$/, '') === q);
+        isReplyToBot = botJids.some((b) => b.replace(/[:@].*$/, '') === q);
       }
     } else if (message.message?.conversation) {
       isBotMentioned = userMessage.includes(`@${botNumber}`);
@@ -278,7 +293,7 @@ async function handleChatbotResponse(sock, chat, message, userMessage, senderId)
 
     if (!response) {
       await sock.sendMessage(chat, {
-        text: "Hmm, brain glitch 😅 try again?",
+        text: 'Hmm, brain glitch 😅 try again?',
         quoted: message
       });
       return;
@@ -286,7 +301,7 @@ async function handleChatbotResponse(sock, chat, message, userMessage, senderId)
 
     pushHistory(senderId, 'assistant', response);
 
-    await new Promise(r => setTimeout(r, getRandomDelay()));
+    await new Promise((r) => setTimeout(r, getRandomDelay()));
 
     await sock.sendMessage(chat, { text: response }, { quoted: message });
 
@@ -295,7 +310,7 @@ async function handleChatbotResponse(sock, chat, message, userMessage, senderId)
     if (error.message && error.message.includes('No sessions')) return;
     try {
       await sock.sendMessage(chat, {
-        text: "Oops! 😅 try again?",
+        text: 'Oops! 😅 try again?',
         quoted: message
       });
     } catch {}
@@ -320,7 +335,7 @@ async function grabImageUrl(msg) {
   return uploadImage(Buffer.concat(chunks));
 }
 
-async function removeBgCommand(sock, chat, msg, args) {
+export async function removeBgCommand(sock, chat, msg, args) {
   try {
     let url = null;
     const argText = (args || []).join(' ').trim();
@@ -343,25 +358,25 @@ async function removeBgCommand(sock, chat, msg, args) {
 
     const api = `https://api.siputzx.my.id/api/iloveimg/removebg?image=${encodeURIComponent(url)}`;
 
-    const res = await axios.get(api, {
-      responseType: 'arraybuffer',
-      timeout: 30000,
+    const res = await fetch(api, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const buf = Buffer.from(await res.arrayBuffer());
 
     await sock.sendMessage(chat, {
-      image: Buffer.from(res.data),
+      image: buf,
       caption: '✨ *Background removed*\n\n— wraith'
     }, { quoted: msg });
 
   } catch (e) {
     console.error('[rmbg]', e.message);
     let errMsg = '❌ Could not remove the background.';
-    if (e.response?.status === 429) errMsg = '⏰ Rate-limited. Try later.';
-    else if (e.response?.status === 400) errMsg = '❌ Invalid image.';
-    else if (e.response?.status === 500) errMsg = '🔧 Server error.';
-    else if (e.code === 'ECONNABORTED') errMsg = '⏰ Timed out.';
-    else if (/ENOTFOUND|ECONNREFUSED/.test(e.message)) errMsg = '🌐 Network error.';
+    if (/429/.test(e.message)) errMsg = '⏰ Rate-limited. Try later.';
+    else if (/400/.test(e.message)) errMsg = '❌ Invalid image.';
+    else if (/500/.test(e.message)) errMsg = '🔧 Server error.';
+    else if (/ENOTFOUND|ECONNREFUSED|fetch failed/i.test(e.message)) errMsg = '🌐 Network error.';
 
     await sock.sendMessage(chat, { text: errMsg }, { quoted: msg });
   }
@@ -370,7 +385,7 @@ async function removeBgCommand(sock, chat, msg, args) {
 // ─────────────────────────────────────────────
 // .remini — AI image enhancement
 // ─────────────────────────────────────────────
-async function reminiCommand(sock, chat, msg, args) {
+export async function reminiCommand(sock, chat, msg, args) {
   try {
     let url = null;
     const argText = (args || []).join(' ').trim();
@@ -393,42 +408,34 @@ async function reminiCommand(sock, chat, msg, args) {
 
     const api = `https://api.princetechn.com/api/tools/remini?apikey=prince_tech_api_azfsbshfb&url=${encodeURIComponent(url)}`;
 
-    const res = await axios.get(api, {
-      timeout: 60000,
+    const res = await fetch(api, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    const result = res.data?.result;
-    if (!res.data?.success || !result?.image_url) {
+    const data = await res.json();
+    const result = data?.result;
+    if (!data?.success || !result?.image_url) {
       throw new Error(result?.message || 'Enhancer rejected the image');
     }
 
-    const imgRes = await axios.get(result.image_url, {
-      responseType: 'arraybuffer',
-      timeout: 30000
-    });
+    const imgRes = await fetch(result.image_url);
+    if (!imgRes.ok) throw new Error('Could not fetch enhanced image');
+    const buf = Buffer.from(await imgRes.arrayBuffer());
 
     await sock.sendMessage(chat, {
-      image: Buffer.from(imgRes.data),
-      caption: '✨ *Image enhanced*\n\n— Wraith'
+      image: buf,
+      caption: '✨ *Image enhanced*\n\n— wraith'
     }, { quoted: msg });
 
   } catch (e) {
     console.error('[remini]', e.message);
     let errMsg = '❌ Could not enhance that image.';
-    if (e.response?.status === 429) errMsg = '⏰ Rate-limited. Try again shortly.';
-    else if (e.response?.status === 400) errMsg = '❌ Invalid image or format.';
-    else if (e.response?.status === 500) errMsg = '🔧 Server error. Try again later.';
-    else if (e.code === 'ECONNABORTED') errMsg = '⏰ Timed out. Try again.';
-    else if (/ENOTFOUND|ECONNREFUSED/.test(e.message)) errMsg = '🌐 Network error.';
+    if (/429/.test(e.message)) errMsg = '⏰ Rate-limited. Try again shortly.';
+    else if (/400/.test(e.message)) errMsg = '❌ Invalid image or format.';
+    else if (/500/.test(e.message)) errMsg = '🔧 Server error. Try again later.';
+    else if (/ENOTFOUND|ECONNREFUSED|fetch failed/i.test(e.message)) errMsg = '🌐 Network error.';
 
     await sock.sendMessage(chat, { text: errMsg }, { quoted: msg });
   }
 }
-
-module.exports = {
-  handleChatbotCommand,
-  handleChatbotResponse,
-  removeBgCommand,
-  reminiCommand
-};
