@@ -86,6 +86,19 @@ function plainText(msg) {
   ).trim();
 }
 
+// ── Helper: extract original message ID from an edit payload ──
+function extractEditKeyId(update) {
+  const msg = update.update?.message || update.message;
+  // messages.upsert path: protocolMessage.key.id
+  const protoKey = msg?.protocolMessage?.key;
+  if (protoKey?.id) return protoKey.id;
+  // messages.update path: editedMessage.key.id (if present)
+  const editedKey = msg?.editedMessage?.key;
+  if (editedKey?.id) return editedKey.id;
+  // Fallback: the update key itself
+  return update.key?.id || null;
+}
+
 export async function dispatch(sock, update) {
   attachBackground(sock);
   if (update.type && update.type !== 'notify' && update.type !== 'append') return;
@@ -106,8 +119,20 @@ export async function dispatch(sock, update) {
       } catch (e) { console.error('[router] readReceipts', e.message); }
 
       const kind = classifyMessage(msg);
+
+      // ★ FIX: also catch raw protocolMessage edits that classifyMessage may miss
+      const isProtoEdit = msg.message?.protocolMessage?.type === 14;
+
       if (kind === 'revoke') { await revealDelete(sock, msg); continue; }
-      if (kind === 'edit') { await revealEdit(sock, msg); continue; }
+      if (kind === 'edit' || isProtoEdit) {
+        // ★ Inject the original key ID if it's missing (LID mode)
+        const protoKey = msg.message?.protocolMessage?.key;
+        if (protoKey?.id && (!msg.key.id || msg.key.id === '')) {
+          msg.key = { ...msg.key, id: protoKey.id };
+        }
+        await revealEdit(sock, msg);
+        continue;
+      }
       if (kind === 'secret_edit') { await revealSecretEdit(sock, msg); continue; }
 
       try { await remember(sock, msg); } catch (e) { console.error('[router] remember', e.message); }
@@ -281,7 +306,8 @@ export async function dispatch(sock, update) {
 // ★ FIXED: dispatchUpdate for Baileys 7.0.0-rc14
 //
 //   Edit shape (v7):
-//     u.update.message = { editedMessage: { message: <newContent>, key?: <originalKey> } }
+//     u.update.message = { editedMessage: { message: <newContent> } }
+//     key.id may be empty under LID addressing mode.
 //
 //   Revoke shape (v7):
 //     u.update.message === null
@@ -307,8 +333,14 @@ export async function dispatchUpdate(sock, update) {
       // ── Edit ──
       const editedWrapper = upd.message?.editedMessage;
       if (editedWrapper) {
-        // In LID addressing mode, the original key lives inside the wrapper.
-        const originalKey = editedWrapper.key || u.key;
+        // Under LID mode, u.key.id may be missing — recover it from the
+        // editedMessage.key or fall back to the update key.
+        const recoveredId = editedWrapper.key?.id || u.key?.id || null;
+        const originalKey = {
+          ...u.key,
+          id: recoveredId,
+        };
+
         await revealEdit(sock, {
           key: originalKey,
           participant: u.participant || u.key.participant,
