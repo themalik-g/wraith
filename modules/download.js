@@ -177,22 +177,37 @@ export async function downloadPostMediaDirect(sock, chat, msg, url, asZip = fals
       if (buffer.length < 512) continue;
 
       let type = await classifyBuffer(buffer);
-      const safeName = item.filename || `media_${i + 1}.${type.ext}`;
+      if (type.kind === 'unknown' && item.type) {
+        if (item.type === 'image') type = { kind: 'image', ext: 'jpg', mime: 'image/jpeg' };
+        else if (item.type === 'video') type = { kind: 'video', ext: 'mp4', mime: 'video/mp4' };
+        else if (item.type === 'audio') type = { kind: 'audio', ext: 'mp3', mime: 'audio/mpeg' };
+      }
+
+      const safeName = item.filename || `media_${i + 1}.${type.ext || 'jpg'}`;
       const limit = type.kind === 'video' ? MAX_VIDEO : MAX_BYTES;
       if (buffer.length > limit) continue;
 
-      if (type.kind === 'image') {
-        await sock.sendMessage(chat, { image: buffer, mimetype: type.mime }, { quoted: msg });
+      if (type.kind === 'image' || (!type.kind && item.type === 'image')) {
+        await sock.sendMessage(chat, { image: buffer, mimetype: type.mime || 'image/jpeg' }, { quoted: msg });
         sentCount++;
-      } else if (type.kind === 'video') {
+      } else if (type.kind === 'video' || (!type.kind && item.type === 'video')) {
         await sock.sendMessage(chat, { video: buffer, mimetype: type.mime || 'video/mp4', fileName: safeName }, { quoted: msg });
         sentCount++;
       } else if (type.kind === 'audio') {
         await sock.sendMessage(chat, { audio: buffer, mimetype: type.mime || 'audio/mpeg', fileName: safeName, ptt: false }, { quoted: msg });
         sentCount++;
       } else {
-        await sock.sendMessage(chat, { document: buffer, mimetype: type.mime, fileName: safeName }, { quoted: msg });
-        sentCount++;
+        // Fallback: send as image if buffer looks like image data or default to document
+        if (buffer[0] === 0xff && buffer[1] === 0xd8) {
+          await sock.sendMessage(chat, { image: buffer, mimetype: 'image/jpeg' }, { quoted: msg });
+          sentCount++;
+        } else if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+          await sock.sendMessage(chat, { image: buffer, mimetype: 'image/png' }, { quoted: msg });
+          sentCount++;
+        } else {
+          await sock.sendMessage(chat, { document: buffer, mimetype: type.mime || 'application/octet-stream', fileName: safeName }, { quoted: msg });
+          sentCount++;
+        }
       }
     }
 
@@ -231,23 +246,37 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
             const buffer = Buffer.from(await res.arrayBuffer());
             if (buffer.length < 512) continue;
 
-            const type = await classifyBuffer(buffer);
-            const safeName = item.filename || `media_${i + 1}.${type.ext}`;
+            let type = await classifyBuffer(buffer);
+            if (type.kind === 'unknown' && item.type) {
+              if (item.type === 'image') type = { kind: 'image', ext: 'jpg', mime: 'image/jpeg' };
+              else if (item.type === 'video') type = { kind: 'video', ext: 'mp4', mime: 'video/mp4' };
+              else if (item.type === 'audio') type = { kind: 'audio', ext: 'mp3', mime: 'audio/mpeg' };
+            }
+
+            const safeName = item.filename || `media_${i + 1}.${type.ext || 'jpg'}`;
             const limit = type.kind === 'video' ? MAX_VIDEO : MAX_BYTES;
             if (buffer.length > limit) continue;
 
-            if (type.kind === 'image') {
-              await sock.sendMessage(chat, { image: buffer, mimetype: type.mime }, { quoted: msg });
+            if (type.kind === 'image' || (!type.kind && item.type === 'image')) {
+              await sock.sendMessage(chat, { image: buffer, mimetype: type.mime || 'image/jpeg' }, { quoted: msg });
               sentCount++;
-            } else if (type.kind === 'video') {
+            } else if (type.kind === 'video' || (!type.kind && item.type === 'video')) {
               await sock.sendMessage(chat, { video: buffer, mimetype: type.mime || 'video/mp4', fileName: safeName }, { quoted: msg });
               sentCount++;
             } else if (type.kind === 'audio') {
               await sock.sendMessage(chat, { audio: buffer, mimetype: type.mime || 'audio/mpeg', fileName: safeName, ptt: false }, { quoted: msg });
               sentCount++;
             } else {
-              await sock.sendMessage(chat, { document: buffer, mimetype: type.mime, fileName: safeName }, { quoted: msg });
-              sentCount++;
+              if (buffer[0] === 0xff && buffer[1] === 0xd8) {
+                await sock.sendMessage(chat, { image: buffer, mimetype: 'image/jpeg' }, { quoted: msg });
+                sentCount++;
+              } else if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+                await sock.sendMessage(chat, { image: buffer, mimetype: 'image/png' }, { quoted: msg });
+                sentCount++;
+              } else {
+                await sock.sendMessage(chat, { document: buffer, mimetype: type.mime || 'application/octet-stream', fileName: safeName }, { quoted: msg });
+                sentCount++;
+              }
             }
           }
           if (sentCount > 0) {

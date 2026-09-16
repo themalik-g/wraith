@@ -48,8 +48,8 @@ const rawNumber     = argVal('--number');
 const pairingNumber = rawNumber ? rawNumber.replace(/\D/g, '') : null;
 
 // ── per-session paths ──
-const AUTH_DIR   = path.join(here, 'session');
-const STATE_DIR  = path.join(here, 'state');
+const AUTH_DIR   = path.join(process.cwd(), 'session');
+const STATE_DIR  = path.join(process.cwd(), 'state');
 const OWNER_FILE = path.join(STATE_DIR, 'owner.json');
 
 fs.mkdirSync(AUTH_DIR,  { recursive: true });

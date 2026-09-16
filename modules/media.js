@@ -301,64 +301,53 @@ export async function lyricsCommand(sock, chat, msg, args) {
 }
 
 // ─────────────────────────────────────────────
-// .couplepp — random couple profile pics in a group
+// .couplepp — random couple profile pics from repository
 // ─────────────────────────────────────────────
+const RAW_REPO = 'https://raw.githubusercontent.com/themalik-g/Couple-PP/main';
+
 export async function coupleppCommand(sock, chat, msg, args) {
-  if (!chat.endsWith('@g.us')) {
-    return sock.sendMessage(chat, { text: '❌ This command only works in groups.' }, { quoted: msg });
-  }
   try {
-    const meta = await sock.groupMetadata(chat);
-    const parts = (meta.participants || []).filter((p) => p?.id);
-    if (parts.length < 2) {
-      return sock.sendMessage(chat, { text: '❌ Not enough members to pair.' }, { quoted: msg });
+    // Select 2 distinct random numbers from 1 to 51
+    const n1 = Math.floor(Math.random() * 51) + 1;
+    let n2 = Math.floor(Math.random() * 51) + 1;
+    while (n2 === n1) {
+      n2 = Math.floor(Math.random() * 51) + 1;
     }
 
-    const count = Math.min(Math.max(parseInt(args?.[0], 10) || 1, 1), 5);
+    const pairs = [
+      {
+        num: n1,
+        male: `${RAW_REPO}/male/m${n1}.jpg`,
+        female: `${RAW_REPO}/female/f${n1}.jpg`,
+      },
+      {
+        num: n2,
+        male: `${RAW_REPO}/male/m${n2}.jpg`,
+        female: `${RAW_REPO}/female/f${n2}.jpg`,
+      },
+    ];
+
     let sent = 0;
-
-    for (let i = 0; i < count; i++) {
-      const a = parts[Math.floor(Math.random() * parts.length)];
-      let b = parts[Math.floor(Math.random() * parts.length)];
-      let guard = 0;
-      while (b.id === a.id && guard++ < 20) {
-        b = parts[Math.floor(Math.random() * parts.length)];
-      }
-      if (b.id === a.id) continue;
-
-      let urlA = null, urlB = null;
-      try { urlA = await sock.profilePictureUrl(a.id, 'image'); } catch {}
-      try { urlB = await sock.profilePictureUrl(b.id, 'image'); } catch {}
-      if (!urlA && !urlB) continue;
-
-      const aNum = a.id.split('@')[0];
-      const bNum = b.id.split('@')[0];
-      const caption = `💞 *couple*\n@${aNum} ❤️ @${bNum}`;
-      const mentions = [a.id, b.id];
-
+    for (let i = 0; i < pairs.length; i++) {
+      const p = pairs[i];
       try {
-        if (urlA) {
-          await sock.sendMessage(chat, {
-            image: { url: urlA },
-            caption,
-            mentions,
-          }, { quoted: msg });
-        } else if (urlB) {
-          await sock.sendMessage(chat, {
-            image: { url: urlB },
-            caption,
-            mentions,
-          }, { quoted: msg });
-        }
-        if (urlA && urlB) {
-          await sock.sendMessage(chat, { image: { url: urlB } });
-        }
+        await sock.sendMessage(chat, {
+          image: { url: p.male },
+          caption: `💞 *Couple PP (Pair ${i + 1} - #${p.num})* · Male\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`,
+        }, i === 0 ? { quoted: msg } : undefined);
+
+        await sock.sendMessage(chat, {
+          image: { url: p.female },
+          caption: `💞 *Couple PP (Pair ${i + 1} - #${p.num})* · Female\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`,
+        });
         sent++;
-      } catch {}
+      } catch (err) {
+        console.error('[couplepp] send pair error:', err.message);
+      }
     }
 
     if (!sent) {
-      await sock.sendMessage(chat, { text: '❌ Could not fetch profile pictures for a couple.' }, { quoted: msg });
+      await sock.sendMessage(chat, { text: '❌ Failed to fetch couple profile pictures.' }, { quoted: msg });
     }
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ couplepp failed: ${e.message}` }, { quoted: msg }).catch(() => {});
