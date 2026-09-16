@@ -129,20 +129,37 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
           YTDLP_TIMEOUT,
           'media download'
         );
-      } catch {
-        // Fallback for photo/slideshow posts or format merge failures
-        const ytFallback = new YtDlp({
-          url: isUrl ? query : `scsearch1:${query}`,
-          output: outTemplate,
-          quiet: true, noWarnings: true, noProgress: true,
-          playlist: true, retries: 3,
-        });
-        ytFallback.format('');
-        await withTimeout(
-          ytFallback.video().download(),
-          YTDLP_TIMEOUT,
-          'fallback download'
-        );
+      } catch (err1) {
+        // Primary download failed (e.g., No video formats found for photo/carousel posts).
+        // Try fallback 1: empty format override (downloads default format e.g. images)
+        try {
+          const ytFallback1 = new YtDlp({
+            url: isUrl ? query : `scsearch1:${query}`,
+            output: outTemplate,
+            quiet: true, noWarnings: true, noProgress: true,
+            playlist: true, retries: 3,
+          });
+          ytFallback1.format('');
+          await withTimeout(
+            ytFallback1.video().download(),
+            YTDLP_TIMEOUT,
+            'fallback download (empty format)'
+          );
+        } catch (err2) {
+          // Fallback 2: format 'b/best'
+          const ytFallback2 = new YtDlp({
+            url: isUrl ? query : `scsearch1:${query}`,
+            output: outTemplate,
+            quiet: true, noWarnings: true, noProgress: true,
+            playlist: true, retries: 3,
+          });
+          ytFallback2.format('b/best');
+          await withTimeout(
+            ytFallback2.video().download(),
+            YTDLP_TIMEOUT,
+            'fallback download (b/best)'
+          );
+        }
       }
     }
 
@@ -150,9 +167,11 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
     if (!files.length) throw new Error('No media file downloaded');
 
     const safeName = (query.replace(/[^\w\s-]/g, '').slice(0, 50).trim() || 'media');
+    const totalFiles = Math.min(files.length, 20);
     let sentCount = 0;
 
-    for (const file of files.slice(0, 20)) {
+    for (let i = 0; i < totalFiles; i++) {
+      const file = files[i];
       if (!fs.existsSync(file)) continue;
       let buffer = fs.readFileSync(file);
       cleanFile(file);
@@ -175,13 +194,13 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
 
       if (type.kind === 'image') {
         await sock.sendMessage(chat, {
-          image: buffer, mimetype: type.mime, caption: `🖼️ _${safeName}_\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`,
+          image: buffer, mimetype: type.mime,
         }, { quoted: msg });
         sentCount++;
       } else if (type.kind === 'video') {
         await sock.sendMessage(chat, {
           video: buffer, mimetype: type.mime || 'video/mp4',
-          fileName: `${safeName}.${type.ext}`, caption: `🎬 _${safeName}_\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`,
+          fileName: `${safeName}.${type.ext}`,
         }, { quoted: msg });
         sentCount++;
       } else if (type.kind === 'audio') {
@@ -193,9 +212,13 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
       } else {
         await sock.sendMessage(chat, {
           document: buffer, mimetype: type.mime,
-          fileName: `${safeName}.${type.ext}`, caption: `📄 _${safeName}_\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`,
+          fileName: `${safeName}.${type.ext}`,
         }, { quoted: msg });
         sentCount++;
+      }
+
+      if (totalFiles > 1) {
+        await edit(sock, chat, status, `⬇️ *Downloading…* (${sentCount}/${totalFiles})`).catch(() => {});
       }
     }
 
