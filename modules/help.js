@@ -130,11 +130,11 @@ const REGISTRY = [
     id: 'social',
     aliases: ['socialsearch'],
     icon: '🔍',
-    title: 'ꜱᴏᴄɪᴀʟ ꜱᴇᴀʀᴄʜ',
+    title: 'ꜱᴏᴄɪᴀʟ ꜱᴇᴀʀᴄʜ / ᴅᴏᴡɴʟᴏᴀᴅ',
     commands: [
-      c('.ig <username>', true),
-      c('.tiktok <username>', true),
-      c('.fb <username>', true),
+      c('.ig <username/url>'),
+      c('.tiktok <username/url>'),
+      c('.fb <username/url>'),
     ],
   },
   {

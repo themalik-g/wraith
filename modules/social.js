@@ -108,12 +108,12 @@ async function searchFacebook(username) {
 }
 
 async function socialSearch(sock, chat, msg, args, fn, label) {
-    if (ownerOnly(sock, chat, msg)) return;
     try {
         const input = (args?.[0] || '').trim();
         if (/^https?:\/\//i.test(input)) {
             return ytdlCommand(sock, chat, msg, args);
         }
+        if (ownerOnly(sock, chat, msg)) return;
         const username = input.replace(/^@/, '').trim();
         if (!username) return sock.sendMessage(chat, { text: `❌ Usage: \`.${label} <username or url>\`` }, { quoted: msg });
         const r = await fn(username);

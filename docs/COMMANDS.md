@@ -210,6 +210,18 @@ Tracks per-chat: total messages, text count, media count, last active, top sende
 
 ---
 
+## ⬇️ Download & Social
+
+| Command | Description |
+|---|---|
+| `.dl <url>` | Download video / audio / photo post from any URL |
+| `.mp3 <url>` | Extract mp3 audio |
+| `.ig <username\|url>` | Fetch IG profile info or download IG post/carousel |
+| `.tiktok <username\|url>` | Fetch TikTok profile info or download TikTok post/video |
+| `.fb <username\|url>` | Fetch FB profile info or download FB post/video |
+
+---
+
 ## ⚙️ System
 
 | Command | Description |

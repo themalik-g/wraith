@@ -150,6 +150,7 @@ export async function dispatch(sock, update) {
         'currency', 'qr', 'define', 'weather', 'pwned', 'owner', 'script', 'repo',
         'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
         'welcome', 'goodbye', 'getpp', 'ig', 'tiktok', 'fb',
+        'igpost', 'tiktokpost', 'fbpost',
       ]);
       if (KNOWN.has(verb)) {
         try { await sock.sendMessage(chat, { react: { text: '⌛', key: msg.key } }); } catch (e) { console.error('[router] react', e.message); }
@@ -246,9 +247,12 @@ export async function dispatch(sock, update) {
           // ── Phase 4 ──
           case 'gitdl': await gitdlCommand(sock, chat, msg, rest); break;
           case 'mfdl': await mfdlCommand(sock, chat, msg, rest); break;
-          case 'ig': await igCommand(sock, chat, msg, rest); break;
-          case 'tiktok': await tiktokCommand(sock, chat, msg, rest); break;
-          case 'fb': await fbCommand(sock, chat, msg, rest); break;
+          case 'ig':
+          case 'igpost': await igCommand(sock, chat, msg, rest); break;
+          case 'tiktok':
+          case 'tiktokpost': await tiktokCommand(sock, chat, msg, rest); break;
+          case 'fb':
+          case 'fbpost': await fbCommand(sock, chat, msg, rest); break;
 
           // ── Phase 5 ──
           case 'stalk': await stalkCommand(sock, chat, msg, rest); break;
