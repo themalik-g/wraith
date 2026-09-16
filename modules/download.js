@@ -106,12 +106,12 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
     const { YtDlp } = await import('@choewy/yt-dlp');
     const isUrl = /^https?:\/\//i.test(query);
 
-    const outTemplate = path.join(TMP, `wraith-%(id)s.%(ext)s`);
+    const outTemplate = path.join(TMP, `wraith-%(playlist_index)s_%(id)s.%(ext)s`);
     const yt = new YtDlp({
       url: isUrl ? query : `scsearch1:${query}`,
       output: outTemplate,
       quiet: true, noWarnings: true, noProgress: true,
-      playlist: false, retries: 3,
+      playlist: true, retries: 3,
     });
 
     if (audioOnly) {
@@ -125,14 +125,21 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
       await edit(sock, chat, status, '⬇️ *Downloading…*');
       try {
         await withTimeout(
-          yt.format('bestvideo+bestaudio/best').mergeFormat('mp4').download(),
+          yt.format('bestvideo+bestaudio/best').mergeFormat('mp4').video().download(),
           YTDLP_TIMEOUT,
           'media download'
         );
       } catch {
-        // Fallback for photo/slideshow posts
+        // Fallback for photo/slideshow posts or format merge failures
+        const ytFallback = new YtDlp({
+          url: isUrl ? query : `scsearch1:${query}`,
+          output: outTemplate,
+          quiet: true, noWarnings: true, noProgress: true,
+          playlist: true, retries: 3,
+        });
+        ytFallback.format('');
         await withTimeout(
-          yt.download(),
+          ytFallback.video().download(),
           YTDLP_TIMEOUT,
           'fallback download'
         );
@@ -145,7 +152,7 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
     const safeName = (query.replace(/[^\w\s-]/g, '').slice(0, 50).trim() || 'media');
     let sentCount = 0;
 
-    for (const file of files.slice(0, 10)) {
+    for (const file of files.slice(0, 20)) {
       if (!fs.existsSync(file)) continue;
       let buffer = fs.readFileSync(file);
       cleanFile(file);
@@ -197,7 +204,7 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
     await edit(sock, chat, status, `✅ *Download complete*\n_${safeName}_\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`);
     await react(sock, chat, msg, '☑');
   } catch (e) {
-    console.error('[download]', e.message);
+    try { console.error('[download]', e.message); } catch {}
     await edit(sock, chat, status, `❌ *Failed:* ${e.message}`);
     await react(sock, chat, msg, '❌');
   } finally {
