@@ -319,8 +319,9 @@ export async function dispatchUpdate(sock, update) {
     try {
       if (!u?.key) continue;
       const upd = u.update || {};
+      const outerMsg = upd.message || u.message;
 
-      // ── Revoke / delete-for-everyone ──
+      // ── 1. Revoke / delete-for-everyone ──
       if (upd.messageStubType === WAMessageStubType.REVOKE || upd.message === null) {
         await revealDelete(sock, {
           key: u.key,
@@ -330,17 +331,39 @@ export async function dispatchUpdate(sock, update) {
         continue;
       }
 
-      // ── Edit ──
-      const editedWrapper = upd.message?.editedMessage;
-      if (editedWrapper) {
-        // Under LID mode, u.key.id may be missing — recover it from the
-        // editedMessage.key or fall back to the update key.
-        const recoveredId = editedWrapper.key?.id || u.key?.id || null;
-        const originalKey = {
-          ...u.key,
-          id: recoveredId,
-        };
+      if (!outerMsg) continue;
 
+      // ── 2. Secret encrypted edit (WhatsApp 2025+) ──
+      if (outerMsg.secretEncryptedMessage?.secretEncType === 2) {
+        await revealSecretEdit(sock, {
+          key: u.key,
+          participant: u.participant || u.key.participant,
+          message: { secretEncryptedMessage: outerMsg.secretEncryptedMessage }
+        });
+        continue;
+      }
+
+      // ── 3. Classic protocolMessage edit / revoke ──
+      if (outerMsg.protocolMessage) {
+        const pm = outerMsg.protocolMessage;
+        const envelope = {
+          key: u.key,
+          participant: u.participant || u.key.participant,
+          message: { protocolMessage: pm }
+        };
+        if (pm.type === 14 || pm.type === 'MESSAGE_EDIT') {
+          await revealEdit(sock, envelope);
+        } else if (pm.type === 0 || pm.type === 'REVOKE') {
+          await revealDelete(sock, envelope);
+        }
+        continue;
+      }
+
+      // ── 4. LID edit — no protocolMessage wrapper ──
+      const editedWrapper = outerMsg.editedMessage;
+      if (editedWrapper) {
+        const recoveredId = editedWrapper.key?.id || u.key?.id || null;
+        const originalKey = { ...u.key, id: recoveredId };
         await revealEdit(sock, {
           key: originalKey,
           participant: u.participant || u.key.participant,
@@ -348,7 +371,7 @@ export async function dispatchUpdate(sock, update) {
             protocolMessage: {
               type: 14,
               key: originalKey,
-              editedMessage: editedWrapper.message
+              editedMessage: editedWrapper.message || editedWrapper
             }
           }
         });
