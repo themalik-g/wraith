@@ -262,76 +262,237 @@ export async function getpairCommand(sock, chat, msg, args) {
 
     let tempSock = null;
     let codeSent = false;
+    let isCleanedUp = false;
+    let overallTimeout = null;
+
+    const cleanup = () => {
+        if (isCleanedUp) return;
+        isCleanedUp = true;
+        if (overallTimeout) clearTimeout(overallTimeout);
+        if (tempSock) {
+            try { tempSock.ev.removeAllListeners('connection.update'); } catch {}
+            try { tempSock.ev.removeAllListeners('creds.update'); } catch {}
+            try { tempSock.end(new Error('cleaned up')); } catch {}
+            tempSock = null;
+        }
+        try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
+    };
+
+    // 3 minute maximum overall pairing window
+    overallTimeout = setTimeout(() => {
+        if (!isCleanedUp) {
+            sock.sendMessage(chat, { text: `⚠️ Pairing timed out for +${rawNumber}. Please try again.` }, { quoted: msg }).catch(() => {});
+            cleanup();
+        }
+    }, 180000);
 
     try {
         await sock.sendMessage(chat, { text: `⏳ Generating pairing code for \`+${rawNumber}\`…` }, { quoted: msg });
 
         const makeWASocket = (await import('@whiskeysockets/baileys')).default;
-        const { useMultiFileAuthState, fetchLatestBaileysVersion, Browsers } = await import('@whiskeysockets/baileys');
+        const {
+            useMultiFileAuthState,
+            makeCacheableSignalKeyStore,
+            fetchLatestBaileysVersion,
+            DisconnectReason,
+            Browsers,
+            delay
+        } = await import('@whiskeysockets/baileys');
+        const { Boom } = await import('@hapi/boom');
+        const NodeCache = (await import('@cacheable/node-cache')).default;
         const pino = (await import('pino')).default;
 
-        const { state, saveCreds } = await useMultiFileAuthState(tempDir);
-        const { version } = await fetchLatestBaileysVersion();
+        const log = pino({ level: 'silent' });
+        const msgRetryCounterCache = new NodeCache({ stdTTL: 100, checkperiod: 120 });
 
-        tempSock = makeWASocket({
-            version,
-            logger: pino({ level: 'silent' }),
-            printQRInTerminal: false,
-            browser: Browsers.ubuntu('Chrome'),
-            auth: state,
-        });
+        const startTempPairSock = async () => {
+            if (isCleanedUp) return;
 
-        tempSock.ev.on('creds.update', saveCreds);
+            const { state, saveCreds } = await useMultiFileAuthState(tempDir);
+            const { version } = await fetchLatestBaileysVersion();
 
-        tempSock.ev.on('connection.update', async (u) => {
-            const { connection, lastDisconnect, qr } = u;
+            tempSock = makeWASocket({
+                version,
+                logger: log,
+                printQRInTerminal: false,
+                browser: Browsers.ubuntu('Chrome'),
+                auth: {
+                    creds: state.creds,
+                    keys: makeCacheableSignalKeyStore(state.keys, log)
+                },
+                markOnlineOnConnect: true,
+                generateHighQualityLinkPreview: true,
+                syncFullHistory: false,
+                msgRetryCounterCache,
+                defaultQueryTimeoutMs: 60000,
+                connectTimeoutMs: 60000,
+                keepAliveIntervalMs: 10000
+            });
 
-            if (qr && !tempSock.authState.creds.registered && !codeSent) {
-                codeSent = true;
-                try {
-                    let code = await tempSock.requestPairingCode(rawNumber);
-                    code = code?.match(/.{1,4}/g)?.join('-') || code;
-                    await sock.sendMessage(chat, {
-                        text: `🔑 *Pairing Code for +${rawNumber}:*\n\n\`\`\`${code}\`\`\`\n\nEnter this code in WhatsApp → Linked Devices.`
-                    }, { quoted: msg });
-                } catch (err) {
-                    await sock.sendMessage(chat, { text: `❌ Failed to request pairing code: ${err.message}` }, { quoted: msg });
-                    try { tempSock.end(new Error('failed')); } catch {}
-                    fs.rmSync(tempDir, { recursive: true, force: true });
+            tempSock.ev.on('creds.update', saveCreds);
+
+            tempSock.ev.on('connection.update', async (u) => {
+                const { connection, lastDisconnect, qr } = u;
+
+                if (qr && !tempSock.authState.creds.registered && !codeSent) {
+                    codeSent = true;
+                    try {
+                        let code = await tempSock.requestPairingCode(rawNumber);
+                        code = code?.match(/.{1,4}/g)?.join('-') || code;
+                        await sock.sendMessage(chat, {
+                            text: `🔑 *Pairing Code for +${rawNumber}:*\n\n\`\`\`${code}\`\`\`\n\nEnter this code in WhatsApp → Linked Devices.`
+                        }, { quoted: msg });
+                    } catch (err) {
+                        await sock.sendMessage(chat, { text: `❌ Failed to request pairing code: ${err.message}` }, { quoted: msg });
+                        cleanup();
+                        return;
+                    }
                 }
-            }
 
-            if (connection === 'open') {
-                await sock.sendMessage(chat, { text: `✅ Linked successfully with +${rawNumber}! Sending \`creds.json\`…` }, { quoted: msg });
-                const credsFile = path.join(tempDir, 'creds.json');
-                if (fs.existsSync(credsFile)) {
-                    await sock.sendMessage(chat, {
-                        document: fs.readFileSync(credsFile),
-                        fileName: 'creds.json',
-                        mimetype: 'application/json',
-                        caption: `📄 *creds.json* for +${rawNumber}`
-                    }, { quoted: msg });
-                } else {
-                    await sock.sendMessage(chat, { text: '⚠️ Connection opened but creds.json file was not found.' }, { quoted: msg });
+                if (connection === 'open') {
+                    await sock.sendMessage(chat, { text: `✅ Linked successfully with +${rawNumber}! Sending \`creds.json\`…` }, { quoted: msg });
+                    const credsFile = path.join(tempDir, 'creds.json');
+                    if (fs.existsSync(credsFile)) {
+                        await sock.sendMessage(chat, {
+                            document: fs.readFileSync(credsFile),
+                            fileName: 'creds.json',
+                            mimetype: 'application/json',
+                            caption: `📄 *creds.json* for +${rawNumber}`
+                        }, { quoted: msg });
+                    } else {
+                        await sock.sendMessage(chat, { text: '⚠️ Connection opened but creds.json file was not found.' }, { quoted: msg });
+                    }
+                    setTimeout(() => {
+                        cleanup();
+                    }, 3000);
                 }
-                setTimeout(() => {
-                    try { tempSock.end(new Error('done')); } catch {}
-                    fs.rmSync(tempDir, { recursive: true, force: true });
-                }, 3000);
-            }
 
-            if (connection === 'close') {
-                const statusCode = lastDisconnect?.error?.output?.statusCode;
-                if (statusCode && statusCode !== 200) {
-                    fs.rmSync(tempDir, { recursive: true, force: true });
+                if (connection === 'close') {
+                    if (isCleanedUp) return;
+                    const statusCode = lastDisconnect?.error instanceof Boom
+                        ? lastDisconnect.error.output?.statusCode
+                        : (lastDisconnect?.error?.output?.statusCode || 0);
+
+                    if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+                        await sock.sendMessage(chat, { text: `❌ Linking failed or logged out for +${rawNumber}.` }, { quoted: msg }).catch(() => {});
+                        cleanup();
+                        return;
+                    }
+
+                    // Reconnect on restart required / socket disconnects during login handshake
+                    console.log(`[getpair] tempSock closed (${statusCode}), reconnecting to finish linking…`);
+                    try { tempSock.end(new Error('reconnecting')); } catch {}
+                    await delay(2000);
+                    if (!isCleanedUp) {
+                        await startTempPairSock();
+                    }
                 }
-            }
-        });
+            });
+        };
+
+        await startTempPairSock();
 
     } catch (e) {
         await sock.sendMessage(chat, { text: `⚠️ getpair failed: ${e.message}` }, { quoted: msg }).catch(() => {});
-        if (tempSock) { try { tempSock.end(new Error('error')); } catch {} }
-        fs.rmSync(tempDir, { recursive: true, force: true });
+        cleanup();
+    }
+}
+
+// ── .setsession ─────────────────────────────────────────────────────────────
+export async function setsessionCommand(sock, chat, msg, args) {
+    if (ownerOnly(sock, chat, msg)) return;
+    try {
+        const parsePhoneNumber = (await import('awesome-phonenumber')).default;
+        const ctx = msg.message?.extendedTextMessage?.contextInfo;
+        const quoted = ctx?.quotedMessage;
+        const doc = quoted?.documentMessage || quoted?.documentWithCaptionMessage?.message?.documentMessage;
+
+        if (!doc) {
+            return sock.sendMessage(chat, { text: '❌ Reply to a `creds.json` file document with `.setsession [owner_number]`.' }, { quoted: msg });
+        }
+
+        const fileName = doc.fileName || '';
+        if (fileName && !fileName.endsWith('.json') && doc.mimetype !== 'application/json' && doc.mimetype !== 'text/plain') {
+            return sock.sendMessage(chat, { text: '❌ The quoted document must be a `creds.json` file.' }, { quoted: msg });
+        }
+
+        const stream = await downloadContentFromMessage(doc, 'document');
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        const buffer = Buffer.concat(chunks);
+        const jsonStr = buffer.toString('utf-8');
+
+        let credsData;
+        try {
+            credsData = JSON.parse(jsonStr);
+        } catch {
+            return sock.sendMessage(chat, { text: '❌ Invalid JSON format in document.' }, { quoted: msg });
+        }
+
+        if (!credsData || typeof credsData !== 'object' || (!credsData.noiseKey && !credsData.me)) {
+            return sock.sendMessage(chat, { text: '❌ Provided JSON does not appear to be a valid Baileys `creds.json` file.' }, { quoted: msg });
+        }
+
+        // Determine owner number from args or credsData.me
+        let rawNumber = args?.[0]?.replace(/\D/g, '');
+        if (!rawNumber && credsData.me) {
+            const meId = typeof credsData.me === 'string' ? credsData.me : (credsData.me.id || credsData.me.jid || '');
+            if (meId) {
+                rawNumber = meId.split(':')[0].split('@')[0].replace(/\D/g, '');
+            }
+        }
+
+        if (!rawNumber) {
+            return sock.sendMessage(chat, { text: '❌ No owner number found. Please retry with `.setsession <owner_number>`' }, { quoted: msg });
+        }
+
+        const pn = parsePhoneNumber('+' + rawNumber);
+        if (!pn?.valid) {
+            return sock.sendMessage(chat, { text: `❌ Invalid phone number format: \`+${rawNumber}\`. Please retry with `.setsession <owner_number>`` }, { quoted: msg });
+        }
+        const validatedNumber = pn.getNumber('e164').replace('+', '');
+
+        // Check root path
+        const repoRoot = process.env.WRAITH_REPO_ROOT || process.cwd();
+        const instancesDir = path.join(repoRoot, 'instances');
+
+        // Determine next session ID
+        let maxN = 1;
+        if (fs.existsSync(instancesDir)) {
+            const used = fs.readdirSync(instancesDir).filter(n => {
+                try { return fs.statSync(path.join(instancesDir, n)).isDirectory(); } catch { return false; }
+            });
+            for (const id of used) {
+                const m = /^sess(\d+)$/.exec(id);
+                if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+            }
+        }
+        const newSessionId = `sess${maxN + 1}`;
+        const newInstDir = path.join(instancesDir, newSessionId);
+        const newSessionDir = path.join(newInstDir, 'session');
+        const newStateDir = path.join(newInstDir, 'state');
+
+        fs.mkdirSync(newSessionDir, { recursive: true });
+        fs.mkdirSync(newStateDir, { recursive: true });
+
+        // Save creds.json and owner.json
+        fs.writeFileSync(path.join(newSessionDir, 'creds.json'), JSON.stringify(credsData, null, 2));
+        fs.writeFileSync(path.join(newStateDir, 'owner.json'), JSON.stringify({ owner: validatedNumber }, null, 2));
+
+        // Signal launcher via IPC to spawn session
+        if (typeof process.send === 'function') {
+            process.send({
+                type: 'wraith:spawn_session',
+                sessionId: newSessionId,
+                number: validatedNumber
+            });
+            await sock.sendMessage(chat, { text: `✅ Created new session \`${newSessionId}\` for +${validatedNumber} and signaled launcher to start it!` }, { quoted: msg });
+        } else {
+            await sock.sendMessage(chat, { text: `✅ Created new session \`${newSessionId}\` for +${validatedNumber}.\n(Note: Launcher IPC not connected. Restart index.js to auto-resume).` }, { quoted: msg });
+        }
+
+    } catch (e) {
+        await sock.sendMessage(chat, { text: `⚠️ setsession failed: ${e.message}` }, { quoted: msg }).catch(() => {});
     }
 }
 
