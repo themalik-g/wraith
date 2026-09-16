@@ -22,6 +22,9 @@ import { getPrefix } from './core/settings.js';
 import { isOwner } from './core/identity.js';
 import { CONFIG } from './config.js';
 
+// ── Baileys protocol constants (for edit/revoke detection) ──
+import { WAMessageStubType } from '@whiskeysockets/baileys';
+
 // ── Phase 1 ──
 import {
   currencyCommand, qrCommand, defineCommand, weatherCommand, pwnedCommand,
@@ -274,17 +277,50 @@ export async function dispatch(sock, update) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// ★ FIXED: dispatchUpdate for Baileys 7.0.0-rc14
+//
+//   Edit shape (v7):
+//     u.update.message = { editedMessage: { message: <newContent>, key?: <originalKey> } }
+//
+//   Revoke shape (v7):
+//     u.update.message === null
+//     u.update.messageStubType === WAMessageStubType.REVOKE (0)
+// ─────────────────────────────────────────────────────────────────
 export async function dispatchUpdate(sock, update) {
   const list = Array.isArray(update) ? update : [update];
   for (const u of list) {
     try {
       if (!u?.key) continue;
-      const editNode = u.update?.message?.protocolMessage || u.update?.message || u.message?.protocolMessage;
-      if (!editNode) continue;
-      const envelope = { key: u.key, participant: u.participant || u.key.participant, message: { protocolMessage: editNode } };
-      const t = editNode.type;
-      if (t === 14 || t === 'MESSAGE_EDIT') await revealEdit(sock, envelope);
-      else if (t === 0 || t === 'REVOKE') await revealDelete(sock, envelope);
+      const upd = u.update || {};
+
+      // ── Revoke / delete-for-everyone ──
+      if (upd.messageStubType === WAMessageStubType.REVOKE || upd.message === null) {
+        await revealDelete(sock, {
+          key: u.key,
+          participant: u.participant || u.key.participant,
+          message: { protocolMessage: { type: 0, key: u.key } }
+        });
+        continue;
+      }
+
+      // ── Edit ──
+      const editedWrapper = upd.message?.editedMessage;
+      if (editedWrapper) {
+        // In LID addressing mode, the original key lives inside the wrapper.
+        const originalKey = editedWrapper.key || u.key;
+        await revealEdit(sock, {
+          key: originalKey,
+          participant: u.participant || u.key.participant,
+          message: {
+            protocolMessage: {
+              type: 14,
+              key: originalKey,
+              editedMessage: editedWrapper.message
+            }
+          }
+        });
+      }
     } catch (e) { console.error('[dispatchUpdate]', e.message); }
   }
 }
