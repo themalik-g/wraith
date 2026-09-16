@@ -245,6 +245,14 @@ function spawnSession(root, id, number) {
 
   proc.on('message', m => {
     if (m?.type === 'wraith:linked') { try { resolveLinked(true); } catch {} }
+    if (m?.type === 'wraith:spawn_session' && m.sessionId) {
+      if (children.has(m.sessionId)) {
+        say(yellow(`session ${m.sessionId} is already running`));
+      } else {
+        say(green(`dynamic spawn request received for session ${m.sessionId}${m.number ? ' (+' + m.number + ')' : ''}`));
+        spawnSession(root, m.sessionId, m.number || null);
+      }
+    }
   });
 
   proc.on('error', err => console.error(clock(), red('spawn error:'), err.message));

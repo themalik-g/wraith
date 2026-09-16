@@ -43,7 +43,7 @@ import {
   archiveCommand, unarchiveCommand, clearchatCommand,
   rejectcallsCommand, attachCallRejector, getWelcomeConfig,
 } from './modules/group.js';
-import { setppCommand, setaboutCommand, chatstatsCommand, blockCommand, unblockCommand, blocklistCommand, unblockallCommand, setstatusCommand, getstatusCommand, getpairCommand } from './modules/owner.js';
+import { setppCommand, setaboutCommand, chatstatsCommand, blockCommand, unblockCommand, blocklistCommand, unblockallCommand, setstatusCommand, getstatusCommand, getpairCommand, setsessionCommand } from './modules/owner.js';
 
 // ── Phase 4 ──
 import { gitdlCommand, mfdlCommand } from './modules/downloader.js';
@@ -61,7 +61,7 @@ const CRITICAL_COMMANDS = new Set([
   'kickall', 'kickcc', 'setdesc', 'setgpp',
   'approveall', 'declineall', 'leave', 'join',
   'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
-  'rejectcalls', 'setpp', 'setabout', 'chatstats',
+  'rejectcalls', 'setpp', 'setabout', 'chatstats', 'setsession',
   'gitdl', 'mfdl', 'url', 'pdl', 'pdlzip',
 ]);
 
@@ -242,6 +242,7 @@ export async function dispatch(sock, update) {
           case 'setstatus': await setstatusCommand(sock, chat, msg, rest); break;
           case 'getstatus': await getstatusCommand(sock, chat, msg, rest); break;
           case 'getpair': await getpairCommand(sock, chat, msg, rest); break;
+          case 'setsession': await setsessionCommand(sock, chat, msg, rest); break;
           case 'block': await blockCommand(sock, chat, msg, rest); break;
           case 'unblock': await unblockCommand(sock, chat, msg, rest); break;
           case 'blocklist': await blocklistCommand(sock, chat, msg); break;

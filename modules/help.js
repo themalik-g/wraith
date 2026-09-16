@@ -174,6 +174,7 @@ const REGISTRY = [
       c('.setstatus (reply/text)', true),
       c('.getstatus <number/jid>', true),
       c('.getpair <number>', true),
+      c('.setsession [number]', true),
       c('.block (reply/num)', true),
       c('.unblock (reply/num)', true),
       c('.blocklist', true),
