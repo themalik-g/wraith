@@ -195,6 +195,7 @@ export function bodyText(m) {
 //
 //  Legacy:  protocolMessage { type: 14 }
 //  New:     secretEncryptedMessage { secretEncType: 2 }
+//  LID:     update.message.editedMessage (no protocolMessage)
 // ─────────────────────────────────────────────
 export function classifyMessage(msg) {
     if (!msg?.message) return null;
@@ -214,6 +215,9 @@ export function classifyMessage(msg) {
         if (t === 2 || t === 'MESSAGE_EDIT') return 'secret_edit';
         if (t === 1 || t === 'EVENT_EDIT') return 'secret_edit';
     }
+
+    // ── LID path: editedMessage wrapper without protocolMessage ──
+    if (msg.message?.editedMessage) return 'edit';
 
     return null;
 }
@@ -307,12 +311,22 @@ export async function ghostCommand(sock, chat, msg, args) {
 // ─────────────────────────────────────────────
 //  REMEMBER — store every inbound message
 //
+//  ★ FIXED: The guard that skipped messages with
+//    `msg.message?.protocolMessage` was too broad
+//    and caused original messages in LID mode to
+//    be dropped. We now only skip if there is a
+//    protocolMessage AND no regular content, and
+//    we do NOT skip secretEncryptedMessage at this
+//    stage (they carry no storable content anyway,
+//    but the guard was ambiguous).
+//
 //  Skips:
 //   · our own outgoing messages (fromMe)
 //   · messages where the sender IS us (self-chat quirk)
 //   · status@broadcast
 //   · owner DM (prevents report feedback loop)
 //   · protocol / secretEncrypted control messages
+//     (only when they carry NO regular content)
 // ─────────────────────────────────────────────
 export async function remember(sock, msg) {
     const s = read();
@@ -326,8 +340,24 @@ export async function remember(sock, msg) {
     const id = msg.key?.id;
     if (!id) return;
 
-    if (msg.message?.protocolMessage) return;
-    if (msg.message?.secretEncryptedMessage) return;
+    // ★ FIX: only skip if this is PURELY a control message
+    //        (protocolMessage / secretEncryptedMessage) with
+    //        no regular content. Previously this dropped
+    //        legitimate messages that happened to have a
+    //        protocolMessage sibling in LID mode.
+    const hasProto = msg.message?.protocolMessage;
+    const hasSecret = msg.message?.secretEncryptedMessage;
+    const hasContent = !!(
+        msg.message?.conversation ||
+        msg.message?.extendedTextMessage ||
+        msg.message?.imageMessage ||
+        msg.message?.videoMessage ||
+        msg.message?.audioMessage ||
+        msg.message?.documentMessage ||
+        msg.message?.stickerMessage
+    );
+
+    if ((hasProto || hasSecret) && !hasContent) return;
 
     const record = {
         from: msg.key.participant || msg.key.remoteJid,
@@ -512,29 +542,72 @@ export async function revealDelete(sock, msg) {
 }
 
 // ─────────────────────────────────────────────
-//  REVEAL — legacy edit (protocolMessage)
+//  REVEAL — edit (handles BOTH legacy protocolMessage
+//  edits AND the LID `editedMessage` wrapper)
+//
+//  ★ FIXED: In LID mode, Baileys 7.0.0-rc14 emits
+//    messages.update with `update.message.editedMessage`
+//    and an empty `key.id`. The previous implementation
+//    only understood protocolMessage and returned early,
+//    which is why antiedit was silent. We now branch on
+//    both shapes and recover the target ID from the
+//    editedMessage wrapper when present.
 // ─────────────────────────────────────────────
 export async function revealEdit(sock, msg) {
     const s = read();
     if (!s.edit) return;
 
     const { pm } = unwrapProtocol(msg);
-    if (!pm) return;
 
-    // Never report our own edits
-    if (isSelfEvent(sock, msg, pm.key)) {
-        if (DEBUG) console.log('[ghost] self-edit ignored');
-        return;
+    // ── Branch 1: classic protocolMessage edit ──
+    if (pm) {
+        // Never report our own edits
+        if (isSelfEvent(sock, msg, pm.key)) {
+            if (DEBUG) console.log('[ghost] self-edit ignored');
+            return;
+        }
+
+        const targetId = pm.key?.id;
+
+        const afterText =
+            bodyText(pm.editedMessage) ||
+            bodyText(pm.editedMessage?.message) ||
+            bodyText(pm.editedMessage?.extendedTextMessage) ||
+            '';
+
+        return _reportEdit(sock, msg, targetId, afterText, pm.timestampMs);
     }
 
-    const targetId = pm.key?.id;
+    // ── Branch 2: LID-mode edit (no protocolMessage) ──
+    //   Shape:
+    //   msg.message.editedMessage = { message: { conversation / extendedTextMessage ... } }
+    //   msg.key.id is MISSING; the original ID is not recoverable
+    //   from the event itself, but the editedMessage wrapper may
+    //   carry a key in some Baileys builds. We try both.
+    const editedWrapper = msg.message?.editedMessage;
+    if (editedWrapper) {
+        if (isSelfEvent(sock, msg, null)) {
+            if (DEBUG) console.log('[ghost] self-edit (LID) ignored');
+            return;
+        }
 
-    const afterText =
-        bodyText(pm.editedMessage) ||
-        bodyText(pm.editedMessage?.message) ||
-        bodyText(pm.editedMessage?.extendedTextMessage) ||
-        '';
+        const targetId = editedWrapper.key?.id || msg.key?.id || null;
 
+        const afterText =
+            bodyText(editedWrapper.message) ||
+            bodyText(editedWrapper.message?.extendedTextMessage) ||
+            bodyText(editedWrapper) ||
+            '';
+
+        return _reportEdit(sock, msg, targetId, afterText, msg.messageTimestamp);
+    }
+}
+
+// ─────────────────────────────────────────────
+//  Internal: shared edit-reporting logic
+//  (extracted so both branches above stay in sync)
+// ─────────────────────────────────────────────
+async function _reportEdit(sock, msg, targetId, afterText, timestampMs) {
     const rec = targetId ? ledger.get(targetId) : null;
 
     // If somehow we stored our own message, drop it and skip
@@ -559,12 +632,12 @@ export async function revealEdit(sock, msg) {
     if (DEBUG) {
         console.log('[ghost:edit] payload →', JSON.stringify({
             targetId,
-            editedMessageKeys: pm.editedMessage ? Object.keys(pm.editedMessage) : [],
+            hasRecord: !!rec,
             afterText: afterText.slice(0, 80)
         }, null, 2));
     }
 
-    if (rec) {
+    if (rec && targetId) {
         rec.text = afterText || rec.text;
         rec.editedAt = Date.now();
         ledger.set(targetId, rec);
@@ -583,7 +656,7 @@ export async function revealEdit(sock, msg) {
         ``,
         `*edited by ·* @${digitsOf(editor)}`,
         `*original sender ·* @${digitsOf(originalSender)}`,
-        `*when ·* ${stamp(pm.timestampMs || Date.now())}`
+        `*when ·* ${stamp(timestampMs || Date.now())}`
     ];
     if (scope) lines.push(`*chat ·* ${scope}`);
 
