@@ -15,7 +15,7 @@ import { activityCommand, trackActivity } from './modules/activity.js';
 import { updateCommand } from './modules/update.js';
 import { prefixCommand } from './modules/prefix.js';
 import { songCommand } from './modules/song.js';
-import { ytdlCommand, mp3Command } from './modules/download.js';
+import { ytdlCommand, mp3Command, pdlCommand, pdlzipCommand } from './modules/download.js';
 import { urlCommand } from './modules/url.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 import { getPrefix } from './core/settings.js';
@@ -62,7 +62,7 @@ const CRITICAL_COMMANDS = new Set([
   'approveall', 'declineall', 'leave', 'join',
   'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
   'rejectcalls', 'setpp', 'setabout', 'chatstats',
-  'gitdl', 'mfdl', 'url',
+  'gitdl', 'mfdl', 'url', 'pdl', 'pdlzip',
 ]);
 
 const attachedSockets = new WeakSet();
@@ -150,7 +150,7 @@ export async function dispatch(sock, update) {
         'currency', 'qr', 'define', 'weather', 'pwned', 'owner', 'script', 'repo',
         'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
         'welcome', 'goodbye', 'getpp', 'ig', 'tiktok', 'fb',
-        'igpost', 'tiktokpost', 'fbpost',
+        'igpost', 'tiktokpost', 'fbpost', 'pdl', 'pdlzip', 'postdl',
       ]);
       if (KNOWN.has(verb)) {
         try { await sock.sendMessage(chat, { react: { text: '⌛', key: msg.key } }); } catch (e) { console.error('[router] react', e.message); }
@@ -171,6 +171,9 @@ export async function dispatch(sock, update) {
           case 'dl':
           case 'download': await ytdlCommand(sock, chat, msg, rest); break;
           case 'mp3': await mp3Command(sock, chat, msg, rest); break;
+          case 'pdl':
+          case 'postdl': await pdlCommand(sock, chat, msg, rest); break;
+          case 'pdlzip': await pdlzipCommand(sock, chat, msg, rest); break;
 
           case 'songinfo': await songInfoCommand(sock, chat, msg, rest); break;
           case 'prefix': await prefixCommand(sock, chat, msg, rest); break;

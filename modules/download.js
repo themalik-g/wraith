@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/download.js
-// .dl / .download  →  yt-dlp, any platform, native media type
+// .dl / .download  →  @postfetch/core (for post/carousel URLs) + yt-dlp (video/audio)
 // .mp3             →  yt-dlp audio extraction (-x --audio-format mp3)
+// .pdl / .pdlzip   →  @postfetch/core direct post download (images/carousels/zip)
 //
 //  · Media type auto-detected from magic bytes (file-type)
 //  · Everything deleted after send (short delay + sweep)
@@ -14,6 +15,7 @@ import { spawn } from 'node:child_process';
 import PQueue from 'p-queue';
 import ffmpegPath from 'ffmpeg-static';
 import { fileTypeFromBuffer } from 'file-type';
+import { postfetch, download as pfDownload, archive as pfArchive, detect as pfDetect } from '@postfetch/core';
 
 const TMP = path.join(os.tmpdir(), 'wraith-dl');
 fs.mkdirSync(TMP, { recursive: true });
@@ -72,43 +74,26 @@ function producedFiles(dir, since) {
   return results.sort((a, b) => a.t - b.t).map((x) => x.full);
 }
 
-function isImagePostUrl(url) {
+export function isPostUrl(url) {
   if (!url || typeof url !== 'string') return false;
-  return /instagram\.com\/p\//i.test(url) ||
-         /tiktok\.com\/.*\/photo\//i.test(url) ||
-         /pinterest\.com\/pin\//i.test(url) ||
-         /pin\.it\//i.test(url) ||
-         /twitter\.com\/.*\/status\/.*\/photo/i.test(url) ||
-         /x\.com\/.*\/status\/.*\/photo/i.test(url) ||
-         /\.(jpe?g|png|webp)($|\?)/i.test(url);
-}
-
-async function downloadWithGalleryDl(url, destDir) {
-  let galleryDlFn;
-  try {
-    const mod = await import('gallery-dl');
-    galleryDlFn = mod.default?.default || mod.default;
-  } catch (e) {
-    throw new Error(`gallery-dl package import failed: ${e.message}`);
+  const lower = url.toLowerCase();
+  if (
+    lower.includes('instagram.com/p/') ||
+    lower.includes('instagram.com/reel/') ||
+    lower.includes('instagram.com/tv/') ||
+    lower.includes('tiktok.com/') && lower.includes('/photo/') ||
+    lower.includes('tiktok.com/') && lower.includes('/video/') ||
+    lower.includes('facebook.com/') && (lower.includes('/posts/') || lower.includes('/photos/') || lower.includes('/videos/')) ||
+    lower.includes('fb.watch/') ||
+    lower.includes('twitter.com/') && lower.includes('/status/') ||
+    lower.includes('x.com/') && lower.includes('/status/') ||
+    lower.includes('pinterest.com/pin/') ||
+    lower.includes('pin.it/')
+  ) {
+    return true;
   }
-
-  try {
-    const binPath = path.join(process.cwd(), 'node_modules/gallery-dl/executable/gallery-dl.bin');
-    if (fs.existsSync(binPath)) fs.chmodSync(binPath, 0o755);
-  } catch {}
-
-  const args = [
-    '--directory', destDir,
-    '--filename', 'wraith-%(id)s_%(num)s.%(extension)s',
-    '--quiet',
-    url
-  ];
-
-  return await withTimeout(
-    galleryDlFn(args),
-    YTDLP_TIMEOUT,
-    'gallery-dl download'
-  );
+  const platform = pfDetect(url);
+  return !!platform;
 }
 
 function bufferToMp3(inputBuffer, bitrate = 192) {
@@ -148,6 +133,80 @@ async function classifyBuffer(buffer) {
   return { kind: 'unknown', ext: ft.ext, mime: ft.mime };
 }
 
+// Download post media using @postfetch/core
+export async function downloadPostMediaDirect(sock, chat, msg, url, asZip = false) {
+  if (!isPostUrl(url)) {
+    return sock.sendMessage(chat, {
+      text: '❌ *Not a post URL:* This URL does not appear to be a post/photo/carousel URL.\n_If you want to download videos or search profiles, try using .ig, .tiktok, or .dl <url>._',
+    }, { quoted: msg });
+  }
+
+  const status = await sock.sendMessage(chat, {
+    text: `📦 *Postfetch:* Resolving post media…`,
+  }, { quoted: msg });
+
+  try {
+    const result = await withTimeout(postfetch(url), YTDLP_TIMEOUT, 'postfetch resolve');
+    if (!result?.items?.length) {
+      throw new Error('No media items found in this post');
+    }
+
+    if (asZip) {
+      await edit(sock, chat, status, `📦 *Archiving ${result.items.length} items into ZIP…*`);
+      const zip = await withTimeout(pfArchive(result), YTDLP_TIMEOUT, 'postfetch archive');
+      const zipBuffer = Buffer.from(zip.bytes);
+      await sock.sendMessage(chat, {
+        document: zipBuffer,
+        fileName: zip.filename || 'post.zip',
+        mimetype: zip.mime || 'application/zip',
+        caption: `📦 *Downloaded Post Archive* (${result.items.length} items)\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`,
+      }, { quoted: msg });
+      await edit(sock, chat, status, `✅ *ZIP Download complete*\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`);
+      await react(sock, chat, msg, '☑');
+      return;
+    }
+
+    const totalFiles = Math.min(result.items.length, 20);
+    let sentCount = 0;
+
+    for (let i = 0; i < totalFiles; i++) {
+      const item = result.items[i];
+      await edit(sock, chat, status, `🖼️ *Downloading item ${i + 1}/${totalFiles}…*`);
+      const res = await withTimeout(pfDownload(item), CONVERT_TIMEOUT, `download item ${i + 1}`);
+      const buffer = Buffer.from(await res.arrayBuffer());
+      if (buffer.length < 512) continue;
+
+      let type = await classifyBuffer(buffer);
+      const safeName = item.filename || `media_${i + 1}.${type.ext}`;
+      const limit = type.kind === 'video' ? MAX_VIDEO : MAX_BYTES;
+      if (buffer.length > limit) continue;
+
+      if (type.kind === 'image') {
+        await sock.sendMessage(chat, { image: buffer, mimetype: type.mime }, { quoted: msg });
+        sentCount++;
+      } else if (type.kind === 'video') {
+        await sock.sendMessage(chat, { video: buffer, mimetype: type.mime || 'video/mp4', fileName: safeName }, { quoted: msg });
+        sentCount++;
+      } else if (type.kind === 'audio') {
+        await sock.sendMessage(chat, { audio: buffer, mimetype: type.mime || 'audio/mpeg', fileName: safeName, ptt: false }, { quoted: msg });
+        sentCount++;
+      } else {
+        await sock.sendMessage(chat, { document: buffer, mimetype: type.mime, fileName: safeName }, { quoted: msg });
+        sentCount++;
+      }
+    }
+
+    if (sentCount === 0) throw new Error('Post media files exceeded size limits or were empty');
+
+    await edit(sock, chat, status, `✅ *Download complete* (${sentCount} items)\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`);
+    await react(sock, chat, msg, '☑');
+  } catch (e) {
+    try { console.error('[postfetch]', e.message); } catch {}
+    await edit(sock, chat, status, `❌ *Post download failed:* ${e.message}\n_If this is a standard video URL, try using .dl, .ig, or .tiktok._`);
+    await react(sock, chat, msg, '❌');
+  }
+}
+
 async function downloadMedia(sock, chat, msg, query, audioOnly) {
   const verbLabel = audioOnly ? '.mp3' : '.dl';
   const status = await sock.sendMessage(chat, {
@@ -155,12 +214,54 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
   }, { quoted: msg });
 
   const runStart = Date.now();
-  let produced = null;
 
   try {
-    const { YtDlp } = await import('@choewy/yt-dlp');
     const isUrl = /^https?:\/\//i.test(query);
 
+    if (isUrl && !audioOnly && isPostUrl(query)) {
+      await edit(sock, chat, status, '🖼️ *Fetching post media (@postfetch/core)…*');
+      try {
+        const pfResult = await withTimeout(postfetch(query), YTDLP_TIMEOUT, 'postfetch resolve');
+        if (pfResult?.items?.length) {
+          const totalFiles = Math.min(pfResult.items.length, 20);
+          let sentCount = 0;
+          for (let i = 0; i < totalFiles; i++) {
+            const item = pfResult.items[i];
+            const res = await withTimeout(pfDownload(item), CONVERT_TIMEOUT, `postfetch item ${i + 1}`);
+            const buffer = Buffer.from(await res.arrayBuffer());
+            if (buffer.length < 512) continue;
+
+            const type = await classifyBuffer(buffer);
+            const safeName = item.filename || `media_${i + 1}.${type.ext}`;
+            const limit = type.kind === 'video' ? MAX_VIDEO : MAX_BYTES;
+            if (buffer.length > limit) continue;
+
+            if (type.kind === 'image') {
+              await sock.sendMessage(chat, { image: buffer, mimetype: type.mime }, { quoted: msg });
+              sentCount++;
+            } else if (type.kind === 'video') {
+              await sock.sendMessage(chat, { video: buffer, mimetype: type.mime || 'video/mp4', fileName: safeName }, { quoted: msg });
+              sentCount++;
+            } else if (type.kind === 'audio') {
+              await sock.sendMessage(chat, { audio: buffer, mimetype: type.mime || 'audio/mpeg', fileName: safeName, ptt: false }, { quoted: msg });
+              sentCount++;
+            } else {
+              await sock.sendMessage(chat, { document: buffer, mimetype: type.mime, fileName: safeName }, { quoted: msg });
+              sentCount++;
+            }
+          }
+          if (sentCount > 0) {
+            await edit(sock, chat, status, `✅ *Download complete*\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`);
+            await react(sock, chat, msg, '☑');
+            return;
+          }
+        }
+      } catch (pfErr) {
+        await edit(sock, chat, status, '⬇️ *Postfetch failed, falling back to yt-dlp…*');
+      }
+    }
+
+    const { YtDlp } = await import('@choewy/yt-dlp');
     const outTemplate = path.join(TMP, `wraith-%(playlist_index)s_%(id)s.%(ext)s`);
     const yt = new YtDlp({
       url: isUrl ? query : `scsearch1:${query}`,
@@ -169,27 +270,7 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
       playlist: true, retries: 3,
     });
 
-    const isImagePost = isUrl && !audioOnly && isImagePostUrl(query);
-
-    if (isImagePost) {
-      await edit(sock, chat, status, '🖼️ *Downloading images (gallery-dl)…*');
-      try {
-        await downloadWithGalleryDl(query, TMP);
-      } catch (gdlErr) {
-        // If gallery-dl fails, fall back to yt-dlp
-        await edit(sock, chat, status, '⬇️ *Retrying with yt-dlp…*');
-        const yt = new YtDlp({
-          url: query, output: outTemplate,
-          quiet: true, noWarnings: true, noProgress: true,
-          playlist: true, retries: 3,
-        });
-        await withTimeout(
-          yt.format('bestvideo+bestaudio/best').mergeFormat('mp4').video().download(),
-          YTDLP_TIMEOUT,
-          'media download'
-        );
-      }
-    } else if (audioOnly) {
+    if (audioOnly) {
       await edit(sock, chat, status, '🎵 *Extracting audio…*');
       await withTimeout(
         yt.audioFormat('mp3').audio().download(),
@@ -205,8 +286,6 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
           'media download'
         );
       } catch (err1) {
-        // Primary download failed (e.g., No video formats found for photo/carousel posts).
-        // Try fallback 1: empty format override (downloads default format e.g. images)
         try {
           const ytFallback1 = new YtDlp({
             url: isUrl ? query : `scsearch1:${query}`,
@@ -221,29 +300,18 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
             'fallback download (empty format)'
           );
         } catch (err2) {
-          // Fallback 2: format 'b/best'
-          try {
-            const ytFallback2 = new YtDlp({
-              url: isUrl ? query : `scsearch1:${query}`,
-              output: outTemplate,
-              quiet: true, noWarnings: true, noProgress: true,
-              playlist: true, retries: 3,
-            });
-            ytFallback2.format('b/best');
-            await withTimeout(
-              ytFallback2.video().download(),
-              YTDLP_TIMEOUT,
-              'fallback download (b/best)'
-            );
-          } catch (err3) {
-            // Fallback 3: try gallery-dl for any URL in case it contains pictures
-            if (isUrl) {
-              await edit(sock, chat, status, '🖼️ *Trying gallery-dl fallback…*');
-              await downloadWithGalleryDl(query, TMP);
-            } else {
-              throw err1;
-            }
-          }
+          const ytFallback2 = new YtDlp({
+            url: isUrl ? query : `scsearch1:${query}`,
+            output: outTemplate,
+            quiet: true, noWarnings: true, noProgress: true,
+            playlist: true, retries: 3,
+          });
+          ytFallback2.format('b/best');
+          await withTimeout(
+            ytFallback2.video().download(),
+            YTDLP_TIMEOUT,
+            'fallback download (b/best)'
+          );
         }
       }
     }
@@ -330,4 +398,32 @@ export async function mp3Command(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
   if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.mp3 <url or query>`' }, { quoted: msg });
   return queue.add(() => downloadMedia(sock, chat, msg, query, true));
+}
+
+export async function pdlCommand(sock, chat, msg, args) {
+  const input = (args || []).join(' ').trim();
+  if (!input) {
+    return sock.sendMessage(chat, {
+      text: '📦 *pdl* — Download Post/Carousel Media\n\nUsage:\n• `.pdl <post-url>` (Download images/videos directly)\n• `.pdl <post-url> zip` or `.pdlzip <post-url>` (Download as ZIP archive)'
+    }, { quoted: msg });
+  }
+
+  let asZip = false;
+  let url = input;
+  if (/\bzip\b/i.test(input) || /--zip/i.test(input)) {
+    asZip = true;
+    url = input.replace(/\bzip\b/gi, '').replace(/--zip/gi, '').trim();
+  }
+
+  return queue.add(() => downloadPostMediaDirect(sock, chat, msg, url, asZip));
+}
+
+export async function pdlzipCommand(sock, chat, msg, args) {
+  const url = (args || []).join(' ').trim();
+  if (!url) {
+    return sock.sendMessage(chat, {
+      text: '📦 *pdlzip* — Download Post/Carousel Media as ZIP\n\nUsage: `.pdlzip <post-url>`'
+    }, { quoted: msg });
+  }
+  return queue.add(() => downloadPostMediaDirect(sock, chat, msg, url, true));
 }

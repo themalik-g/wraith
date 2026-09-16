@@ -1,7 +1,7 @@
 <div align="center">
 
 <!-- ANIMATED TYPING SVG HEADER -->
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&size=40&duration=3000&pause=1000&color=00E5FF&center=true&vCenter=true&width=800&height=80&lines=🤖+𝙒𝙍𝘼𝙄𝙏𝙃+𝙒𝘼+𝘽𝙊𝙏;⚡+𝙏𝙝𝙚+𝙐𝙡𝙩𝙞𝙢𝙖𝙩𝙚+𝙒𝙝𝙖𝙩𝙨𝘼𝙥p+𝘽o𝙏;🚀+𝙋𝙤𝙬𝙚𝙧𝙚𝙙+𝙗𝙮+𝘽𝙖𝙞𝙡𝙚𝙮𝙨;🔥+24%2F7+𝙎𝙩𝙖𝙗𝙡𝙚+%26+𝙁𝙖𝙨𝙩" alt="Typing SVG" />
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&size=40&duration=3000&pause=1000&color=00E5FF&center=true&vCenter=true&width=800&height=80&lines=🤖+𝙒𝙍𝘼𝙄𝙏🇭+𝙒𝘼+𝘽𝙊𝙏;⚡+𝙏𝙝𝙚+𝙐𝙡𝙩𝙞𝙢𝙖𝙩𝙚+𝙒𝙝𝙖𝙩𝙨𝘼𝙥p+𝘽o𝙏;🚀+𝙋𝙤𝙬𝙚𝙧𝙚𝙙+𝙗𝙮+𝘽𝙖𝙞𝙡𝙚𝙮𝙨;🔥+24%2F7+𝙎𝙩𝙖𝙗𝙡𝙚+%26+𝙁𝙖𝙨𝙩" alt="Typing SVG" />
 
 <!-- VIBRANT ELECTRIC OCEAN HEADER -->
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:0052D4,50:1E88E5,100:00E5FF&height=200&section=header&text=WRAITH%20BOT&fontSize=70&fontColor=ffffff&animation=twinkling&fontAlignY=35" width="100%"/>
@@ -18,7 +18,7 @@
 
 > A silent, high-performance watcher for WhatsApp — remembers deleted/edited messages, peeks at view-once media, lurks on status updates, schedules posts, downloads videos, music, and image carousels, and manages groups effortlessly.
 
-Built on [Baileys v7](https://github.com/WhiskeySockets/Baileys) with full LID-aware JID resolution and integrated `yt-dlp` + `gallery-dl` media extractors.
+Built on [Baileys v7](https://github.com/WhiskeySockets/Baileys) with full LID-aware JID resolution and integrated `@postfetch/core` + `yt-dlp` media extractors.
 
 ---
 
@@ -30,7 +30,7 @@ Built on [Baileys v7](https://github.com/WhiskeySockets/Baileys) with full LID-a
 | 👁️ **Peek** | Reveals view-once images, videos, audio, with auto-peek and quoted message detection. |
 | 🌒 **Lurk** | Auto-view statuses, auto-react with custom/random emojis, silent download to owner DM. |
 | 📅 **Schedule** | Send any message or schedule group opening/closing for a future time. |
-| ⬇️ **Media Downloader** | Integrated `yt-dlp` + `gallery-dl` engine (`.dl`, `.mp3`) for videos, audio, and image carousels (Instagram `/p/`, TikTok `/photo/`, Pinterest, Twitter). |
+| ⬇️ **Media Downloader** | Integrated `@postfetch/core` + `yt-dlp` engine (`.dl`, `.mp3`, `.pdl`, `.pdlzip`) for videos, audio, and image carousels (Instagram `/p/`, TikTok `/photo/`, Pinterest, Twitter, Facebook). |
 | 📦 **File & Social Downloader** | GitHub repo downloader (`.gitdl`), MediaFire downloader (`.mfdl`), social profile search & media downloading (`.ig`, `.tiktok`, `.fb`), SoundCloud song downloader (`.song`). |
 | 📚 **Media & Entertainment** | Verified book search & download (Gutenberg/Archive.org), stock image search (`.img`), song info, lyrics, movie search, PowerPoint presentation generator (`.ppt`), couple profile pictures (`.couplepp`). |
 | 👥 **Admin & Group** | Group management (`.open`, `.close`, `.kick`, `.add`, `.promote`, `.demote`, `.approveall`, `.declineall`, `.kickall`, `.kickcc`, `.tagall`, `.hidetag`, `.setgpp`, `.setgdesc`, `.mute`, `.unmute`, `.welcome`, `.goodbye`), plus protection (`.antilink`, `.antispam`, `.antisticker`, `.rejectcalls`). |
@@ -181,7 +181,7 @@ wraith/
 |---|---|
 | Bot won't pair | Delete `session/`, restart, re-enter number |
 | `internal-server-error` on admin | Bot must be admin; target PN may be uncached |
-| Image post download failed | Ensure `gallery-dl` package is installed (`npm install`) |
+| Image post download failed | Use `.pdl <url>` or `.pdlzip <url>` for direct postfetch download |
 | LID not resolving to PN | Reply to their message in a group first |
 
 Full guide: [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md)
