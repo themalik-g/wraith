@@ -4,10 +4,9 @@ import { fileURLToPath } from 'url';
 import { writeFile } from 'fs/promises';
 import { downloadContentFromMessage, proto } from '@whiskeysockets/baileys';
 
-import { isOwner, ownerJid, digitsOf, isOwnerChat } from '../core/identity.js';
+import { isOwner, ownerJid, digitsOf } from '../core/identity.js';
 import { vaultPath, dropFromVault } from '../core/vault.js';
 import { CONFIG } from '../config.js';
-import { readJson, writeJsonAtomic } from '../core/state-io.js';
 import { extractViewOnce } from './peek.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -17,41 +16,6 @@ const LEDGER_FILE = path.join(here, '..', 'state', 'ghost-ledger.json');
 const DEBUG = process.env.WRAITH_DEBUG === '1';
 
 // ─────────────────────────────────────────────
-//  Self-event guard
-//  Returns true when the incoming delete/edit event
-//  OR its target message originated from US:
-//    · our own linked device (fromMe)
-//    · a "note to self" / self-chat message
-//    · the bot's own outgoing sends (peek forwards, etc.)
-//  We NEVER report these — the whole point of ghost is
-//  to catch OTHER people, not ourselves.
-// ─────────────────────────────────────────────
-function isSelfEvent(sock, msg, targetKey = null) {
-    // 1) The event itself came from our device
-    if (msg?.key?.fromMe) return true;
-
-    // 2) The target message (the one being edited/revoked) was ours
-    if (targetKey?.fromMe) return true;
-
-    // 3) Sender digits match our own PN or LID
-    const selfPn  = digitsOf(sock?.user?.id  || '');
-    const selfLid = digitsOf(sock?.user?.lid || '');
-    const culprit =
-        msg?.participant ||
-        msg?.key?.participant ||
-        msg?.key?.remoteJid;
-    if (culprit) {
-        const cd = digitsOf(culprit);
-        if (cd && (cd === selfPn || (selfLid && cd === selfLid))) return true;
-    }
-
-    // 4) The chat is our own DM-with-self
-    if (isOwnerChat(msg?.key?.remoteJid)) return true;
-
-    return false;
-}
-
-// ─────────────────────────────────────────────
 //  Persistent ledger
 // ─────────────────────────────────────────────
 const ledger = new Map();
@@ -59,8 +23,8 @@ let saveTimer = null;
 
 function loadLedger() {
     try {
-        const raw = readJson(LEDGER_FILE, null);
-        if (!raw) return;
+        if (!fs.existsSync(LEDGER_FILE)) return;
+        const raw = JSON.parse(fs.readFileSync(LEDGER_FILE, 'utf-8'));
         const cutoff = Date.now() - CONFIG.memoryTTL;
         for (const [id, rec] of Object.entries(raw)) {
             if (rec?.at >= cutoff) ledger.set(id, rec);
@@ -75,37 +39,16 @@ function scheduleSave() {
     if (saveTimer) return;
     saveTimer = setTimeout(() => {
         saveTimer = null;
-        writeJsonAtomic(LEDGER_FILE, Object.fromEntries(ledger));
+        try {
+            const obj = Object.fromEntries(ledger);
+            fs.writeFileSync(LEDGER_FILE, JSON.stringify(obj));
+        } catch (e) {
+            if (DEBUG) console.log('[ghost] ledger save failed:', e.message);
+        }
     }, 3000);
 }
 
 loadLedger();
-
-// ─────────────────────────────────────────────
-//  Reveal dedupe.
-//  The same delete/edit can arrive via BOTH
-//  messages.upsert AND messages.update — without
-//  this, the owner gets duplicate reports.
-// ─────────────────────────────────────────────
-const revealed = new Map();   // dedupeKey → timestamp
-const REVEAL_WINDOW_MS = 2 * 60 * 1000;
-
-function markRevealed(key) {
-    const now = Date.now();
-    revealed.set(key, now);
-    if (revealed.size > 500) {
-        for (const [k, ts] of revealed.entries()) {
-            if (ts < now - REVEAL_WINDOW_MS) revealed.delete(k);
-        }
-    }
-}
-
-function wasRevealed(key) {
-    const ts = revealed.get(key);
-    if (ts && ts > Date.now() - REVEAL_WINDOW_MS) return true;
-    markRevealed(key);
-    return false;
-}
 
 // ─────────────────────────────────────────────
 //  Protocol constants
@@ -190,12 +133,13 @@ export function bodyText(m) {
 }
 
 // ─────────────────────────────────────────────
-//  Classifier — handles BOTH legacy and new
-//  edit delivery mechanisms.
+//  Classifier — handles legacy protocolMessage,
+//  WhatsApp 2025 secretEncryptedMessage, AND
+//  the Baileys 7.x LID `editedMessage` wrapper.
 //
 //  Legacy:  protocolMessage { type: 14 }
-//  New:     secretEncryptedMessage { secretEncType: 2 }
-//  LID:     update.message.editedMessage (no protocolMessage)
+//  Secret:  secretEncryptedMessage { secretEncType: 2 }
+//  LID:     message.editedMessage { message: {...} }
 // ─────────────────────────────────────────────
 export function classifyMessage(msg) {
     if (!msg?.message) return null;
@@ -208,6 +152,9 @@ export function classifyMessage(msg) {
         if (t === TYPE_MESSAGE_EDIT || t === 'MESSAGE_EDIT' || t === 14) return 'edit';
     }
 
+    // ── ★ LID edit path (Baileys 7.0.0-rc14) ──
+    if (msg.message?.editedMessage) return 'edit';
+
     // ── New path: secretEncryptedMessage ──
     const sem = msg.message?.secretEncryptedMessage;
     if (sem) {
@@ -216,9 +163,6 @@ export function classifyMessage(msg) {
         if (t === 1 || t === 'EVENT_EDIT') return 'secret_edit';
     }
 
-    // ── LID path: editedMessage wrapper without protocolMessage ──
-    if (msg.message?.editedMessage) return 'edit';
-
     return null;
 }
 
@@ -226,10 +170,11 @@ export function classifyMessage(msg) {
 //  State
 // ─────────────────────────────────────────────
 function read() {
-    return { on: true, edit: true, ...readJson(STATE, {}) };
+    try { return JSON.parse(fs.readFileSync(STATE, 'utf-8')); }
+    catch { return { on: false, edit: true }; }
 }
 function write(o) {
-    writeJsonAtomic(STATE, o);
+    try { fs.writeFileSync(STATE, JSON.stringify(o, null, 2)); } catch {}
 }
 
 // ─────────────────────────────────────────────
@@ -240,21 +185,6 @@ async function grab(node, kind) {
     const chunks = [];
     for await (const c of stream) chunks.push(c);
     return Buffer.concat(chunks);
-}
-
-// ─────────────────────────────────────────────
-//  Timestamp helper
-// ─────────────────────────────────────────────
-function stamp(ts = Date.now()) {
-    return new Date(ts).toLocaleString('en-GB', {
-        hour12: true,
-        timeZone: CONFIG.timezone || 'Asia/Karachi',
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
 }
 
 // ─────────────────────────────────────────────
@@ -310,54 +240,17 @@ export async function ghostCommand(sock, chat, msg, args) {
 
 // ─────────────────────────────────────────────
 //  REMEMBER — store every inbound message
-//
-//  ★ FIXED: The guard that skipped messages with
-//    `msg.message?.protocolMessage` was too broad
-//    and caused original messages in LID mode to
-//    be dropped. We now only skip if there is a
-//    protocolMessage AND no regular content, and
-//    we do NOT skip secretEncryptedMessage at this
-//    stage (they carry no storable content anyway,
-//    but the guard was ambiguous).
-//
-//  Skips:
-//   · our own outgoing messages (fromMe)
-//   · messages where the sender IS us (self-chat quirk)
-//   · status@broadcast
-//   · owner DM (prevents report feedback loop)
-//   · protocol / secretEncrypted control messages
-//     (only when they carry NO regular content)
 // ─────────────────────────────────────────────
 export async function remember(sock, msg) {
     const s = read();
     if (!s.on && !s.edit) return;
 
-    // Never store our own activity
-    if (isSelfEvent(sock, msg)) return;
-
-    if (msg.key?.remoteJid === 'status@broadcast') return;
-
     const id = msg.key?.id;
     if (!id) return;
 
-    // ★ FIX: only skip if this is PURELY a control message
-    //        (protocolMessage / secretEncryptedMessage) with
-    //        no regular content. Previously this dropped
-    //        legitimate messages that happened to have a
-    //        protocolMessage sibling in LID mode.
-    const hasProto = msg.message?.protocolMessage;
-    const hasSecret = msg.message?.secretEncryptedMessage;
-    const hasContent = !!(
-        msg.message?.conversation ||
-        msg.message?.extendedTextMessage ||
-        msg.message?.imageMessage ||
-        msg.message?.videoMessage ||
-        msg.message?.audioMessage ||
-        msg.message?.documentMessage ||
-        msg.message?.stickerMessage
-    );
-
-    if ((hasProto || hasSecret) && !hasContent) return;
+    if (msg.message?.protocolMessage) return;
+    if (msg.message?.secretEncryptedMessage) return;
+    if (msg.message?.editedMessage) return;
 
     const record = {
         from: msg.key.participant || msg.key.remoteJid,
@@ -367,10 +260,6 @@ export async function remember(sock, msg) {
         file: null,
         at: Date.now()
     };
-
-    // Final safety: if the resolved sender is still us, skip
-    const selfPn = digitsOf(sock?.user?.id || '');
-    if (record.from && selfPn && digitsOf(record.from) === selfPn) return;
 
     try {
         const vo = extractViewOnce(msg.message);
@@ -413,7 +302,7 @@ export async function remember(sock, msg) {
                 if (DEBUG) console.log('[ghost] view-once forward failed:', e.message);
             }
         }
-        else if (s.on && msg.message?.imageMessage) {
+        else if (msg.message?.imageMessage) {
             record.media = 'image';
             record.text = msg.message.imageMessage.caption || '';
             const buf = await grab(msg.message.imageMessage, 'image');
@@ -421,7 +310,7 @@ export async function remember(sock, msg) {
             await writeFile(fp, buf);
             record.file = fp;
         }
-        else if (s.on && msg.message?.videoMessage) {
+        else if (msg.message?.videoMessage) {
             record.media = 'video';
             record.text = msg.message.videoMessage.caption || '';
             const buf = await grab(msg.message.videoMessage, 'video');
@@ -429,7 +318,7 @@ export async function remember(sock, msg) {
             await writeFile(fp, buf);
             record.file = fp;
         }
-        else if (s.on && msg.message?.audioMessage) {
+        else if (msg.message?.audioMessage) {
             record.media = 'audio';
             const mime = msg.message.audioMessage.mimetype || '';
             const ext = mime.includes('ogg') ? 'ogg' : 'mp3';
@@ -438,7 +327,7 @@ export async function remember(sock, msg) {
             await writeFile(fp, buf);
             record.file = fp;
         }
-        else if (s.on && msg.message?.stickerMessage) {
+        else if (msg.message?.stickerMessage) {
             record.media = 'sticker';
             const buf = await grab(msg.message.stickerMessage, 'sticker');
             const fp = vaultPath(`${id}.webp`);
@@ -470,34 +359,25 @@ export async function revealDelete(sock, msg) {
     const { pm } = unwrapProtocol(msg);
     if (!pm?.key?.id) return;
 
-    // Never report our own deletions
-    if (isSelfEvent(sock, msg, pm.key)) {
-        if (DEBUG) console.log('[ghost] self-delete ignored');
-        return;
-    }
-
     const targetId = pm.key.id;
     const culprit = msg.participant || msg.key?.participant || msg.key?.remoteJid;
+
+    const selfNum = digitsOf(sock.user?.id || '');
+    if (culprit && digitsOf(culprit) === selfNum) return;
 
     const rec = ledger.get(targetId);
     if (!rec) return;
 
-    // Belt & braces: the stored record's sender must not be us
-    const selfPn = digitsOf(sock?.user?.id || '');
-    if (rec.from && selfPn && digitsOf(rec.from) === selfPn) {
-        ledger.delete(targetId);
-        scheduleSave();
-        return;
-    }
-
-    // Suppress duplicate deliveries of the same revoke
-    const dk = `del:${msg.key?.remoteJid || ''}:${targetId}:${digitsOf(culprit)}`;
-    if (wasRevealed(dk)) {
-        if (DEBUG) console.log('[ghost] duplicate revoke suppressed:', dk);
-        return;
-    }
-
     const owner = ownerJid();
+    const stamp = new Date().toLocaleString('en-GB', {
+        hour12: true,
+        timeZone: 'Asia/Karachi',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
 
     let scope = '';
     if (rec.scope) {
@@ -509,14 +389,14 @@ export async function revealDelete(sock, msg) {
         ``,
         `*erased by ·* @${digitsOf(culprit)}`,
         `*original sender ·* @${digitsOf(rec.from)}`,
-        `*when ·* ${stamp()}`
+        `*when ·* ${stamp}`
     ];
     if (scope) lines.push(`*chat ·* ${scope}`);
     if (rec.text) lines.push(``, `*what was said*`, rec.text);
 
     await sock.sendMessage(owner, {
         text: lines.join('\n'),
-        mentions: [culprit, rec.from].filter(Boolean)
+        mentions: [culprit, rec.from]
     });
 
     if (rec.media && rec.file && fs.existsSync(rec.file)) {
@@ -542,100 +422,60 @@ export async function revealDelete(sock, msg) {
 }
 
 // ─────────────────────────────────────────────
-//  REVEAL — edit (handles BOTH legacy protocolMessage
-//  edits AND the LID `editedMessage` wrapper)
+//  REVEAL — edit
 //
-//  ★ FIXED: In LID mode, Baileys 7.0.0-rc14 emits
-//    messages.update with `update.message.editedMessage`
-//    and an empty `key.id`. The previous implementation
-//    only understood protocolMessage and returned early,
-//    which is why antiedit was silent. We now branch on
-//    both shapes and recover the target ID from the
-//    editedMessage wrapper when present.
+//  ★ FIXED for Baileys 7.0.0-rc14.
+//
+//  Accepts BOTH the classic protocolMessage edit
+//  AND the LID `message.editedMessage` wrapper
+//  (which has no protocolMessage and whose outer
+//  key carries the original message ID).
 // ─────────────────────────────────────────────
 export async function revealEdit(sock, msg) {
     const s = read();
     if (!s.edit) return;
 
-    const { pm } = unwrapProtocol(msg);
+    let pm = unwrapProtocol(msg).pm;
 
-    // ── Branch 1: classic protocolMessage edit ──
-    if (pm) {
-        // Never report our own edits
-        if (isSelfEvent(sock, msg, pm.key)) {
-            if (DEBUG) console.log('[ghost] self-edit ignored');
-            return;
-        }
-
-        const targetId = pm.key?.id;
-
-        const afterText =
-            bodyText(pm.editedMessage) ||
-            bodyText(pm.editedMessage?.message) ||
-            bodyText(pm.editedMessage?.extendedTextMessage) ||
-            '';
-
-        return _reportEdit(sock, msg, targetId, afterText, pm.timestampMs);
+    // ★ LID fallback — synthesise a protocolMessage from the wrapper
+    if (!pm && msg.message?.editedMessage) {
+        const em = msg.message.editedMessage;
+        pm = {
+            type: 14,
+            key: em.key || msg.key,
+            editedMessage: em.message || em
+        };
     }
 
-    // ── Branch 2: LID-mode edit (no protocolMessage) ──
-    //   Shape:
-    //   msg.message.editedMessage = { message: { conversation / extendedTextMessage ... } }
-    //   msg.key.id is MISSING; the original ID is not recoverable
-    //   from the event itself, but the editedMessage wrapper may
-    //   carry a key in some Baileys builds. We try both.
-    const editedWrapper = msg.message?.editedMessage;
-    if (editedWrapper) {
-        if (isSelfEvent(sock, msg, null)) {
-            if (DEBUG) console.log('[ghost] self-edit (LID) ignored');
-            return;
-        }
+    if (!pm) return;
 
-        const targetId = editedWrapper.key?.id || msg.key?.id || null;
+    // ★ LID-safe target ID: outer key often carries the original id
+    const targetId = pm.key?.id || msg.key?.id;
 
-        const afterText =
-            bodyText(editedWrapper.message) ||
-            bodyText(editedWrapper.message?.extendedTextMessage) ||
-            bodyText(editedWrapper) ||
-            '';
+    const afterText =
+        bodyText(pm.editedMessage) ||
+        bodyText(pm.editedMessage?.message) ||
+        bodyText(pm.editedMessage?.extendedTextMessage) ||
+        '';
 
-        return _reportEdit(sock, msg, targetId, afterText, msg.messageTimestamp);
-    }
-}
-
-// ─────────────────────────────────────────────
-//  Internal: shared edit-reporting logic
-//  (extracted so both branches above stay in sync)
-// ─────────────────────────────────────────────
-async function _reportEdit(sock, msg, targetId, afterText, timestampMs) {
     const rec = targetId ? ledger.get(targetId) : null;
-
-    // If somehow we stored our own message, drop it and skip
-    const selfPn = digitsOf(sock?.user?.id || '');
-    if (rec?.from && selfPn && digitsOf(rec.from) === selfPn) {
-        if (targetId) { ledger.delete(targetId); scheduleSave(); }
-        return;
-    }
-
-    const editor = msg.participant || msg.key?.participant || msg.key?.remoteJid;
-
-    // Suppress duplicate deliveries of the same edit
-    const ek = `edit:${msg.key?.remoteJid || ''}:${targetId}:${digitsOf(editor)}`;
-    if (wasRevealed(ek)) {
-        if (DEBUG) console.log('[ghost] duplicate edit suppressed:', ek);
-        return;
-    }
-
-    const originalText = rec?.text || '';
-    const originalSender = rec?.from || editor;
 
     if (DEBUG) {
         console.log('[ghost:edit] payload →', JSON.stringify({
             targetId,
             hasRecord: !!rec,
+            editedMessageKeys: pm.editedMessage ? Object.keys(pm.editedMessage) : [],
             afterText: afterText.slice(0, 80)
         }, null, 2));
     }
+
+    const originalText = rec?.text || '';
+    const editor = msg.participant || msg.key?.participant || msg.key?.remoteJid;
+    const originalSender = rec?.from || editor;
+
+    // Ignore our own edits
+    const selfNum = digitsOf(sock.user?.id || '');
+    if (editor && digitsOf(editor) === selfNum) return;
 
     if (rec && targetId) {
         rec.text = afterText || rec.text;
@@ -643,6 +483,26 @@ async function _reportEdit(sock, msg, targetId, afterText, timestampMs) {
         ledger.set(targetId, rec);
         scheduleSave();
     }
+
+    const stamp = pm.timestampMs
+        ? new Date(pm.timestampMs).toLocaleString('en-GB', {
+              hour12: true,
+              timeZone: 'Asia/Karachi',
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+          })
+        : new Date().toLocaleString('en-GB', {
+              hour12: true,
+              timeZone: 'Asia/Karachi',
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+          });
 
     const owner = ownerJid();
 
@@ -656,13 +516,17 @@ async function _reportEdit(sock, msg, targetId, afterText, timestampMs) {
         ``,
         `*edited by ·* @${digitsOf(editor)}`,
         `*original sender ·* @${digitsOf(originalSender)}`,
-        `*when ·* ${stamp(timestampMs || Date.now())}`
+        `*when ·* ${stamp}`
     ];
     if (scope) lines.push(`*chat ·* ${scope}`);
 
     lines.push(``);
     lines.push(`*before*`);
-    lines.push(originalText || '_…not captured (message arrived before antiedit was armed)_');
+    if (originalText) {
+        lines.push(originalText);
+    } else {
+        lines.push('_…not captured (message arrived before antiedit was armed)_');
+    }
 
     lines.push(``);
     lines.push(`*after*`);
@@ -670,15 +534,12 @@ async function _reportEdit(sock, msg, targetId, afterText, timestampMs) {
 
     await sock.sendMessage(owner, {
         text: lines.join('\n'),
-        mentions: [editor, originalSender].filter(Boolean)
+        mentions: [editor, originalSender]
     });
 }
 
 // ─────────────────────────────────────────────
 //  REVEAL — secret encrypted edit (WhatsApp 2025+)
-//  Edits arrive as secretEncryptedMessage; the new
-//  text is encrypted and unreadable on linked devices.
-//  We can still identify the target and report it.
 // ─────────────────────────────────────────────
 export async function revealSecretEdit(sock, msg) {
     const s = read();
@@ -687,14 +548,7 @@ export async function revealSecretEdit(sock, msg) {
     const sem = msg.message?.secretEncryptedMessage;
     if (!sem) return;
 
-    const targetId = sem.targetMessageKey?.id;
-
-    // Never report our own edits
-    if (isSelfEvent(sock, msg, sem.targetMessageKey)) {
-        if (DEBUG) console.log('[ghost] self secret-edit ignored');
-        return;
-    }
-
+    const targetId = sem.targetMessageKey?.id || msg.key?.id;
     const editor = msg.key?.participant || msg.key?.remoteJid;
 
     if (DEBUG) {
@@ -707,24 +561,19 @@ export async function revealSecretEdit(sock, msg) {
         }, null, 2));
     }
 
-    // Suppress duplicates
-    const ek = `sedit:${msg.key?.remoteJid || ''}:${targetId}:${digitsOf(editor)}`;
-    if (wasRevealed(ek)) {
-        if (DEBUG) console.log('[ghost] duplicate secret-edit suppressed:', ek);
-        return;
-    }
-
     const rec = targetId ? ledger.get(targetId) : null;
-
-    // If somehow we stored our own message, drop it and skip
-    const selfPn = digitsOf(sock?.user?.id || '');
-    if (rec?.from && selfPn && digitsOf(rec.from) === selfPn) {
-        if (targetId) { ledger.delete(targetId); scheduleSave(); }
-        return;
-    }
-
     const originalText = rec?.text || '';
     const originalSender = rec?.from || editor;
+
+    const stamp = new Date().toLocaleString('en-GB', {
+        hour12: true,
+        timeZone: 'Asia/Karachi',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
 
     let scope = '';
     if (rec?.scope) {
@@ -736,7 +585,7 @@ export async function revealSecretEdit(sock, msg) {
         ``,
         `*edited by ·* @${digitsOf(editor)}`,
         `*original sender ·* @${digitsOf(originalSender)}`,
-        `*when ·* ${stamp()}`
+        `*when ·* ${stamp}`
     ];
     if (scope) lines.push(`*chat ·* ${scope}`);
 
@@ -750,10 +599,10 @@ export async function revealSecretEdit(sock, msg) {
 
     await sock.sendMessage(ownerJid(), {
         text: lines.join('\n'),
-        mentions: [editor, originalSender].filter(Boolean)
+        mentions: [editor, originalSender]
     });
 
-    if (rec) {
+    if (rec && targetId) {
         rec.editedAt = Date.now();
         ledger.set(targetId, rec);
         scheduleSave();
