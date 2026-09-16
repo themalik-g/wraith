@@ -58,52 +58,86 @@ setInterval(() => {
 }, 60 * 1000);
 
 // ─────────────────────────────────────────────
+//  Helper — extract contextInfo from any message node
+// ─────────────────────────────────────────────
+function extractContextInfo(m) {
+    if (!m) return null;
+    let cur = m.message || m;
+
+    for (let depth = 0; depth < 5 && cur; depth++) {
+        if (cur.contextInfo) return cur.contextInfo;
+
+        const next =
+            cur.extendedTextMessage ||
+            cur.imageMessage ||
+            cur.videoMessage ||
+            cur.audioMessage ||
+            cur.documentMessage ||
+            cur.stickerMessage ||
+            cur.viewOnceMessage?.message ||
+            cur.viewOnceMessageV2?.message ||
+            cur.viewOnceMessageV2Extension?.message ||
+            cur.ephemeralMessage?.message ||
+            cur.documentWithCaptionMessage?.message;
+
+        if (!next || next === cur) break;
+        cur = next;
+    }
+    return null;
+}
+
+// ─────────────────────────────────────────────
 //  View-once extractor
 //  Works on any message envelope, returns:
 //    { node, type, contentKey }
 // ─────────────────────────────────────────────
 function extractViewOnce(msg) {
-    if (!msg || !msg.message) return null;
+    if (!msg) return null;
 
-    const m = msg.message;
+    let m = msg.message || msg;
 
-    // Direct media
-    if (m.imageMessage) return { node: m.imageMessage, type: 'image', contentKey: 'imageMessage' };
-    if (m.videoMessage) return { node: m.videoMessage, type: 'video', contentKey: 'videoMessage' };
-    if (m.audioMessage) return { node: m.audioMessage, type: 'audio', contentKey: 'audioMessage' };
+    const inspectNode = (node) => {
+        if (!node) return null;
+        if (node.imageMessage) return { node: node.imageMessage, type: 'image', contentKey: 'imageMessage' };
+        if (node.videoMessage) return { node: node.videoMessage, type: 'video', contentKey: 'videoMessage' };
+        if (node.audioMessage) return { node: node.audioMessage, type: 'audio', contentKey: 'audioMessage' };
+        return null;
+    };
 
-    // Wrapped shapes
-    const wrapped =
+    // 1) Explicit viewOnce wrappers
+    const voWrapper =
         m.viewOnceMessageV2?.message ||
         m.viewOnceMessageV2Extension?.message ||
         m.viewOnceMessage?.message;
-
-    if (wrapped) {
-        if (wrapped.imageMessage) return { node: wrapped.imageMessage, type: 'image', contentKey: 'imageMessage' };
-        if (wrapped.videoMessage) return { node: wrapped.videoMessage, type: 'video', contentKey: 'videoMessage' };
-        if (wrapped.audioMessage) return { node: wrapped.audioMessage, type: 'audio', contentKey: 'audioMessage' };
+    if (voWrapper) {
+        const found = inspectNode(voWrapper);
+        if (found) return found;
     }
 
-    // Ephemeral wrappers
+    // 2) Ephemeral wrapper
     const eph = m.ephemeralMessage?.message;
     if (eph) {
-        if (eph.imageMessage) return { node: eph.imageMessage, type: 'image', contentKey: 'imageMessage' };
-        if (eph.videoMessage) return { node: eph.videoMessage, type: 'video', contentKey: 'videoMessage' };
-
-        const ephWrapped =
+        const ephVo =
             eph.viewOnceMessageV2?.message ||
             eph.viewOnceMessageV2Extension?.message ||
             eph.viewOnceMessage?.message;
-        if (ephWrapped) {
-            if (ephWrapped.imageMessage) return { node: ephWrapped.imageMessage, type: 'image', contentKey: 'imageMessage' };
-            if (ephWrapped.videoMessage) return { node: ephWrapped.videoMessage, type: 'video', contentKey: 'videoMessage' };
+        if (ephVo) {
+            const found = inspectNode(ephVo);
+            if (found) return found;
         }
+        const ephDirect = inspectNode(eph);
+        if (ephDirect && (ephDirect.node?.viewOnce || eph.viewOnce)) return ephDirect;
     }
+
+    // 3) Direct media with viewOnce attribute
+    if (m.imageMessage?.viewOnce) return { node: m.imageMessage, type: 'image', contentKey: 'imageMessage' };
+    if (m.videoMessage?.viewOnce) return { node: m.videoMessage, type: 'video', contentKey: 'videoMessage' };
+    if (m.audioMessage?.viewOnce) return { node: m.audioMessage, type: 'audio', contentKey: 'audioMessage' };
 
     return null;
 }
 
-export { extractViewOnce };
+export { extractContextInfo, extractViewOnce };
 
 // ─────────────────────────────────────────────
 //  Send strategies
@@ -223,7 +257,7 @@ export async function peekCommand(sock, chat, msg, args) {
     const a0 = (args?.[0] || '').toLowerCase();
     const a1 = (args?.[1] || '').toLowerCase();
 
-    const ctx = msg.message?.extendedTextMessage?.contextInfo;
+    const ctx = extractContextInfo(msg);
     const quoted = ctx?.quotedMessage;
     const hasQuote = !!quoted;
 
@@ -383,6 +417,9 @@ export async function watchQuotedViewOnce(sock, msg) {
     const s = read();
     if (!s.watchQuoted) return;
 
+    // Skip owner DM — prevents loop when quoted view-once is forwarded/replied to in self-chat
+    if (isOwnerChat(msg.key?.remoteJid)) return;
+
     // Skip commands — the user is handling it manually
     const body = (
         msg.message?.conversation ||
@@ -393,13 +430,8 @@ export async function watchQuotedViewOnce(sock, msg) {
     ).trim();
     if (body.startsWith('.')) return;
 
-    // Look for quoted content in any media type
-    const ctx =
-        msg.message?.extendedTextMessage?.contextInfo ||
-        msg.message?.imageMessage?.contextInfo ||
-        msg.message?.videoMessage?.contextInfo ||
-        msg.message?.audioMessage?.contextInfo ||
-        msg.message?.documentMessage?.contextInfo;
+    // Look for quoted content in any media type using extractContextInfo
+    const ctx = extractContextInfo(msg);
 
     if (!ctx?.quotedMessage) return;
 
