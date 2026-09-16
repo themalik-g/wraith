@@ -31,6 +31,9 @@ import { trace } from './modules/debug.js';
 import { startScheduler, stopScheduler } from './modules/schedule.js';
 import { startPresenceHeartbeat, stopPresenceHeartbeat } from './modules/presence.js';
 
+// ★ ADDED: direct import for the messages.delete listener
+import { revealDelete } from './modules/ghost.js';
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 // ── CLI ──
@@ -262,8 +265,22 @@ async function ignite() {
     await dispatch(sock, u, sessionId);
   });
 
-  // ★ FIXED in router: dispatchUpdate now handles the ARRAY Baileys emits
+  // ★ FIXED in router: dispatchUpdate now handles the v7 edit/revoke shapes
   sock.ev.on('messages.update', (upd) => dispatchUpdate(sock, upd));
+
+  // ★ ADDED: remote deletions arrive on this event — route them to revealDelete
+  sock.ev.on('messages.delete', async (deletion) => {
+    try {
+      if ('keys' in deletion) {
+        for (const key of deletion.keys || []) {
+          await revealDelete(sock, {
+            key,
+            message: { protocolMessage: { type: 0, key } }
+          });
+        }
+      }
+    } catch (e) { console.error('[messages.delete]', e.message); }
+  });
 
   // ★ welcome/goodbye — core/groupEvents.js (created in round 1)
   sock.ev.on('group-participants.update', async (update) => {
