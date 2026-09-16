@@ -1,13 +1,13 @@
-# Deployment
+# Deployment Guide
 
-## VPS (Ubuntu/Debian)
+## VPS Setup (Ubuntu / Debian)
 
-### 1. Install Node 20
+### 1. Install Node.js 20+
 
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
-node --version   # v20.x
+node --version   # Should output v20.x or higher
 ```
 
 ### 2. Install PM2
@@ -16,7 +16,7 @@ node --version   # v20.x
 sudo npm install -g pm2
 ```
 
-### 3. Clone and install
+### 3. Clone Repository & Install Dependencies
 
 ```bash
 git clone https://github.com/themalik-g/wraith.git
@@ -24,15 +24,22 @@ cd wraith
 npm install
 ```
 
+*Note:* `gallery-dl` and `ffmpeg-static` are included as dependencies in `package.json`. No separate Python/FFmpeg installation is required, though system `gallery-dl` or `python3-pip` can be installed if desired:
+
+```bash
+sudo apt install -y python3-pip
+pip install gallery-dl
+```
+
 ### 4. Start with PM2
 
 ```bash
 npm run pm2:start
 pm2 save
-pm2 startup   # follow the printed command
+pm2 startup
 ```
 
-### 5. Logs
+### 5. Monitor Logs
 
 ```bash
 pm2 logs wraith
@@ -41,7 +48,7 @@ pm2 monit
 
 ---
 
-## Docker (optional)
+## Docker Setup (Optional)
 
 **Dockerfile:**
 
@@ -58,7 +65,7 @@ VOLUME ["/app/session", "/app/state", "/app/vault"]
 CMD ["node", "start.js"]
 ```
 
-**Build and run:**
+**Build & Run:**
 
 ```bash
 docker build -t wraith .
@@ -73,66 +80,31 @@ docker run -d \
 
 ---
 
-## Pairing over SSH
+## Interactive Pairing over SSH
 
-First run in a non-TTY context uses `CONFIG.owner` from `config.js`. For interactive pairing:
+First run will request your phone number in terminal and output a pairing code:
 
 ```bash
-ssh -t user@host
+ssh -t user@your-vps-ip
 cd wraith
 npm start
 ```
 
-Enter the number when prompted, then scan/enter the pairing code on your phone.
+Enter your phone number when prompted, then open WhatsApp on your phone:
+> Settings → Linked Devices → Link a Device → Link with phone number instead
 
 ---
 
-## Reverse Proxy (not needed)
+## Backup & Restoration
 
-WRAITH uses **outbound WebSockets only**. No ports to expose, no HTTPS, no Nginx needed.
-
----
-
-## Backup
-
-Back up these:
+To create a backup:
 
 ```bash
 tar czf wraith-backup-$(date +%F).tar.gz \
   session/ \
   state/ \
   config.js \
-  package.json \
-  core/ \
-  modules/ \
-  start.js \
-  router.js
+  package.json
 ```
 
-**Do not back up:** `node_modules/`, `vault/`, `logs/`.
-
-**Restore:** extract, `npm install`, `npm start`. Bot will reconnect with the same session — no re-pairing needed.
-
----
-
-## Resource Usage
-
-Typical footprint on a $5 VPS:
-
-- **RAM:** 80–150 MB idle, up to 300 MB under load
-- **CPU:** <5% idle
-- **Disk:** session ~5 MB, ledger grows with messages (~1 KB per message)
-
-If ledger grows large, lower `memoryTTL` in `config.js`.
-
----
-
-## Health Checks
-
-PM2 auto-restarts on crash. To monitor externally:
-
-```bash
-pm2 jlist | jq '.[0].pm2_env.status'
-```
-
-Returns `"online"` when healthy.
+**To restore:** Extract the tarball, run `npm install`, and start with `npm start` or `npm run pm2:start`. Re-pairing is not required if `session/` is preserved.

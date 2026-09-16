@@ -1,6 +1,6 @@
 # Commands Reference
 
-All commands are **owner-only**. Prefix is a dot: `.`
+All commands use the configurable prefix (default: `.`). In **private mode**, commands are owner-only. In **public mode**, non-critical commands are available to everyone.
 
 ---
 
@@ -8,13 +8,13 @@ All commands are **owner-only**. Prefix is a dot: `.`
 
 | Command | Description |
 |---|---|
-| `.ghost` | Show current status |
+| `.ghost` | Show current ghost status |
 | `.ghost on` | Arm anti-delete |
 | `.ghost off` | Disarm anti-delete |
-| `.ghost edit on` | Arm anti-edit |
-| `.ghost edit off` | Disarm anti-edit |
+| `.ghost edit on` | Arm anti-edit tracking |
+| `.ghost edit off` | Disarm anti-edit tracking |
 
-**How it works:** Every inbound message is stored in `state/ghost-ledger.json` with text and media (saved to `vault/`). When a message is deleted or edited, the bot sends you the original.
+**How it works:** Inbound messages are stored in `state/ghost-ledger.json` with text and media (saved to `vault/`). When a message is deleted or edited, the original content is revealed.
 
 ---
 
@@ -22,16 +22,14 @@ All commands are **owner-only**. Prefix is a dot: `.`
 
 | Command | Description |
 |---|---|
-| `.peek` (reply to view-once) | Reveal it |
-| `.peek auto on` | Auto-forward every incoming view-once |
+| `.peek` (reply to view-once) | Reveal view-once media |
+| `.peek auto on` | Auto-forward incoming view-once media |
 | `.peek auto off` | Disable auto-peek |
-| `.peek watch on` | Watch quoted replies to view-once |
-| `.peek watch off` | Stop watching |
-| `.peek dest owner` | Reveals go to owner DM (default) |
-| `.peek dest same` | Reveals go to originating chat |
-| `.peek dest both` | Reveals go to both |
-
-**How it works:** WhatsApp embeds the real content in `contextInfo.quotedMessage` when someone replies to a view-once. The quoted-watcher extracts it silently.
+| `.peek watch on` | Watch quoted replies to view-once messages |
+| `.peek watch off` | Stop quoted watching |
+| `.peek dest owner` | Direct reveals to owner DM (default) |
+| `.peek dest same` | Direct reveals to originating chat |
+| `.peek dest both` | Direct reveals to both owner DM and originating chat |
 
 ---
 
@@ -39,18 +37,16 @@ All commands are **owner-only**. Prefix is a dot: `.`
 
 | Command | Description |
 |---|---|
-| `.lurk` | Show status |
-| `.lurk on` | Auto-view every status |
-| `.lurk off` | Stop auto-viewing |
-| `.lurk react on` | React to statuses |
-| `.lurk react off` | Stop reacting |
-| `.lurk download on` | Download statuses to owner DM silently |
-| `.lurk download off` | Stop downloading |
-| `.lurk emoji ❤️` | Set custom reaction emoji |
+| `.lurk` | Show lurk status |
+| `.lurk on` | Auto-view every status update |
+| `.lurk off` | Disable auto-view |
+| `.lurk react on` | React to status updates |
+| `.lurk react off` | Disable status reactions |
+| `.lurk download on` | Silently download status media to owner DM |
+| `.lurk download off` | Stop status downloads |
+| `.lurk emoji <emoji>` | Set custom reaction emoji |
 | `.lurk emoji random` | Pick a random emoji per status |
-| `.lurk emoji none` | Empty reaction (silent) |
-
-**Silent download:** When `download=on` and `auto=off` and `react=off`, statuses are captured **without** sending a read receipt or reaction.
+| `.lurk emoji none` | Empty reaction (silent view) |
 
 ---
 
@@ -60,6 +56,8 @@ All commands are **owner-only**. Prefix is a dot: `.`
 ```
 .schedule <message> <target> dd,mm,yy hour minute am/pm
 .schedule <target> dd,mm,yy hour minute am/pm    (reply to a message)
+.schedule open dd,mm,yy hour minute am/pm        (schedule group opening)
+.schedule close dd,mm,yy hour minute am/pm       (schedule group closing)
 ```
 
 **Target formats:**
@@ -69,163 +67,150 @@ All commands are **owner-only**. Prefix is a dot: `.`
 - LID — `278713363128439@lid`
 - Newsletter — `...@newsletter`
 
-**Examples:**
-```
-.schedule Hey! 923001234567 25,12,26 10 30 am
-.schedule 25,12,26 10 30 am        (reply to a message)
-.schedule open 25,12,26 10 30 am   (schedule opening current group)
-.schedule close 25,12,26 10 30 pm  (schedule closing current group)
-```
+---
 
-**Date formats supported:** `dd,mm,yy`, `dd/mm/yy`, `dd-mm-yy`, or `dd mm yy` (3 tokens).
+## ⬇️ Media & File Downloaders
+
+| Command | Description |
+|---|---|
+| `.dl <url>` | Download video, audio, or image carousel (`yt-dlp` + `gallery-dl`) |
+| `.mp3 <url>` | Extract MP3 audio from any video or audio URL |
+| `.song <query>` | Download audio from SoundCloud, Apple Music, or Deezer |
+| `.gitdl <github-url>` | Download GitHub repository as a ZIP archive |
+| `.mfdl <mediafire-url>` | Resolve and download MediaFire files directly |
+| `.ig <username\|url>` | Fetch Instagram user profile or download post/carousel |
+| `.tiktok <username\|url>` | Fetch TikTok profile info or download photo post/video |
+| `.fb <username\|url>` | Fetch Facebook profile info or download video post |
+
+**Image Carousel Routing:**
+URLs containing picture posts (e.g. Instagram `/p/`, TikTok `/photo/`, Pinterest) are routed directly to `gallery-dl`. If `yt-dlp` fails for any URL, `gallery-dl` is tried as a fallback.
 
 ---
 
-## 👥 Admin — group management
+## 📚 Media & Entertainment
 
-### Member actions
+| Command | Description |
+|---|---|
+| `.book <query>` | Search and download verified free books (Project Gutenberg / Archive.org) |
+| `.img <query>` | Search stock images (Wikimedia Commons / Openverse / LoremFlickr) |
+| `.movie <title>` | Search movie/show details (iTunes / TVmaze) |
+| `.songinfo <query>` | Lookup song details & artwork (Deezer / MusicBrainz) |
+| `.lyrics <artist> <title>` | Fetch plain lyrics (LRCLIB / lyrics.ovh) |
+| `.ppt <topic>` | Generate a PowerPoint presentation file (.pptx) |
+| `.couplepp` | Get matching couple profile pictures |
+
+---
+
+## 👥 Admin & Group Management
 
 | Command | Description |
 |---|---|
 | `.open` | Open group so all members can send messages |
 | `.close` | Close group so only admins can send messages |
-| `.tagall [message]` | Tag all group participants explicitly |
-| `.hidetag [message]` | Tag all group participants silently |
+| `.tagall [message]` | Mention all group members explicitly |
+| `.hidetag [message]` | Mention all group members silently |
 | `.setgpp` (reply image) | Change group profile picture |
 | `.setgdesc <text>` | Change group description |
-| `.kick` (reply) | Remove the replied user |
-| `.kick 923001234567` | Remove by number |
-| `.add 923001234567` | Add by number |
-| `.promote` (reply) | Make admin |
-| `.demote` (reply) | Remove admin |
-
-**Note:** WhatsApp's group API requires PN JIDs. WRAITH converts LID → PN via cache, group metadata, or fallback.
-
-### Protection toggles
-
-| Command | Description |
-|---|---|
-| `.antilink on\|off` | Block links |
-| `.antispam on\|off` | Block spam |
-| `.antisticker on\|off` | Block stickers |
-
-**Behavior:** Violating messages are deleted and the sender is mentioned.
-
----
-
-## ⛔ Block & Status Management
-
-| Command | Description |
-|---|---|
-| `.block` (reply / num / JID) | Block user |
-| `.unblock` (reply / num / JID) | Unblock user |
-| `.blocklist` | Show current blocklist |
-| `.unblockall` | Unblock all blocked users |
-| `.setstatus <text>` / reply media | Post status update to `status@broadcast` |
-| `.getstatus <number/JID>` | Fetch status/about bio of user |
-| `.getpair <number>` | Generate pairing code session and retrieve `creds.json` |
+| `.kick` (reply / num) | Remove member from group |
+| `.add <number>` | Add member by phone number |
+| `.promote` (reply / num) | Promote member to admin |
+| `.demote` (reply / num) | Demote admin to member |
+| `.approveall` | Approve all pending group join requests |
+| `.declineall` | Decline all pending group join requests |
+| `.kickall` | Remove all non-admin members |
+| `.kickcc <country_code>` | Remove all members from specific country code |
+| `.mute` / `.unmute` | Mute/unmute group notifications |
+| `.archive` / `.unarchive` | Archive/unarchive chat |
+| `.clearchat` | Clear chat history |
+| `.welcome on\|off` | Toggle welcome message on user join |
+| `.goodbye on\|off` | Toggle goodbye message on user leave |
+| `.antilink on\|off` | Block and delete link messages |
+| `.antispam on\|off` | Block and delete message spam |
+| `.antisticker on\|off` | Block and delete sticker spam |
+| `.rejectcalls on\|off` | Auto-reject incoming calls |
 
 ---
 
-## 🖼️ Getpp — profile pictures
+## 👤 Owner & Settings
 
 | Command | Description |
 |---|---|
-| `.getpp` | Get profile pic of current chat |
-| `.getpp owner` | Send to owner DM |
-| `.getpp chat` | Send to this chat |
-| `.getpp <number>` | Get of a specific user |
-| `.getpp` (reply) | Get of the replied user |
+| `.block` (reply / num) | Block user |
+| `.unblock` (reply / num) | Unblock user |
+| `.blocklist` | Show blocked users list |
+| `.unblockall` | Unblock all users |
+| `.setstatus <text>` | Post status update to `status@broadcast` |
+| `.getstatus <num>` | Fetch user's status bio |
+| `.getpair <number>` | Generate pairing code session |
+| `.setpp` (reply image) | Change bot profile picture |
+| `.setabout <text>` | Change bot WhatsApp about bio |
+| `.chatstats` | Show chat statistics |
+| `.stalk <number>` | Track user online presence updates |
+| `.mode public\|private` | Set bot access mode |
+| `.prefix <char>` | Set command prefix (e.g. `.`, `!`, `#`) |
+| `.update` | Trigger git pull & restart |
 
 ---
 
-## 📌 Getjid — JID resolver
+## 🖼️ Getpp — Profile Pictures
 
-### Basic lookups
+| Command | Description |
+|---|---|
+| `.getpp` | Get profile picture of current chat |
+| `.getpp owner` | Send profile picture to owner DM |
+| `.getpp chat` | Send profile picture to current chat |
+| `.getpp <number>` | Get profile picture of user by phone number |
+| `.getpp` (reply) | Get profile picture of replied user |
+
+---
+
+## 📌 Getjid — JID Resolver
 
 | Command | Description |
 |---|---|
 | `.getjid` | Current chat JID |
-| `.getjid` (reply) | Both PN + LID of replied sender |
-| `.getjid 923001234567` | Resolve a number → PN + LID |
-| `.getjid @ali` | Resolve a username → PN + LID |
-| `.getjid 278713363128439@lid` | Try to resolve a LID → PN |
-
-### Group tools
-
-| Command | Description |
-|---|---|
-| `.getjid members` | List all group members with PN + LID + admin status |
-| `.getjid group <groupJid> <targetJid>` | Resolve a specific member |
-| `.getjid currentchat` | Current chat details (works in group, DM, channel) |
-
-### Channels
-
-| Command | Description |
-|---|---|
-| `.getjid channels` | List all joined channels with names |
-| `.getjid currentchat` (in a channel) | Get channel JID + name + subscribers |
-
-**Note:** Bulk channel listing requires a fork with `newsletterSubscribed()` or `newsletterFetchAllParticipating()`. Official Baileys v7 falls back to a local cache built from inbound channel messages.
-
-### Owner lookup
-
-| Command | Description |
-|---|---|
-| `.getjid owner <target>` | Resolve any number/username/JID |
+| `.getjid` (reply) | Resolve PN + LID of replied message sender |
+| `.getjid <number>` | Resolve phone number → PN + LID |
+| `.getjid @username` | Resolve username → PN + LID |
+| `.getjid <LID>` | Resolve LID → PN |
+| `.getjid members` | List all group members with PN, LID, and admin status |
+| `.getjid currentchat` | Detailed info for current chat (group, DM, channel) |
+| `.getjid channels` | List joined WhatsApp channels |
 
 ---
 
-## ⚙️ Presence — online control
+## ⚙️ Presence Controls
 
 | Command | Description |
 |---|---|
-| `.presence` | Show status |
-| `.presence online on\|off` | Always online toggle |
-| `.presence typing on\|off` | Auto-typing indicator |
-| `.presence recording on\|off` | Auto-recording indicator |
-| `.presence reads on\|off` | Read receipts |
-
-**Default:** Always online **on**, read receipts **on**, typing/recording **off**.
-
-**Note:** `typing` and `recording` are mutually exclusive.
+| `.presence` | Show presence settings |
+| `.presence online on\|off` | Toggle always online heartbeat |
+| `.presence typing on\|off` | Toggle auto-typing indicator on inbound |
+| `.presence recording on\|off` | Toggle auto-recording indicator on inbound |
+| `.presence reads on\|off` | Toggle read receipts |
 
 ---
 
-## 📊 Activity — dashboard
+## 🛠️ Utility Tools
 
 | Command | Description |
 |---|---|
-| `.activity` | Global dashboard: total chats, messages, top chats |
-
-Tracks per-chat: total messages, text count, media count, last active, top senders.
+| `.weather <city>` | Fetch weather forecast and storm alerts |
+| `.currency <amount> <from> <to>` | Real-time currency conversion |
+| `.define <word>` | Dictionary definition lookup |
+| `.pwned <password>` | Check if password has been leaked in breaches |
+| `.qr <text>` | Generate QR code image |
+| `.readqr` (reply image) | Read and decode QR code from image |
+| `.url` (reply media) | Upload media to temp URL host |
+| `.owner` | Show owner info |
+| `.script` / `.repo` | View bot repository info |
 
 ---
 
-## 🏓 Probe
+## 📊 Activity & Ping
 
 | Command | Description |
 |---|---|
-| `.ping` | WhatsApp RTT + event-loop lag + memory + uptime |
-
----
-
-## ⬇️ Download & Social
-
-| Command | Description |
-|---|---|
-| `.dl <url>` | Download video / audio / photo post from any URL |
-| `.mp3 <url>` | Extract mp3 audio |
-| `.ig <username\|url>` | Fetch IG profile info or download IG post/carousel |
-| `.tiktok <username\|url>` | Fetch TikTok profile info or download TikTok post/video |
-| `.fb <username\|url>` | Fetch FB profile info or download FB post/video |
-
----
-
-## ⚙️ System
-
-| Command | Description |
-|---|---|
-| `.help` | Full command index |
-| `.help <group>` | One group only (e.g. `.help ghost`) |
-| `.menu` | Alias for `.help` |
+| `.activity` | Show chat activity dashboard (messages, media, top senders) |
+| `.ping` | Measure RTT latency, memory usage, and uptime |
+| `.help` / `.menu` | Render command help menu |

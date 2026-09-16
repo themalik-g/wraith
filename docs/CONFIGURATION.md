@@ -4,58 +4,36 @@
 
 ```javascript
 export const CONFIG = {
-    owner: "923257853673",              // WhatsApp number, digits only
-    codename: "WRAITH",                 // Shown in startup logs
-    memoryTTL: 60 * 60 * 1000,          // Ledger retention (1 hour)
+    owner: "923257853673",              // WhatsApp phone number, digits only
+    codename: "WRAITH",                 // Shown in startup banner
+    memoryTTL: 60 * 60 * 1000,          // Ledger message retention (1 hour)
     vaultDir: "vault",                  // Temp media folder
     vaultMaxMB: 200,                    // Auto-purge threshold
     reconnectDelay: 3000,               // Auto-reconnect delay (ms)
-    keepAliveInterval: 30_000           // Presence heartbeat (ms)
+    keepAliveInterval: 30_000           // Presence heartbeat interval (ms)
 };
 ```
-
-⚠️ `owner` **must match** `state/owner.json`.
 
 ---
 
 ## State Files
 
-All in `state/`:
+All state files are stored in `state/`:
 
 | File | Purpose | Auto-created |
 |---|---|---|
-| `owner.json` | Owner number | On first run |
-| `ghost.json` | Anti-delete/anti-edit toggles | On first run |
-| `ghost-ledger.json` | Message history | On first message |
-| `lurk.json` | Lurk settings | On first run |
-| `peek.json` | Peek settings | On first run |
-| `presence.json` | Presence toggles | On first run |
-| `schedule.json` | Pending scheduled messages | On first schedule |
-| `activity.json` | Chat activity stats | On first message |
-| `admin.json` | Per-group protection toggles | On first toggle |
-| `channel-cache.json` | Channels seen from inbound messages | On first channel message |
-
-### Example: `state/lurk.json`
-
-```json
-{
-  "on": true,
-  "react": true,
-  "emoji": "🇵🇰",
-  "download": false
-}
-```
-
-### Example: `state/presence.json`
-
-```json
-{
-  "alwaysOnline": true,
-  "autoTyping": false,
-  "autoRecording": false,
-  "readReceipts": true
-}
-```
+| `owner.json` | Owner phone number | On first startup |
+| `ghost.json` | Anti-delete / anti-edit settings | On first run |
+| `ghost-ledger.json` | Inbound message history for reveals | On first message |
+| `lurk.json` | Status watcher settings | On first run |
+| `peek.json` | View-once reveal settings | On first run |
+| `presence.json` | Online & typing toggles | On first run |
+| `schedule.json` | Pending scheduled tasks | On first schedule |
+| `activity.json` | Per-chat activity metrics | On first message |
+| `admin.json` | Per-group protection settings | On first group setting toggle |
+| `channel-cache.json` | Cached channel JIDs | On first channel message |
+| `prefix.json` | Current command prefix | On first run |
+| `mode.json` | Access mode (`public` or `private`) | On first run |
 
 ---
 
@@ -63,20 +41,20 @@ All in `state/`:
 
 ### `session/`
 
-Baileys auth state. **Never delete** unless you want to re-pair.
+Baileys authentication state directory. **Never commit or delete** unless re-pairing device.
 
 Contains:
-- `creds.json` — Signal credentials
-- `app-state-sync-*.json`
-- `lid-mapping-*.json` — LID↔PN cache
+- `creds.json` — Signal protocol key credentials
+- `app-state-sync-*.json` — App state sync files
+- `lid-mapping-*.json` — LID ↔ PN local mappings
 
 ### `vault/`
 
-Temp storage for media during processing. Auto-purged when total size exceeds `vaultMaxMB`.
+Temporary media storage during processing. Purged automatically when size exceeds `vaultMaxMB`.
 
 ### `logs/`
 
-PM2 output. Safe to delete.
+Process and PM2 log files. Safe to prune.
 
 ---
 
@@ -84,22 +62,22 @@ PM2 output. Safe to delete.
 
 | Var | Default | Purpose |
 |---|---|---|
-| `NODE_ENV` | `production` | Standard Node env |
-| `WRAITH_DEBUG` | unset | Set to `1` for verbose debug logs |
+| `NODE_ENV` | `production` | Node environment |
+| `WRAITH_DEBUG` | unset | Set to `1` for verbose trace logs |
 
-Set `WRAITH_DEBUG=1` when troubleshooting to see:
-- Ledger operations
-- Peek extraction details
-- Edit detection
+Set `WRAITH_DEBUG=1` to enable verbose trace output:
+- Ghost ledger storage events
+- View-once extraction steps
 - JID resolution paths
+- Download execution logs
 
 ---
 
-## PM2 Ecosystem (`ecosystem.config.cjs`)
+## PM2 Configuration (`ecosystem.config.cjs`)
 
 Key settings:
 
-- `autorestart: true` — restart on crash
+- `autorestart: true` — restart process on unexpected termination
 - `max_memory_restart: 500M` — restart if RAM exceeds 500 MB
-- `max_restarts: 20` — stop retrying after 20 crashes
+- `max_restarts: 20` — cap retries to avoid continuous crash loops
 - `kill_timeout: 5000` — graceful shutdown window
