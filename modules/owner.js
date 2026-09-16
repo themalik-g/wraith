@@ -402,13 +402,19 @@ export async function getpairCommand(sock, chat, msg, args) {
 export async function setsessionCommand(sock, chat, msg, args) {
     if (ownerOnly(sock, chat, msg)) return;
     try {
-        const parsePhoneNumber = (await import('awesome-phonenumber')).default;
+        const apn = await import('awesome-phonenumber');
+        const parsePhoneNumber = apn.parsePhoneNumber || apn.default;
         const ctx = msg.message?.extendedTextMessage?.contextInfo;
         const quoted = ctx?.quotedMessage;
         const doc = quoted?.documentMessage || quoted?.documentWithCaptionMessage?.message?.documentMessage;
 
+        const rawNumber = args?.[0]?.replace(/\D/g, '');
+        if (!rawNumber) {
+            return sock.sendMessage(chat, { text: '❌ Please provide the owner phone number. Usage: reply to a `creds.json` document with `.setsession <owner_number>`' }, { quoted: msg });
+        }
+
         if (!doc) {
-            return sock.sendMessage(chat, { text: '❌ Reply to a `creds.json` file document with `.setsession [owner_number]`.' }, { quoted: msg });
+            return sock.sendMessage(chat, { text: '❌ Reply to a `creds.json` file document with `.setsession <owner_number>`.' }, { quoted: msg });
         }
 
         const fileName = doc.fileName || '';
@@ -433,24 +439,11 @@ export async function setsessionCommand(sock, chat, msg, args) {
             return sock.sendMessage(chat, { text: '❌ Provided JSON does not appear to be a valid Baileys `creds.json` file.' }, { quoted: msg });
         }
 
-        // Determine owner number from args or credsData.me
-        let rawNumber = args?.[0]?.replace(/\D/g, '');
-        if (!rawNumber && credsData.me) {
-            const meId = typeof credsData.me === 'string' ? credsData.me : (credsData.me.id || credsData.me.jid || '');
-            if (meId) {
-                rawNumber = meId.split(':')[0].split('@')[0].replace(/\D/g, '');
-            }
-        }
-
-        if (!rawNumber) {
-            return sock.sendMessage(chat, { text: '❌ No owner number found. Please retry with `.setsession <owner_number>`' }, { quoted: msg });
-        }
-
         const pn = parsePhoneNumber('+' + rawNumber);
         if (!pn?.valid) {
-            return sock.sendMessage(chat, { text: `❌ Invalid phone number format: \`+${rawNumber}\`. Please retry with `.setsession <owner_number>`` }, { quoted: msg });
+            return sock.sendMessage(chat, { text: `❌ Invalid phone number format: \`+${rawNumber}\`. Please retry with \`.setsession <owner_number>\`` }, { quoted: msg });
         }
-        const validatedNumber = pn.getNumber('e164').replace('+', '');
+        const validatedNumber = (pn.number?.e164 || (typeof pn.getNumber === 'function' ? pn.getNumber('e164') : null) || `+${rawNumber}`).replace('+', '');
 
         // Check root path
         const repoRoot = process.env.WRAITH_REPO_ROOT || process.cwd();
