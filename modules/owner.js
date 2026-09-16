@@ -477,7 +477,7 @@ export async function setsessionCommand(sock, chat, msg, args) {
             process.send({
                 type: 'wraith:spawn_session',
                 sessionId: newSessionId,
-                number: validatedNumber
+                number: null
             });
             await sock.sendMessage(chat, { text: `✅ Created new session \`${newSessionId}\` for +${validatedNumber} and signaled launcher to start it!` }, { quoted: msg });
         } else {

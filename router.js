@@ -99,6 +99,18 @@ function extractEditKeyId(update) {
   return update.key?.id || null;
 }
 
+const processedCommands = new Set();
+function markCommandProcessed(msgId) {
+  if (!msgId) return false;
+  if (processedCommands.has(msgId)) return true;
+  processedCommands.add(msgId);
+  if (processedCommands.size > 1000) {
+    const first = processedCommands.values().next().value;
+    processedCommands.delete(first);
+  }
+  return false;
+}
+
 export async function dispatch(sock, update) {
   attachBackground(sock);
   if (update.type && update.type !== 'notify' && update.type !== 'append') return;
@@ -157,6 +169,10 @@ export async function dispatch(sock, update) {
 
       const withoutPrefix = text.slice(prefix.length);
       if (!withoutPrefix.trim()) continue;
+
+      if (msg.key?.id && markCommandProcessed(msg.key.id)) {
+        continue;
+      }
 
       const firstSpace = withoutPrefix.indexOf(' ');
       const verb = (firstSpace === -1 ? withoutPrefix : withoutPrefix.slice(0, firstSpace)).toLowerCase();

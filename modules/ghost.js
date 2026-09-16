@@ -9,9 +9,8 @@ import { vaultPath, dropFromVault } from '../core/vault.js';
 import { CONFIG } from '../config.js';
 import { extractViewOnce } from './peek.js';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const STATE = path.join(here, '..', 'state', 'ghost.json');
-const LEDGER_FILE = path.join(here, '..', 'state', 'ghost-ledger.json');
+const STATE = path.join(process.cwd(), 'state', 'ghost.json');
+const LEDGER_FILE = path.join(process.cwd(), 'state', 'ghost-ledger.json');
 
 const DEBUG = process.env.WRAITH_DEBUG === '1';
 
@@ -349,6 +348,18 @@ export async function remember(sock, msg) {
     }
 }
 
+// Deduplication cache for delete and edit events across concurrent listeners
+const processedDeletes = new Set();
+const processedEdits = new Set();
+
+function markProcessed(set, key, max = 500) {
+    set.add(key);
+    if (set.size > max) {
+        const first = set.values().next().value;
+        set.delete(first);
+    }
+}
+
 // ─────────────────────────────────────────────
 //  REVEAL — delete
 // ─────────────────────────────────────────────
@@ -360,6 +371,8 @@ export async function revealDelete(sock, msg) {
     if (!pm?.key?.id) return;
 
     const targetId = pm.key.id;
+    if (processedDeletes.has(targetId)) return;
+    markProcessed(processedDeletes, targetId);
     const culprit = msg.participant || msg.key?.participant || msg.key?.remoteJid;
 
     const selfNum = digitsOf(sock.user?.id || '');
@@ -457,6 +470,10 @@ export async function revealEdit(sock, msg) {
         bodyText(pm.editedMessage?.message) ||
         bodyText(pm.editedMessage?.extendedTextMessage) ||
         '';
+
+    const editDedupeKey = `${targetId || ''}:${afterText}`;
+    if (processedEdits.has(editDedupeKey)) return;
+    markProcessed(processedEdits, editDedupeKey);
 
     const rec = targetId ? ledger.get(targetId) : null;
 
