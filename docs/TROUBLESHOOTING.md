@@ -31,15 +31,15 @@ If the code still fails:
 
 ---
 
-## Media download fails (`.dl` / `.mp3`)
+## Media download fails (`.dl` / `.mp3` / `.pdl`)
 
 **Symptom:** Command reports failure or no media downloaded.
 
 **Fixes:**
-1. **Image Posts & Carousels:** Ensure `gallery-dl` package is installed (`npm install gallery-dl`).
-2. **Executable Permissions:** If running on Linux/macOS, check execution permissions on `node_modules/gallery-dl/executable/gallery-dl.bin` (`chmod +x node_modules/gallery-dl/executable/gallery-dl.bin`).
+1. **Image Posts & Carousels:** Ensure `@postfetch/core` is installed (`npm install`). Try `.pdl <url>` or `.pdlzip <url>` directly for post extraction.
+2. **Non-Post URLs in `.pdl`:** If `.pdl` fails on a standard video or profile link, use `.dl`, `.ig`, or `.tiktok` instead.
 3. **Video Size Limit:** Videos exceeding 60 MB are skipped to prevent WhatsApp upload failures.
-4. **Private Content:** Private Instagram/TikTok posts require session authentication.
+4. **Private Content:** Private Instagram/TikTok posts are login-gated and cannot be fetched without authentication.
 
 ---
 

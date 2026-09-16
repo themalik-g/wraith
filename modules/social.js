@@ -7,7 +7,7 @@ import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import { isOwner } from '../core/identity.js';
 import { withTempFile, downloadToFile, BROWSER_USER_AGENT } from '../lib/net.js';
 import { getKey } from '../core/keys.js';
-import { ytdlCommand } from './download.js';
+import { ytdlCommand, isPostUrl, downloadPostMediaDirect } from './download.js';
 
 function ownerOnly(sock, chat, msg) {
     const from = msg.key.participant || msg.key.remoteJid;
@@ -111,6 +111,9 @@ async function socialSearch(sock, chat, msg, args, fn, label) {
     try {
         const input = (args?.[0] || '').trim();
         if (/^https?:\/\//i.test(input)) {
+            if (isPostUrl(input)) {
+                return downloadPostMediaDirect(sock, chat, msg, input, false);
+            }
             return ytdlCommand(sock, chat, msg, args);
         }
         if (ownerOnly(sock, chat, msg)) return;
@@ -120,7 +123,7 @@ async function socialSearch(sock, chat, msg, args, fn, label) {
         r.ok = r.ok || false;
         if (!r.ok) {
             return sock.sendMessage(chat, {
-                text: `❌ Could not fetch *${username}*.\n_If this is a post/reel/photo URL, use .dl <url> to download media directly._`,
+                text: `❌ Could not fetch *${username}*.\n_If this is a post/reel/photo URL, try .pdl <url> or .dl <url>._`,
             }, { quoted: msg });
         }
         const lines = [

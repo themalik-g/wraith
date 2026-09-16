@@ -120,6 +120,8 @@ const REGISTRY = [
       c('.dl <url>'),
       c('.dl audio <url>'),
       c('.dl mp3 <url>'),
+      c('.pdl <post-url>'),
+      c('.pdlzip <post-url>'),
       c('.download <url>'),
       c('.song <query>'),
       c('.gitdl <github-url>', true),

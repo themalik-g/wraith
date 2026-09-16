@@ -73,17 +73,19 @@ All commands use the configurable prefix (default: `.`). In **private mode**, co
 
 | Command | Description |
 |---|---|
-| `.dl <url>` | Download video, audio, or image carousel (`yt-dlp` + `gallery-dl`) |
+| `.dl <url>` | Download video, audio, or post carousel (`@postfetch/core` + `yt-dlp`) |
+| `.pdl <post-url>` | Download post/carousel media items directly via `@postfetch/core` |
+| `.pdlzip <post-url>` | Download post/carousel items as a single ZIP archive |
 | `.mp3 <url>` | Extract MP3 audio from any video or audio URL |
 | `.song <query>` | Download audio from SoundCloud, Apple Music, or Deezer |
 | `.gitdl <github-url>` | Download GitHub repository as a ZIP archive |
 | `.mfdl <mediafire-url>` | Resolve and download MediaFire files directly |
 | `.ig <username\|url>` | Fetch Instagram user profile or download post/carousel |
 | `.tiktok <username\|url>` | Fetch TikTok profile info or download photo post/video |
-| `.fb <username\|url>` | Fetch Facebook profile info or download video post |
+| `.fb <username\|url>` | Fetch Facebook profile info or download video/post |
 
-**Image Carousel Routing:**
-URLs containing picture posts (e.g. Instagram `/p/`, TikTok `/photo/`, Pinterest) are routed directly to `gallery-dl`. If `yt-dlp` fails for any URL, `gallery-dl` is tried as a fallback.
+**Post Carousel Routing:**
+URLs containing picture posts or carousels (e.g. Instagram `/p/`, TikTok `/photo/`, Pinterest, Facebook posts) are routed directly to `@postfetch/core`. If `yt-dlp` fails for any URL, `@postfetch/core` is tried as a fallback where appropriate.
 
 ---
 

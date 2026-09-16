@@ -24,7 +24,7 @@ WhatsApp Server
        ├─ lurk   ──► status handling
        ├─ schedule ──► state/schedule.json
        ├─ admin / group ──► groupParticipantsUpdate
-       ├─ download / social ──► yt-dlp + gallery-dl media engine
+       ├─ download / social ──► @postfetch/core + yt-dlp media engine
        ├─ jid    ──► core/jid-resolver.js
        ├─ presence ──► state/presence.json
        ├─ activity ──► state/activity.json
@@ -51,7 +51,7 @@ WhatsApp Server
 
 ### Modules (`modules/`)
 
-- `download.js` — Native media downloader engine using `@choewy/yt-dlp` for video/audio and `gallery-dl` for image carousels & post fallbacks.
+- `download.js` — Native media downloader engine using `@postfetch/core` for image carousels & social post resolution, and `@choewy/yt-dlp` for video/audio streams. Also exposes `.pdl` and `.pdlzip`.
 - `social.js` — Instagram, TikTok, and Facebook user search and direct post downloader routing.
 - `downloader.js` — `.gitdl` (GitHub repository downloader) and `.mfdl` (MediaFire downloader).
 - `ghost.js` — Message ledger tracking anti-delete, anti-edit, and secret edit events.
@@ -79,23 +79,22 @@ WhatsApp Server
 ```
 Inbound URL or Query
          │
-         ├──► Is Image Post URL? (Instagram /p/, TikTok /photo/, Pinterest, Twitter)
+         ├──► Is Post/Carousel URL? (Instagram /p/, TikTok /photo/, Pinterest, Twitter, FB)
          │           │
-         │           ├── YES ──► gallery-dl download
+         │           ├── YES ──► @postfetch/core download
          │           │                │ (if fails) ──► yt-dlp fallback
          │           │
          │           └── NO  ──► yt-dlp download
-         │                            │ (if fails) ──► empty format / b/best format
-         │                            │ (if fails) ──► gallery-dl fallback
+         │                            │ (if fails) ──► fallback formats
          │
          ▼
-Recursive Directory Scan (TMP)
+Recursive Directory Scan / Stream Buffers
          │
          ▼
 File Classification (Magic bytes via file-type)
          │
          ▼
-Sequential Send (up to 20 files, video/audio/image limit checks)
+Sequential Send (up to 20 files, video/audio/image limit checks) or ZIP archive (.pdlzip)
          │
          ▼
 Cleanup & Sweep

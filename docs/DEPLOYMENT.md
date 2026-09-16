@@ -24,12 +24,7 @@ cd wraith
 npm install
 ```
 
-*Note:* `gallery-dl` and `ffmpeg-static` are included as dependencies in `package.json`. No separate Python/FFmpeg installation is required, though system `gallery-dl` or `python3-pip` can be installed if desired:
-
-```bash
-sudo apt install -y python3-pip
-pip install gallery-dl
-```
+*Note:* `@postfetch/core` and `ffmpeg-static` are included as dependencies in `package.json`. No separate Python or authentication credentials are required.
 
 ### 4. Start with PM2
 
