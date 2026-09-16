@@ -9,10 +9,11 @@ WhatsApp Server
        ▼
   makeWASocket (Baileys)
        │
-       │ events
+       │ events (upsert, update, reaction, presence)
        ▼
    start.js ─────────────► scheduler loop
        │                  presence heartbeat
+       │                  reject calls handler
        │
        │ dispatch(sock, update)
        ▼
@@ -22,130 +23,83 @@ WhatsApp Server
        ├─ peek   ──► owner DM
        ├─ lurk   ──► status handling
        ├─ schedule ──► state/schedule.json
-       ├─ admin  ──► groupParticipantsUpdate
+       ├─ admin / group ──► groupParticipantsUpdate
+       ├─ download / social ──► yt-dlp + gallery-dl media engine
        ├─ jid    ──► core/jid-resolver.js
        ├─ presence ──► state/presence.json
        ├─ activity ──► state/activity.json
-       └─ help / ping
+       └─ help / ping / utility / media
 ```
 
 ---
 
-## Module Responsibilities
+## Core Modules & Responsibilities
 
-### `start.js`
+### Core System (`core/`)
 
-- Boots Baileys socket
-- Handles pairing code flow
-- Manages reconnect on disconnect
-- Registers `messages.upsert`, `messages.update`, `messages.reaction` handlers
-- Calls `dispatch()` and `dispatchStatus()`
-- Starts background loops: scheduler, presence heartbeat
+- `jid-resolver.js` — Centralized PN↔LID resolution, group member lookups, channel caching.
+- `identity.js` — Owner validation (`isOwner`), owner JID resolution.
+- `settings.js` — Prefix, mode, and global setting persistence.
+- `vault.js` — Temporary media storage in `vault/` with automatic size purge.
 
-### `router.js`
+### Libraries (`lib/`)
 
-- Single entry point for all inbound messages
-- Order of operations:
-  1. Track activity
-  2. Cache channel (if newsletter)
-  3. Send read receipt (if enabled)
-  4. Ghost classification (revoke/edit)
-  5. Store in ledger
-  6. Auto-peek
-  7. Watch quoted view-once
-  8. Auto-presence
-  9. Group protection (antilink/etc.)
-  10. Command parsing + dispatch
+- `apis.js` — External API integration (books, stock images, movies, song info, lyrics, weather, currency, dictionary, QR, pwned).
+- `net.js` — Robust HTTP client, chunking, downloading to file, temp file lifecycle.
+- `music-sources.js` — SoundCloud, Apple Music, and Deezer music fetchers.
+- `uploadImage.js` — Image host uploader.
 
-### `core/jid-resolver.js`
+### Modules (`modules/`)
 
-- Centralized JID utilities
-- PN↔LID resolution with 5 fallbacks
-- Newsletter metadata + cache
-- Group member resolution
-- Message key extraction
+- `download.js` — Native media downloader engine using `@choewy/yt-dlp` for video/audio and `gallery-dl` for image carousels & post fallbacks.
+- `social.js` — Instagram, TikTok, and Facebook user search and direct post downloader routing.
+- `downloader.js` — `.gitdl` (GitHub repository downloader) and `.mfdl` (MediaFire downloader).
+- `ghost.js` — Message ledger tracking anti-delete, anti-edit, and secret edit events.
+- `peek.js` — View-once extraction, auto-peek forwarding, quoted message watcher.
+- `lurk.js` — WhatsApp status watcher with auto-view, reactions, and silent owner DM download.
+- `schedule.js` — Schedule post delivery and automated group opening/closing.
+- `group.js` — Advanced group management: welcome/goodbye messages, approve/decline requests, kickall, kickcc, open/close, tagall, hidetag.
+- `admin.js` — Admin actions (kick, add, promote, demote) and protection enforcement (antilink, antispam, antisticker).
+- `owner.js` — Blocklist management, bot profile picture/about settings, status updates, pairing session retrieval.
+- `media.js` — Book search & verified download, stock images, movies, lyrics, song info, couple profile picture generator.
+- `ppt.js` — PowerPoint presentation file (.pptx) generator.
+- `utility.js` — Weather, currency conversion, dictionary definitions, QR code tools, password breach check.
+- `jid.js` — JID resolution tool subcommands (`.getjid`).
+- `presence.js` — Presence controls (always online, auto-typing, auto-recording, read receipts).
+- `presence-track.js` — Stalk online/offline status updates for targets.
+- `activity.js` — Per-chat activity tracking and statistics dashboard.
+- `ping.js` — Latency RTT, memory, and uptime probe.
+- `help.js` — Dynamic help registry.
+- `debug.js` — Structured trace logging.
 
-### `core/identity.js`
+---
 
-- `isOwner(jid)` — owner check
-- `ownerJid()` — returns `owner@s.whatsapp.net`
-- `digitsOf(jid)` — strips server
+## Download Engine Architecture (`download.js`)
 
-### `core/vault.js`
-
-- Temp media storage in `vault/`
-- Auto-purge when total size > `vaultMaxMB`
-- Sweeps every 60s
-
-### `modules/ghost.js`
-
-- Ledger (Map) loaded from `state/ghost-ledger.json`
-- `classifyMessage()` — detects revoke/edit/secret_edit
-- `remember()` — stores message + media
-- `revealDelete()` — sends original back to owner
-- `revealEdit()` — before/after diff
-- `revealSecretEdit()` — handles encrypted edits (v7)
-
-### `modules/peek.js`
-
-- `extractViewOnce()` — finds view-once in any wrapper
-- `autoPeek()` — fires on every inbound
-- `watchQuotedViewOnce()` — extracts from `contextInfo.quotedMessage`
-- Two send strategies: forward stripped, download+reupload
-
-### `modules/lurk.js`
-
-- Status watcher with auto-view, react, download
-- Silent download mode (no seen, no react)
-- Random emoji pool
-
-### `modules/schedule.js`
-
-- Scan-based date parser (robust to LIDs)
-- 30s tick loop
-- Persists to `state/schedule.json`
-
-### `modules/admin.js`
-
-- `resolveToPnJid()` — LID→PN conversion for group API
-- `adminAction()` — kick/add/promote/demote
-- `toggleProtection()` — per-group settings
-- `handleProtection()` — antilink/antispam/antisticker enforcement
-
-### `modules/profile.js`
-
-- `.getpp` — profile picture fetch
-- Supports owner/chat/current targets
-
-### `modules/jid.js`
-
-- `.getjid` subcommands: owner, members, group, channels, currentchat
-- Delegates all resolution to `core/jid-resolver.js`
-
-### `modules/presence.js`
-
-- Heartbeat sends `available` every 8s if `alwaysOnline`
-- `applyAutoPresence()` — composing/recording on inbound
-- `shouldReadReceipts()` — checked by router
-
-### `modules/activity.js`
-
-- Tracks per-chat: total, texts, media, lastActive, contacts
-- Dashboard aggregator
-
-### `modules/ping.js`
-
-- Sends placeholder, measures RTT, edits placeholder with result
-
-### `modules/help.js`
-
-- Static registry of all commands
-- Renders grouped or full list
-
-### `modules/debug.js`
-
-- `trace(tag, data)` — colored structured logging
-- `traceLine(tag, msg)` — colored single-line
+```
+Inbound URL or Query
+         │
+         ├──► Is Image Post URL? (Instagram /p/, TikTok /photo/, Pinterest, Twitter)
+         │           │
+         │           ├── YES ──► gallery-dl download
+         │           │                │ (if fails) ──► yt-dlp fallback
+         │           │
+         │           └── NO  ──► yt-dlp download
+         │                            │ (if fails) ──► empty format / b/best format
+         │                            │ (if fails) ──► gallery-dl fallback
+         │
+         ▼
+Recursive Directory Scan (TMP)
+         │
+         ▼
+File Classification (Magic bytes via file-type)
+         │
+         ▼
+Sequential Send (up to 20 files, video/audio/image limit checks)
+         │
+         ▼
+Cleanup & Sweep
+```
 
 ---
 
@@ -159,56 +113,24 @@ WhatsApp Server
 | `presence.json` | presence | presence, router |
 | `schedule.json` | schedule | schedule (loop) |
 | `activity.json` | activity | activity |
-| `admin.json` | admin | admin |
+| `admin.json` | admin | admin, router |
 | `channel-cache.json` | jid-resolver | jid-resolver |
+| `prefix.json` | settings | router, prefix |
+| `mode.json` | settings | router, mode |
 
 ---
 
 ## Error Handling Philosophy
 
-Every module follows the same pattern:
+Every module isolates execution in `try-catch` blocks:
 
 ```javascript
 try {
-    // do work
+    // work
 } catch (e) {
-    console.error('[module] context', e.message);
-    // continue, don't crash
+    console.error('[module]', e.message);
+    // recover gracefully
 }
 ```
 
-**Never let one bad message kill the bot.** The router wraps every dispatch call. Modules wrap every file write. Background loops wrap every iteration.
-
----
-
-## Adding a New Command
-
-1. Create `modules/yourcommand.js`:
-
-```javascript
-import { isOwner } from '../core/identity.js';
-
-export async function yourCommand(sock, chat, msg, args) {
-    const from = msg.key.participant || msg.key.remoteJid;
-    if (!msg.key.fromMe && !isOwner(from)) {
-        return sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
-    }
-    // your logic
-}
-```
-
-2. Import in `router.js`:
-
-```javascript
-import { yourCommand } from './modules/yourcommand.js';
-```
-
-3. Add to switch:
-
-```javascript
-case 'yourcmd': await yourCommand(sock, chat, msg, rest); break;
-```
-
-4. Add to `modules/help.js` registry.
-
-That's it. Hot-reload is not supported — restart the bot.
+No single failed request or unexpected media format is allowed to crash the WhatsApp process.

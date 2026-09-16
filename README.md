@@ -1,14 +1,14 @@
 <div align="center">
 
 <!-- ANIMATED TYPING SVG HEADER -->
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&size=40&duration=3000&pause=1000&color=00E5FF&center=true&vCenter=true&width=800&height=80&lines=🤖+𝙒𝙍𝘼𝙄𝙏𝙃+𝙒𝘼+𝘽𝙊𝙏;⚡+𝙏𝙝𝙚+𝙐𝙡𝙩𝙞𝙢𝙖𝙩𝙚+𝙒𝙝𝙖𝙩𝙨𝘼𝙥𝙥+𝘽𝙤𝙏;🚀+𝙋𝙤𝙬𝙚𝙧𝙚𝙙+𝙗𝙮+𝘽𝙖𝙞𝙡𝙚𝙮𝙨;🔥+24%2F7+𝙎𝙩𝙖𝙗𝙡𝙚+%26+𝙁𝙖𝙨𝙩" alt="Typing SVG" />
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&size=40&duration=3000&pause=1000&color=00E5FF&center=true&vCenter=true&width=800&height=80&lines=🤖+𝙒𝙍𝘼𝙄𝙏𝙃+𝙒𝘼+𝘽𝙊𝙏;⚡+𝙏𝙝𝙚+𝙐𝙡𝙩𝙞𝙢𝙖𝙩𝙚+𝙒𝙝𝙖𝙩𝙨𝘼𝙥p+𝘽o𝙏;🚀+𝙋𝙤𝙬𝙚𝙧𝙚𝙙+𝙗𝙮+𝘽𝙖𝙞𝙡𝙚𝙮𝙨;🔥+24%2F7+𝙎𝙩𝙖𝙗𝙡𝙚+%26+𝙁𝙖𝙨𝙩" alt="Typing SVG" />
 
 <!-- VIBRANT ELECTRIC OCEAN HEADER -->
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:0052D4,50:1E88E5,100:00E5FF&height=200&section=header&text=WRAITH%20BOT&fontSize=70&fontColor=ffffff&animation=twinkling&fontAlignY=35" width="100%"/>
 
 <!-- BADGES -->
 <p>
-  <img src="https://img.shields.io/badge/Version-2.0.0-0D47A1?style=for-the-badge&logo=github&logoColor=white&labelColor=000000"/>
+  <img src="https://img.shields.io/badge/Version-2.1.0-0D47A1?style=for-the-badge&logo=github&logoColor=white&labelColor=000000"/>
   <img src="https://img.shields.io/badge/Node.js-20%2B-DC2626?style=for-the-badge&logo=node.js&logoColor=white&labelColor=000000"/>
   <img src="https://img.shields.io/badge/official--baileys-Latest-0D47A1?style=for-the-badge&logo=whatsapp&logoColor=white&labelColor=000000"/>
   <img src="https://img.shields.io/badge/License-MIT-DC2626?style=for-the-badge&logo=opensourceinitiative&logoColor=white&labelColor=000000"/>
@@ -16,10 +16,9 @@
 </p>
 </div>
 
+> A silent, high-performance watcher for WhatsApp — remembers deleted/edited messages, peeks at view-once media, lurks on status updates, schedules posts, downloads videos, music, and image carousels, and manages groups effortlessly.
 
-> A silent watcher for WhatsApp — remembers what was deleted, peeks at what was hidden, lurks on statuses, schedules messages, and manages groups.
-
-Built on [Baileys v7](https://github.com/WhiskeySockets/Baileys) with LID-aware JID resolution.
+Built on [Baileys v7](https://github.com/WhiskeySockets/Baileys) with full LID-aware JID resolution and integrated `yt-dlp` + `gallery-dl` media extractors.
 
 ---
 
@@ -27,18 +26,20 @@ Built on [Baileys v7](https://github.com/WhiskeySockets/Baileys) with LID-aware 
 
 | Module | What it does |
 |---|---|
-| 👻 **Ghost** | Anti-delete + anti-edit. Reports deleted/edited messages with media. |
-| 👁️ **Peek** | Reveals view-once images, videos, audio. |
-| 🌒 **Lurk** | Auto-view statuses, auto-react, silent download to owner DM. |
-| 📅 **Schedule** | Send any message later — numbers, @usernames, JIDs, newsletters. |
-| 👥 **Admin / Group** | Kick, add, promote, demote, open/close group, schedule open/close, tagall, hidetag, setgpp, setgdesc + antilink, antispam, antisticker. |
-| 👤 **Owner / Block** | Block/unblock by reply/number/JID, blocklist, unblockall, setstatus, getstatus, getpair pairing session. |
-| 📚 **Media / Books** | Verified book downloading (Gutenberg/Archive.org), stock image search, lyrics, movies, song info. |
+| 👻 **Ghost** | Anti-delete, anti-edit, & secret edit tracking. Logs deleted/edited messages with media back to owner. |
+| 👁️ **Peek** | Reveals view-once images, videos, audio, with auto-peek and quoted message detection. |
+| 🌒 **Lurk** | Auto-view statuses, auto-react with custom/random emojis, silent download to owner DM. |
+| 📅 **Schedule** | Send any message or schedule group opening/closing for a future time. |
+| ⬇️ **Media Downloader** | Integrated `yt-dlp` + `gallery-dl` engine (`.dl`, `.mp3`) for videos, audio, and image carousels (Instagram `/p/`, TikTok `/photo/`, Pinterest, Twitter). |
+| 📦 **File & Social Downloader** | GitHub repo downloader (`.gitdl`), MediaFire downloader (`.mfdl`), social profile search & media downloading (`.ig`, `.tiktok`, `.fb`), SoundCloud song downloader (`.song`). |
+| 📚 **Media & Entertainment** | Verified book search & download (Gutenberg/Archive.org), stock image search (`.img`), song info, lyrics, movie search, PowerPoint presentation generator (`.ppt`), couple profile pictures (`.couplepp`). |
+| 👥 **Admin & Group** | Group management (`.open`, `.close`, `.kick`, `.add`, `.promote`, `.demote`, `.approveall`, `.declineall`, `.kickall`, `.kickcc`, `.tagall`, `.hidetag`, `.setgpp`, `.setgdesc`, `.mute`, `.unmute`, `.welcome`, `.goodbye`), plus protection (`.antilink`, `.antispam`, `.antisticker`, `.rejectcalls`). |
+| 👤 **Owner & Profile** | Block/unblock management, `.setstatus`, `.getstatus`, `.getpair` pairing code generator, `.setpp`, `.setabout`, `.chatstats`, `.stalk` online tracking, `.mode` public/private, `.prefix` control. |
+| 🛠️ **Utility Tools** | Weather forecast (`.weather`), Currency converter (`.currency`), Dictionary (`.define`), Password pwned check (`.pwned`), QR generator/decoder (`.qr`), URL uploader (`.url`). |
 | 🖼️ **Getpp** | Fetch profile pictures of any user, group, or chat. |
-| 📌 **Getjid** | PN + LID resolver, channel list, group members, current chat. |
-| ⚙️ **Presence** | Always online, auto-typing, auto-recording, read receipts. |
-| 📊 **Activity** | Chat activity dashboard — messages, media, top chats. |
-| 🏓 **Ping** | Latency + memory + uptime probe. |
+| 📌 **Getjid** | PN + LID resolver, channel list, group member roster with admin roles. |
+| ⚙️ **Presence** | Always online, auto-typing, auto-recording, read receipts configuration. |
+| 📊 **Activity & Ping** | Chat activity dashboard (messages, media counts) and RTT/memory latency probe. |
 
 ---
 
@@ -48,7 +49,7 @@ Built on [Baileys v7](https://github.com/WhiskeySockets/Baileys) with LID-aware 
 
 - **Node.js 20+**
 - A WhatsApp account you're willing to link as a device
-- (Optional) **PM2** for 24/7 running
+- (Optional) **PM2** for 24/7 background operation
 
 ### Installation
 
@@ -59,7 +60,7 @@ npm install
 npm start
 ```
 
-First run prompts for your WhatsApp number, then shows a **pairing code**:
+First run prompts for your WhatsApp phone number, then generates a **pairing code**:
 
 > WhatsApp → Settings → Linked Devices → Link a Device → Link with phone number instead
 
@@ -77,12 +78,12 @@ npm run pm2:restart
 
 | File | Topic |
 |---|---|
-| [docs/COMMANDS.md](./docs/COMMANDS.md) | All commands with examples |
-| [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) | Config, state files |
-| [docs/JID-SYSTEM.md](./docs/JID-SYSTEM.md) | PN, LID, JID resolution |
-| [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) | VPS, Docker, PM2 |
-| [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) | Common fixes |
-| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Module layout |
+| [docs/COMMANDS.md](./docs/COMMANDS.md) | Complete index of all commands with examples |
+| [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) | Config settings, state files, and variables |
+| [docs/JID-SYSTEM.md](./docs/JID-SYSTEM.md) | Deep dive into PN, LID, and JID resolution |
+| [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) | VPS, Docker, PM2, and server setups |
+| [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) | Solutions for common errors |
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System layout, module design, and router flow |
 
 ---
 
@@ -90,12 +91,12 @@ npm run pm2:restart
 
 Every WhatsApp user has **two JIDs**:
 
-- **PN JID** — `923001234567@s.whatsapp.net` (home address)
-- **LID** — `278713363128439@lid` (PO box, permanent, anonymous)
+- **PN JID** — `923001234567@s.whatsapp.net` (phone number)
+- **LID** — `278713363128439@lid` (Linked Identity, permanent anonymous ID)
 
-WRAITH is **LID-aware** — resolves both, sends to LIDs directly, uses 5 fallback strategies to recover PNs when hidden.
+WRAITH is **LID-aware** — resolves both, sends messages to LIDs directly, and utilizes 5 fallback strategies to resolve PNs when hidden.
 
-→ Full deep dive: [docs/JID-SYSTEM.md](./docs/JID-SYSTEM.md)
+→ Full details: [docs/JID-SYSTEM.md](./docs/JID-SYSTEM.md)
 
 ---
 
@@ -127,20 +128,39 @@ wraith/
 ├── core/
 │   ├── identity.js
 │   ├── vault.js
+│   ├── settings.js
 │   └── jid-resolver.js
+├── lib/
+│   ├── apis.js
+│   ├── music-sources.js
+│   ├── net.js
+│   └── uploadImage.js
 ├── modules/
-│   ├── ghost.js
-│   ├── peek.js
-│   ├── lurk.js
-│   ├── schedule.js
-│   ├── admin.js
-│   ├── profile.js
-│   ├── jid.js
-│   ├── presence.js
 │   ├── activity.js
-│   ├── ping.js
+│   ├── admin.js
+│   ├── debug.js
+│   ├── download.js
+│   ├── downloader.js
+│   ├── ghost.js
+│   ├── group.js
 │   ├── help.js
-│   └── debug.js
+│   ├── jid.js
+│   ├── lurk.js
+│   ├── media.js
+│   ├── owner.js
+│   ├── peek.js
+│   ├── ping.js
+│   ├── ppt.js
+│   ├── prefix.js
+│   ├── presence-track.js
+│   ├── presence.js
+│   ├── profile.js
+│   ├── schedule.js
+│   ├── social.js
+│   ├── song.js
+│   ├── update.js
+│   ├── url.js
+│   └── utility.js
 ├── state/
 ├── session/
 └── vault/
@@ -148,10 +168,10 @@ wraith/
 
 ---
 
-## 🔐 Security
+## 🔐 Security & Privacy
 
-- **Never commit** `session/`, `.env`, `state/owner.json`
-- `state/ghost-ledger.json` contains message history — sensitive
+- **Never commit** `session/`, `.env`, `keys.env`, `state/owner.json`
+- `state/ghost-ledger.json` contains encrypted message history — keep it private
 
 ---
 
@@ -161,8 +181,8 @@ wraith/
 |---|---|
 | Bot won't pair | Delete `session/`, restart, re-enter number |
 | `internal-server-error` on admin | Bot must be admin; target PN may be uncached |
-| Channels empty | Use fork with `newsletterSubscribed()` or wait for cache |
-| LID not resolving to PN | Reply to their message first |
+| Image post download failed | Ensure `gallery-dl` package is installed (`npm install`) |
+| LID not resolving to PN | Reply to their message in a group first |
 
 Full guide: [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md)
 
@@ -191,4 +211,3 @@ MIT
 **Made with ❤️ by MALIK MEHTAB**
 
 </div>
-

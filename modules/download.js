@@ -49,11 +49,66 @@ function sweepDir(dir, since) {
   } catch {}
 }
 function producedFiles(dir, since) {
-  return fs.readdirSync(dir)
-    .map((f) => ({ full: path.join(dir, f), t: fs.statSync(path.join(dir, f)).mtimeMs }))
-    .filter((x) => x.t >= since)
-    .sort((a, b) => a.t - b.t)
-    .map((x) => x.full);
+  const results = [];
+  function scan(d) {
+    try {
+      const entries = fs.readdirSync(d, { withFileTypes: true });
+      for (const entry of entries) {
+        const full = path.join(d, entry.name);
+        if (entry.isDirectory()) {
+          scan(full);
+        } else if (entry.isFile()) {
+          try {
+            const stat = fs.statSync(full);
+            if (stat.mtimeMs >= since) {
+              results.push({ full, t: stat.mtimeMs });
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+  scan(dir);
+  return results.sort((a, b) => a.t - b.t).map((x) => x.full);
+}
+
+function isImagePostUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  return /instagram\.com\/p\//i.test(url) ||
+         /tiktok\.com\/.*\/photo\//i.test(url) ||
+         /pinterest\.com\/pin\//i.test(url) ||
+         /pin\.it\//i.test(url) ||
+         /twitter\.com\/.*\/status\/.*\/photo/i.test(url) ||
+         /x\.com\/.*\/status\/.*\/photo/i.test(url) ||
+         /\.(jpe?g|png|webp)($|\?)/i.test(url);
+}
+
+async function downloadWithGalleryDl(url, destDir) {
+  let galleryDlFn;
+  try {
+    const mod = await import('gallery-dl');
+    galleryDlFn = mod.default?.default || mod.default;
+  } catch (e) {
+    throw new Error(`gallery-dl package import failed: ${e.message}`);
+  }
+
+  try {
+    const binPath = path.join(process.cwd(), 'node_modules/gallery-dl/executable/gallery-dl.bin');
+    if (fs.existsSync(binPath)) fs.chmodSync(binPath, 0o755);
+  } catch {}
+
+  const args = [
+    '--directory', destDir,
+    '--filename', 'wraith-%(id)s_%(num)s.%(extension)s',
+    '--quiet',
+    url
+  ];
+
+  return await withTimeout(
+    galleryDlFn(args),
+    YTDLP_TIMEOUT,
+    'gallery-dl download'
+  );
 }
 
 function bufferToMp3(inputBuffer, bitrate = 192) {
@@ -114,7 +169,27 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
       playlist: true, retries: 3,
     });
 
-    if (audioOnly) {
+    const isImagePost = isUrl && !audioOnly && isImagePostUrl(query);
+
+    if (isImagePost) {
+      await edit(sock, chat, status, '🖼️ *Downloading images (gallery-dl)…*');
+      try {
+        await downloadWithGalleryDl(query, TMP);
+      } catch (gdlErr) {
+        // If gallery-dl fails, fall back to yt-dlp
+        await edit(sock, chat, status, '⬇️ *Retrying with yt-dlp…*');
+        const yt = new YtDlp({
+          url: query, output: outTemplate,
+          quiet: true, noWarnings: true, noProgress: true,
+          playlist: true, retries: 3,
+        });
+        await withTimeout(
+          yt.format('bestvideo+bestaudio/best').mergeFormat('mp4').video().download(),
+          YTDLP_TIMEOUT,
+          'media download'
+        );
+      }
+    } else if (audioOnly) {
       await edit(sock, chat, status, '🎵 *Extracting audio…*');
       await withTimeout(
         yt.audioFormat('mp3').audio().download(),
@@ -147,18 +222,28 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
           );
         } catch (err2) {
           // Fallback 2: format 'b/best'
-          const ytFallback2 = new YtDlp({
-            url: isUrl ? query : `scsearch1:${query}`,
-            output: outTemplate,
-            quiet: true, noWarnings: true, noProgress: true,
-            playlist: true, retries: 3,
-          });
-          ytFallback2.format('b/best');
-          await withTimeout(
-            ytFallback2.video().download(),
-            YTDLP_TIMEOUT,
-            'fallback download (b/best)'
-          );
+          try {
+            const ytFallback2 = new YtDlp({
+              url: isUrl ? query : `scsearch1:${query}`,
+              output: outTemplate,
+              quiet: true, noWarnings: true, noProgress: true,
+              playlist: true, retries: 3,
+            });
+            ytFallback2.format('b/best');
+            await withTimeout(
+              ytFallback2.video().download(),
+              YTDLP_TIMEOUT,
+              'fallback download (b/best)'
+            );
+          } catch (err3) {
+            // Fallback 3: try gallery-dl for any URL in case it contains pictures
+            if (isUrl) {
+              await edit(sock, chat, status, '🖼️ *Trying gallery-dl fallback…*');
+              await downloadWithGalleryDl(query, TMP);
+            } else {
+              throw err1;
+            }
+          }
         }
       }
     }
