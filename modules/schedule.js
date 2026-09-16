@@ -168,6 +168,65 @@ export async function scheduleCommand(sock, chat, msg, args) {
     return sock.sendMessage(chat, { text: lines.join('\n') }, { quoted: msg });
   }
 
+  if (a0 === 'open' || a0 === 'close') {
+    const action = a0;
+    const restArgs = args.slice(1);
+    if (!restArgs.length) {
+      return sock.sendMessage(chat, {
+        text: `❌ Usage: \`.schedule ${action} [groupJid] dd,mm,yy hour minute am/pm\`\nExample: \`.schedule ${action} 25,12,26 10 30 am\` (in group)`
+      }, { quoted: msg });
+    }
+
+    let targetGroupJid = chat;
+    let timeArgs = restArgs;
+
+    if (restArgs[0].endsWith('@g.us')) {
+      targetGroupJid = restArgs[0];
+      timeArgs = restArgs.slice(1);
+    }
+
+    if (!targetGroupJid.endsWith('@g.us')) {
+      return sock.sendMessage(chat, { text: '❌ Scheduled open/close commands must target a group.' }, { quoted: msg });
+    }
+
+    const dt = parseDateTime(timeArgs);
+    if (!dt.ok) {
+      return sock.sendMessage(chat, {
+        text: `❌ ${dt.error}\n\nYou gave: \`${timeArgs.join(' ')}\`\n\nUsage: \`.schedule ${action} [groupJid] dd,mm,yy hour minute am/pm\``
+      }, { quoted: msg });
+    }
+
+    const schedules = read();
+    const entry = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      action: `group_${action}`,
+      targetJid: targetGroupJid,
+      targetType: 'group',
+      sendAt: dt.date.getTime(),
+      attempts: 0,
+      createdAt: Date.now(),
+      createdBy: from
+    };
+
+    schedules.push(entry);
+    write(schedules);
+
+    const stamp = dt.date.toLocaleString('en-GB', {
+      hour12: true, timeZone: CONFIG.timezone || 'Asia/Karachi',
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+
+    return sock.sendMessage(chat, {
+      text:
+        `📅 *scheduled group ${action}*\n\n` +
+        `*group ·* ${targetGroupJid.split('@')[0]}\n` +
+        `*when ·* ${stamp}\n\n` +
+        `_ID: ${entry.id}_\n` +
+        `_Cancel with .schedule cancel ${entry.id}_`
+    }, { quoted: msg });
+  }
+
   if (a0 === 'cancel' || a0 === 'delete' || a0 === 'del') {
     const id = (args?.[1] || '').trim();
     if (!id) {
@@ -304,6 +363,16 @@ export async function scheduleCommand(sock, chat, msg, args) {
 
 // ── ★ send helper (text or media), always cleans up the file ────────────────
 async function sendEntry(sock, entry) {
+  if (entry.action === 'group_open') {
+    await sock.groupSettingUpdate(entry.targetJid, 'not_announcement');
+    await sock.sendMessage(entry.targetJid, { text: '🔓 Scheduled group open executed.' });
+    return;
+  }
+  if (entry.action === 'group_close') {
+    await sock.groupSettingUpdate(entry.targetJid, 'announcement');
+    await sock.sendMessage(entry.targetJid, { text: '🔒 Scheduled group close executed.' });
+    return;
+  }
   if (!entry.media) {
     await sock.sendMessage(entry.targetJid, { text: entry.message });
     return;

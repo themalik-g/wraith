@@ -265,7 +265,9 @@ export async function pingCommand(sock, chat, msg) {
         ``,
         `*memory*`,
         `\`${bar(memPct)}\`  ${memPct.toFixed(1)}%  ${memQuality(memPct)}`,
-        `• used · ${mb(mem.used)} / ${mb(mem.limit)} MB`,
+        `• container · ${mb(mem.used)} / ${mb(mem.limit)} MB`,
+        `• process rss · ${mb(proc.rss)} MB`,
+        `• heap used · ${mb(proc.heapUsed)} / ${mb(proc.heapTotal)} MB`,
         ``,
         `*uptime* · ${uptime()}`
     );
