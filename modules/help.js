@@ -131,6 +131,7 @@ const REGISTRY = [
       c('.pdlzip <post-url>'),
       c('.download <url>'),
       c('.song <query>'),
+      c('.findaudio (reply audio)'),
       c('.gitdl <github-url>', true),
       c('.mfdl <mediafire-url>', true),
     ],
@@ -199,6 +200,9 @@ const REGISTRY = [
       c('.stalk list', true),
       c('.stalk stop <number>', true),
       c('.chatstats <number>', true),
+      c('.addowner <number>', true),
+      c('.delowner <number>', true),
+      c('.owner list', true),
     ],
   },
   {

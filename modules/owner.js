@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
-import { isOwner } from '../core/identity.js';
+import { isOwner, isPrimaryOwner, addSecondaryOwner, delSecondaryOwner, getOwnerDetails } from '../core/identity.js';
 import { readJson } from '../core/state-io.js';
 import { CONFIG } from '../config.js';
 
@@ -486,6 +486,81 @@ export async function setsessionCommand(sock, chat, msg, args) {
 
     } catch (e) {
         await sock.sendMessage(chat, { text: `⚠️ setsession failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+    }
+}
+
+// ── .addowner / .delowner / .owner list ─────────────────────────────────────
+function primaryOwnerOnly(sock, chat, msg) {
+    const from = msg.key.participant || msg.key.remoteJid;
+    if (!msg.key.fromMe && !isPrimaryOwner(from)) {
+        sock.sendMessage(chat, { text: '⛔ Primary owner only.' }, { quoted: msg }).catch(() => {});
+        return true;
+    }
+    return false;
+}
+
+export async function addownerCommand(sock, chat, msg, args) {
+    if (primaryOwnerOnly(sock, chat, msg)) return;
+    try {
+        const target = await resolveBlockTarget(sock, chat, msg, args);
+        if (!target) {
+            return sock.sendMessage(chat, { text: '❌ Provide a target by reply, @mention, phone number, or JID.' }, { quoted: msg });
+        }
+        const digits = target.replace(/\D/g, '');
+        const res = addSecondaryOwner(digits);
+        if (!res.ok) {
+            return sock.sendMessage(chat, { text: `❌ ${res.reason}` }, { quoted: msg });
+        }
+        await sock.sendMessage(chat, { text: `✅ Added @${res.number} as secondary owner.`, mentions: [`${res.number}@s.whatsapp.net`] }, { quoted: msg });
+    } catch (e) {
+        await sock.sendMessage(chat, { text: `⚠️ addowner failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+    }
+}
+
+export async function delownerCommand(sock, chat, msg, args) {
+    if (primaryOwnerOnly(sock, chat, msg)) return;
+    try {
+        const target = await resolveBlockTarget(sock, chat, msg, args);
+        if (!target) {
+            return sock.sendMessage(chat, { text: '❌ Provide a target by reply, @mention, phone number, or JID.' }, { quoted: msg });
+        }
+        const digits = target.replace(/\D/g, '');
+        const res = delSecondaryOwner(digits);
+        if (!res.ok) {
+            return sock.sendMessage(chat, { text: `❌ ${res.reason}` }, { quoted: msg });
+        }
+        await sock.sendMessage(chat, { text: `✅ Removed @${res.number} from secondary owners.`, mentions: [`${res.number}@s.whatsapp.net`] }, { quoted: msg });
+    } catch (e) {
+        await sock.sendMessage(chat, { text: `⚠️ delowner failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+    }
+}
+
+export async function ownerlistCommand(sock, chat, msg) {
+    if (ownerOnly(sock, chat, msg)) return;
+    try {
+        const { owner, owners } = getOwnerDetails();
+        const mentions = [];
+        const lines = ['👑 *WRAITH Owners*', ''];
+        if (owner) {
+            lines.push(`• *Primary Owner:* @${owner}`);
+            mentions.push(`${owner}@s.whatsapp.net`);
+        } else {
+            lines.push('• *Primary Owner:* _Not configured_');
+        }
+
+        if (owners.length > 0) {
+            lines.push('', '*Secondary Owners:*');
+            owners.forEach((num, i) => {
+                lines.push(`${i + 1}. @${num}`);
+                mentions.push(`${num}@s.whatsapp.net`);
+            });
+        } else {
+            lines.push('', '*Secondary Owners:* _None_');
+        }
+
+        await sock.sendMessage(chat, { text: lines.join('\n'), mentions }, { quoted: msg });
+    } catch (e) {
+        await sock.sendMessage(chat, { text: `⚠️ ownerlist failed: ${e.message}` }, { quoted: msg }).catch(() => {});
     }
 }
 

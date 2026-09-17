@@ -1,1 +1,4 @@
-{ "on": false, "edit": true }
+{
+  "on": true,
+  "edit": true
+}

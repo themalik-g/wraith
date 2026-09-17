@@ -78,6 +78,7 @@ All commands use the configurable prefix (default: `.`). In **private mode**, co
 | `.pdlzip <post-url>` | Download post/carousel items as a single ZIP archive |
 | `.mp3 <url>` | Extract MP3 audio from any video or audio URL |
 | `.song <query>` | Download audio from SoundCloud, Apple Music, or Deezer |
+| `.findaudio` (reply audio/video) | Identify song from audio/voice-note/video sample |
 | `.gitdl <github-url>` | Download GitHub repository as a ZIP archive |
 | `.mfdl <mediafire-url>` | Resolve and download MediaFire files directly |
 | `.ig <username\|url>` | Fetch Instagram user profile or download post/carousel |
@@ -149,6 +150,9 @@ URLs containing picture posts or carousels (e.g. Instagram `/p/`, TikTok `/photo
 | `.setabout <text>` | Change bot WhatsApp about bio |
 | `.chatstats` | Show chat statistics |
 | `.stalk <number>` | Track user online presence updates |
+| `.addowner <number>` | Add secondary owner (primary owner only) |
+| `.delowner <number>` | Remove secondary owner (primary owner only) |
+| `.owner list` / `.ownerlist` | List all configured bot owners |
 | `.mode public\|private` | Set bot access mode |
 | `.prefix <char>` | Set command prefix (e.g. `.`, `!`, `#`) |
 | `.update` | Trigger git pull & restart |
