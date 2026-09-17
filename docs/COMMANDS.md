@@ -194,10 +194,11 @@ URLs containing picture posts or carousels (e.g. Instagram `/p/`, TikTok `/photo
 
 ---
 
-## 🛠️ Utility Tools
+## 🛠️ Utility Tools & Manual
 
 | Command | Description |
 |---|---|
+| `.usermanual` | Generate and receive PDF user manual document (`WRAITH_User_Manual.pdf`) |
 | `.weather <city>` | Fetch weather forecast and storm alerts |
 | `.currency <amount> <from> <to>` | Real-time currency conversion |
 | `.define <word>` | Dictionary definition lookup |

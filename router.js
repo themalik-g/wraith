@@ -26,6 +26,7 @@ import { CONFIG } from './config.js';
 import { WAMessageStubType } from '@whiskeysockets/baileys';
 
 // ── Phase 1 ──
+import { usermanualCommand } from './modules/usermanual.js';
 import {
   currencyCommand, qrCommand, defineCommand, weatherCommand, pwnedCommand,
   ownerCommand, scriptCommand, modeCommand, getMode,
@@ -190,7 +191,7 @@ export async function dispatch(sock, update) {
       }
 
       const KNOWN = new Set([...CRITICAL_COMMANDS,
-        'dl', 'download', 'mp3', 'song', 'songinfo', 'help', 'menu', 'ping',
+        'dl', 'download', 'mp3', 'song', 'songinfo', 'help', 'menu', 'ping', 'usermanual',
         'currency', 'qr', 'define', 'weather', 'pwned', 'owner', 'script', 'repo',
         'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
         'welcome', 'goodbye', 'getpp', 'ig', 'tiktok', 'fb',
@@ -223,6 +224,7 @@ export async function dispatch(sock, update) {
           case 'prefix': await prefixCommand(sock, chat, msg, rest); break;
           case 'help':
           case 'menu': await helpCommand(sock, chat, msg, rest); break;
+          case 'usermanual': await usermanualCommand(sock, chat, msg); break;
           case 'schedule': await scheduleCommand(sock, chat, msg, rest); break;
           case 'kick': await adminAction(sock, chat, msg, rest, 'remove'); break;
           case 'add': await adminAction(sock, chat, msg, rest, 'add'); break;
