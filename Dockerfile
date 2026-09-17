@@ -8,7 +8,8 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install only production dependencies
-RUN npm ci --omit=dev
+# Using npm install instead of npm ci to resolve Linux-specific binaries
+RUN npm install --omit=dev
 
 # Copy the rest of your bot code
 COPY . .
