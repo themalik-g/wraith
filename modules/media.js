@@ -58,12 +58,12 @@ export async function bookCommand(sock, chat, msg, args) {
 
       if (!book.url) {
         return sock.sendMessage(chat, {
-          text: `❌ No direct download for *${book.title}*.\n_Read online:_ ${book.webUrl || 'not available'}`
+          text: `📖 *${book.title}*\n_by ${book.author}_\n\n⚠️ No direct PDF download available for this item (lending restricted).\n\n_Read online:_ ${book.webUrl || 'not available'}`
         }, { quoted: msg });
       }
 
       await sock.sendMessage(chat, {
-        text: `📚 Downloading *${book.title}* (${book.format})…`
+        text: `📚 Downloading *${book.title}* (${(book.format || 'pdf').toUpperCase()})…`
       }, { quoted: msg });
 
       const ext = book.format === 'epub' ? '.epub'
@@ -96,7 +96,9 @@ export async function bookCommand(sock, chat, msg, args) {
           caption: `📚 *${book.title}*\n_by ${book.author}_${book.year ? ` · ${book.year}` : ''}`
         }, { quoted: msg });
       } catch (e) {
-        await sock.sendMessage(chat, { text: `❌ Download failed: ${e.message}` }, { quoted: msg });
+        await sock.sendMessage(chat, {
+          text: `❌ Direct file delivery failed: ${e.message}\n\n🔗 *Direct Download Link:*\n${book.url}\n\n📖 *Read Online Link:*\n${book.webUrl || 'N/A'}`
+        }, { quoted: msg });
       } finally {
         try { if (fs.existsSync(dest)) fs.unlinkSync(dest); } catch {}
       }
@@ -114,7 +116,7 @@ export async function bookCommand(sock, chat, msg, args) {
     const r = await searchBooks(query, 8);
     if (!r.ok || !r.books.length) {
       return sock.sendMessage(chat, {
-        text: `❌ No downloadable books found for *${query}*.`
+        text: `❌ No books found for *${query}*.`
       }, { quoted: msg });
     }
 
@@ -122,9 +124,14 @@ export async function bookCommand(sock, chat, msg, args) {
 
     const lines = [`📚 *Books* — "${query}"`, ''];
     r.books.forEach((b, i) => {
+      const typeLabel = b.url ? `📥 DL (${(b.format || 'pdf').toUpperCase()})` : '📖 READ ONLINE ONLY';
       lines.push(`*${i + 1}.* ${b.title}`);
-      lines.push(`   _${b.author}_${b.year ? ` · ${b.year}` : ''} · ${b.format ? b.format.toUpperCase() : '—'}`);
-      lines.push(`   ✅ \`.book dl ${i + 1}\``);
+      lines.push(`   _${b.author}_${b.year ? ` · ${b.year}` : ''} · ${typeLabel}`);
+      if (b.url) {
+        lines.push(`   ✅ \`.book dl ${i + 1}\``);
+      } else {
+        lines.push(`   🔗 ${b.webUrl}`);
+      }
     });
     lines.push('', `_Source: ${r.source}_`);
     await sendChunked(sock, chat, msg, lines.join('\n'));
