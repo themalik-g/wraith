@@ -35,6 +35,7 @@ Built on [Baileys v7](https://github.com/WhiskeySockets/Baileys) with full LID-a
 | 📚 **Media & Entertainment** | Verified book search & download (Gutenberg/Archive.org), stock image search (`.img`), song info, lyrics, movie search, PowerPoint presentation generator (`.ppt`), couple profile pictures (`.couplepp`). |
 | 👥 **Admin & Group** | Group management (`.open`, `.close`, `.kick`, `.add`, `.promote`, `.demote`, `.approveall`, `.declineall`, `.kickall`, `.kickcc`, `.tagall`, `.hidetag`, `.setgpp`, `.setgdesc`, `.mute`, `.unmute`, `.welcome`, `.goodbye`), plus protection (`.antilink`, `.antispam`, `.antisticker`, `.rejectcalls`). |
 | 👤 **Owner & Profile** | Block/unblock management, `.setstatus`, `.getstatus`, `.getpair` pairing code generator, `.setsession` session importer, `.setpp`, `.setabout`, `.chatstats`, `.stalk` online tracking, `.mode` public/private, `.prefix` control. |
+| 📄 **User Manual** | Pure PDF manual generator (`.usermanual`) delivering complete feature documentation as a WhatsApp PDF document. |
 | 🛠️ **Utility Tools** | Weather forecast (`.weather`), Currency converter (`.currency`), Dictionary (`.define`), Password pwned check (`.pwned`), QR generator/decoder (`.qr`), URL uploader (`.url`). |
 | 🖼️ **Getpp** | Fetch profile pictures of any user, group, or chat. |
 | 📌 **Getjid** | PN + LID resolver, channel list, group member roster with admin roles. |
@@ -160,6 +161,7 @@ wraith/
 │   ├── song.js
 │   ├── update.js
 │   ├── url.js
+│   ├── usermanual.js
 │   └── utility.js
 ├── state/
 ├── session/
