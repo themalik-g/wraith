@@ -19,7 +19,7 @@ const DEFAULTS = {
     alwaysOnline: false,
     autoTyping: false,
     autoRecording: false,
-    readReceipts: true
+    readReceipts: false
 };
 
 function read() {

@@ -14,7 +14,7 @@ import { presenceCommand, shouldReadReceipts, applyAutoPresence } from './module
 import { activityCommand, trackActivity } from './modules/activity.js';
 import { updateCommand } from './modules/update.js';
 import { prefixCommand } from './modules/prefix.js';
-import { songCommand } from './modules/song.js';
+import { songCommand, findaudioCommand } from './modules/song.js';
 import { ytdlCommand, mp3Command, pdlCommand, pdlzipCommand } from './modules/download.js';
 import { urlCommand } from './modules/url.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
@@ -47,7 +47,7 @@ import {
   archiveCommand, unarchiveCommand, clearchatCommand,
   rejectcallsCommand, attachCallRejector, getWelcomeConfig,
 } from './modules/group.js';
-import { setppCommand, setaboutCommand, chatstatsCommand, blockCommand, unblockCommand, blocklistCommand, unblockallCommand, setstatusCommand, getstatusCommand, getpairCommand, setsessionCommand } from './modules/owner.js';
+import { setppCommand, setaboutCommand, chatstatsCommand, blockCommand, unblockCommand, blocklistCommand, unblockallCommand, setstatusCommand, getstatusCommand, getpairCommand, setsessionCommand, addownerCommand, delownerCommand, ownerlistCommand } from './modules/owner.js';
 
 // ── Phase 4 ──
 import { gitdlCommand, mfdlCommand } from './modules/downloader.js';
@@ -66,6 +66,7 @@ const CRITICAL_COMMANDS = new Set([
   'approveall', 'declineall', 'leave', 'join',
   'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
   'rejectcalls', 'setpp', 'setabout', 'chatstats', 'setsession',
+  'addowner', 'delowner', 'ownerlist',
   'gitdl', 'mfdl', 'url', 'pdl', 'pdlzip', 'restart',
 ]);
 
@@ -191,7 +192,7 @@ export async function dispatch(sock, update) {
       }
 
       const KNOWN = new Set([...CRITICAL_COMMANDS,
-        'dl', 'download', 'mp3', 'song', 'songinfo', 'help', 'menu', 'ping', 'usermanual',
+        'dl', 'download', 'mp3', 'song', 'findaudio', 'songinfo', 'help', 'menu', 'ping', 'usermanual',
         'currency', 'qr', 'define', 'weather', 'pwned', 'owner', 'script', 'repo',
         'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
         'welcome', 'goodbye', 'getpp', 'ig', 'tiktok', 'fb',
@@ -215,6 +216,7 @@ export async function dispatch(sock, update) {
 
           // ── Song (SoundCloud → Apple → Deezer) ──
           case 'song': await songCommand(sock, chat, msg, rest); break;
+          case 'findaudio': await findaudioCommand(sock, chat, msg); break;
 
           // ── Download (yt-dlp, all platforms) ──
           case 'dl':
@@ -249,7 +251,10 @@ export async function dispatch(sock, update) {
           case 'define': await defineCommand(sock, chat, msg, rest); break;
           case 'weather': await weatherCommand(sock, chat, msg, rest); break;
           case 'pwned': await pwnedCommand(sock, chat, msg, rest); break;
-          case 'owner': await ownerCommand(sock, chat, msg); break;
+          case 'owner': await ownerCommand(sock, chat, msg, rest); break;
+          case 'addowner': await addownerCommand(sock, chat, msg, rest); break;
+          case 'delowner': await delownerCommand(sock, chat, msg, rest); break;
+          case 'ownerlist': await ownerlistCommand(sock, chat, msg); break;
           case 'script':
           case 'repo': await scriptCommand(sock, chat, msg); break;
           case 'mode': await modeCommand(sock, chat, msg, rest); break;

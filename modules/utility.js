@@ -290,8 +290,13 @@ export async function pwnedCommand(sock, chat, msg, args) {
 }
 
 // ── .owner ──────────────────────────────────────────────────────────────────
-export async function ownerCommand(sock, chat, msg) {
+export async function ownerCommand(sock, chat, msg, args) {
   try {
+    const a0 = (args?.[0] || '').toLowerCase();
+    if (a0 === 'list') {
+      const { ownerlistCommand } = await import('./owner.js');
+      return ownerlistCommand(sock, chat, msg);
+    }
     if (!CONFIG.owner) return sock.sendMessage(chat, { text: '❌ Owner not configured.' }, { quoted: msg });
     const digits = CONFIG.owner.replace(/\D/g, '');
     const vcard = [

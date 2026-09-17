@@ -17,9 +17,9 @@ fs.mkdirSync(path.dirname(STATE), { recursive: true });
 if (!fs.existsSync(STATE)) {
     fs.writeFileSync(STATE, JSON.stringify({
         on: true,
-        react: false,
+        react: true,
         emoji: '❤️',
-        download: false
+        download: true
     }));
 }
 
@@ -28,12 +28,12 @@ function read() {
         const raw = JSON.parse(fs.readFileSync(STATE, 'utf-8'));
         return {
             on: raw.on !== false,
-            react: raw.react === true,
+            react: raw.react !== false,
             emoji: raw.emoji || '❤️',
-            download: raw.download === true
+            download: raw.download !== false
         };
     } catch {
-        return { on: true, react: false, emoji: '❤️', download: false };
+        return { on: true, react: true, emoji: '❤️', download: true };
     }
 }
 

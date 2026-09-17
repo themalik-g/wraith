@@ -169,8 +169,15 @@ export function classifyMessage(msg) {
 //  State
 // ─────────────────────────────────────────────
 function read() {
-    try { return JSON.parse(fs.readFileSync(STATE, 'utf-8')); }
-    catch { return { on: false, edit: true }; }
+    try {
+        const raw = JSON.parse(fs.readFileSync(STATE, 'utf-8'));
+        return {
+            on: raw.on !== false,
+            edit: raw.edit !== false
+        };
+    } catch {
+        return { on: true, edit: true };
+    }
 }
 function write(o) {
     try { fs.writeFileSync(STATE, JSON.stringify(o, null, 2)); } catch {}
