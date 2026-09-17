@@ -217,4 +217,7 @@ URLs containing picture posts or carousels (e.g. Instagram `/p/`, TikTok `/photo
 |---|---|
 | `.activity` | Show chat activity dashboard (messages, media, top senders) |
 | `.ping` | Measure RTT latency, memory usage, and uptime |
+| `.alive` | Check if WRAITH is alive (`𝗪𝗥𝗔𝗜𝗧𝗛 𝗜𝗦 𝗔𝗟𝗜𝗩𝗘 ✅`) |
+| `.uptime` | Check current bot uptime |
+| `.restart` | Restart WRAITH server process (owner only) |
 | `.help` / `.menu` | Render command help menu |

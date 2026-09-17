@@ -280,3 +280,31 @@ export async function pingCommand(sock, chat, msg) {
         await sock.sendMessage(chat, { text: body });
     }
 }
+
+// ─────────────────────────────────────────────
+//  .alive
+// ─────────────────────────────────────────────
+export async function aliveCommand(sock, chat, msg) {
+    return sock.sendMessage(chat, { text: '𝗪𝗥𝗔𝗜𝗧𝗛 𝗜𝗦 𝗔𝗟𝗜𝗩𝗘 ✅' }, { quoted: msg });
+}
+
+// ─────────────────────────────────────────────
+//  .uptime
+// ─────────────────────────────────────────────
+export async function uptimeCommand(sock, chat, msg) {
+    return sock.sendMessage(chat, { text: `⏰ *Uptime:* ${uptime()}` }, { quoted: msg });
+}
+
+// ─────────────────────────────────────────────
+//  .restart
+// ─────────────────────────────────────────────
+export async function restartCommand(sock, chat, msg) {
+    const from = msg.key.participant || msg.key.remoteJid;
+    if (!msg.key.fromMe && !isOwner(from)) {
+        return sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
+    }
+    await sock.sendMessage(chat, { text: '🔄 *Restarting WRAITH server…*' }, { quoted: msg });
+    setTimeout(() => {
+        process.exit(0);
+    }, 1000);
+}
