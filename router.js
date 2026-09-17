@@ -4,7 +4,7 @@
 import { remember, revealDelete, revealEdit, revealSecretEdit, ghostCommand, classifyMessage } from './modules/ghost.js';
 import { peekCommand, autoPeek, watchQuotedViewOnce } from './modules/peek.js';
 import { lurkCommand, lurkTick } from './modules/lurk.js';
-import { pingCommand } from './modules/ping.js';
+import { pingCommand, aliveCommand, uptimeCommand, restartCommand } from './modules/ping.js';
 import { helpCommand } from './modules/help.js';
 import { scheduleCommand } from './modules/schedule.js';
 import { adminAction, toggleProtection, handleProtection } from './modules/admin.js';
@@ -66,7 +66,7 @@ const CRITICAL_COMMANDS = new Set([
   'approveall', 'declineall', 'leave', 'join',
   'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
   'rejectcalls', 'setpp', 'setabout', 'chatstats', 'setsession',
-  'gitdl', 'mfdl', 'url', 'pdl', 'pdlzip',
+  'gitdl', 'mfdl', 'url', 'pdl', 'pdlzip', 'restart',
 ]);
 
 const attachedSockets = new WeakSet();
@@ -196,6 +196,7 @@ export async function dispatch(sock, update) {
         'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
         'welcome', 'goodbye', 'getpp', 'ig', 'tiktok', 'fb',
         'igpost', 'tiktokpost', 'fbpost', 'pdl', 'pdlzip', 'postdl',
+        'alive', 'uptime', 'restart',
       ]);
       if (KNOWN.has(verb)) {
         try { await sock.sendMessage(chat, { react: { text: '⌛', key: msg.key } }); } catch (e) { console.error('[router] react', e.message); }
@@ -208,6 +209,9 @@ export async function dispatch(sock, update) {
           case 'peek': await peekCommand(sock, chat, msg, rest); break;
           case 'lurk': await lurkCommand(sock, chat, msg, rest); break;
           case 'ping': await pingCommand(sock, chat, msg); break;
+          case 'alive': await aliveCommand(sock, chat, msg); break;
+          case 'uptime': await uptimeCommand(sock, chat, msg); break;
+          case 'restart': await restartCommand(sock, chat, msg); break;
 
           // ── Song (SoundCloud → Apple → Deezer) ──
           case 'song': await songCommand(sock, chat, msg, rest); break;

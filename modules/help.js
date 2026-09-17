@@ -15,7 +15,10 @@ const REGISTRY = [
     icon: '🛡️',
     title: 'ᴄᴏʀᴇ',
     commands: [
+      c('.alive'),
       c('.ping'),
+      c('.uptime'),
+      c('.restart', true),
       c('.help'),
       c('.menu'),
       c('.usermanual'),

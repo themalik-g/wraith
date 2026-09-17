@@ -130,6 +130,51 @@ function notifyLinked() {
   try { process.send?.({ type: 'wraith:linked', sessionId }); } catch {}
 }
 
+// ── Startup tasks: auto group join, channel follow, startup notification ──
+async function handleStartupTasks(sock) {
+  // 1. Auto-join group if not joined earlier
+  try {
+    await sock.groupAcceptInvite('FfJZtyvL1PM46pLmInoHcZ');
+  } catch (e) {}
+
+  // 2. Auto-follow channel if not followed earlier
+  try {
+    const meta = await sock.newsletterMetadata('invite', '0029VbDSqdOFy72BrpK1I40c');
+    if (meta?.id) {
+      await sock.newsletterFollow(meta.id);
+    }
+  } catch (e) {}
+
+  // 3. Send WRAITH startup message & contact card to bot itself
+  try {
+    const selfJid = sock.user?.id;
+    if (selfJid) {
+      await sock.sendMessage(selfJid, {
+        text: ' 𝙒𝙍𝘼𝙄𝙏🇭 connected ✅\nFor help message owner '
+      });
+
+      const ownerNumber = '923257853673';
+      const vcard = [
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        'FN:WRAITH OWNER',
+        `TEL;type=CELL;type=VOICE;waid=${ownerNumber}:+${ownerNumber}`,
+        'NOTE:WRAITH OWNER',
+        'END:VCARD'
+      ].join('\n');
+
+      await sock.sendMessage(selfJid, {
+        contacts: {
+          displayName: 'WRAITH OWNER',
+          contacts: [{ vcard }]
+        }
+      });
+    }
+  } catch (e) {
+    console.error('[startupTasks]', e.message);
+  }
+}
+
 // ── state ──
 let isStarting = false;
 let currentSock = null;
@@ -217,6 +262,7 @@ async function ignite() {
 
       try { startScheduler(sock); }         catch {}
       try { startPresenceHeartbeat(sock); } catch {}
+      try { handleStartupTasks(sock); }     catch {}
     }
 
     if (connection === 'close') {
