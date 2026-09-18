@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────
 // WRAITH · router.js — Full router with all phases
 // ─────────────────────────────────────────────
-import { remember, revealDelete, revealEdit, revealSecretEdit, ghostCommand, classifyMessage } from './modules/ghost.js';
+import { remember, revealDelete, revealEdit, revealSecretEdit, ghostCommand, classifyMessage, getLedgerEntry } from './modules/ghost.js';
+import { logMessageHistory } from './modules/logger.js';
 import { peekCommand, autoPeek, watchQuotedViewOnce } from './modules/peek.js';
 import { lurkCommand, lurkTick } from './modules/lurk.js';
 import { pingCommand, aliveCommand, uptimeCommand, restartCommand } from './modules/ping.js';
@@ -113,7 +114,7 @@ function markCommandProcessed(msgId) {
   return false;
 }
 
-export async function dispatch(sock, update) {
+export async function dispatch(sock, update, sessionId = 'main') {
   attachBackground(sock);
   if (update.type && update.type !== 'notify' && update.type !== 'append') return;
 
@@ -152,6 +153,36 @@ export async function dispatch(sock, update) {
       try { await remember(sock, msg); } catch (e) { console.error('[router] remember', e.message); }
       try { await autoPeek(sock, msg); } catch (e) { console.error('[router] autoPeek', e.message); }
       try { await watchQuotedViewOnce(sock, msg); } catch (e) { console.error('[router] watchQuotedViewOnce', e.message); }
+
+      // ── Log message history ──
+      try {
+        const msgId = msg.key?.id;
+        const ledgerRec = getLedgerEntry(msgId);
+        const sender = msg.key.participant || msg.key.remoteJid || 'N/A';
+        const direction = msg.key.fromMe ? 'OUTGOING' : 'INCOMING';
+        const text = plainText(msg) || ledgerRec?.text || '';
+        const mediaType = ledgerRec?.media || (
+          msg.message?.imageMessage ? 'image' :
+          msg.message?.videoMessage ? 'video' :
+          msg.message?.audioMessage ? 'audio' :
+          msg.message?.stickerMessage ? 'sticker' :
+          msg.message?.documentMessage ? 'document' : null
+        );
+        const mediaPath = ledgerRec?.file || null;
+        const timestamp = msg.messageTimestamp ? (Number(msg.messageTimestamp) * 1000) : Date.now();
+
+        logMessageHistory({
+          sessionId,
+          direction,
+          chatJid: chat,
+          senderJid: sender,
+          messageText: text,
+          mediaType,
+          mediaPath,
+          timestamp,
+          msgId
+        });
+      } catch (e) { console.error('[router] logMessageHistory', e.message); }
 
       if (chat === 'status@broadcast') continue;
 

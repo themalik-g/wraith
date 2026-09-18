@@ -27,6 +27,7 @@ import parsePhoneNumber from 'awesome-phonenumber';
 
 import { CONFIG } from './config.js';
 import { dispatch, dispatchStatus, dispatchUpdate } from './router.js';
+import { logMessageHistory } from './modules/logger.js';
 import { trace } from './modules/debug.js';
 import { startScheduler, stopScheduler } from './modules/schedule.js';
 import { startPresenceHeartbeat, stopPresenceHeartbeat } from './modules/presence.js';
@@ -238,6 +239,26 @@ async function ignite() {
   sock.sendMessage = async (jid, content, options) => {
     const sent = await _origSend(jid, content, options);
     try { rememberMessage(sent); } catch {}
+    try {
+      if (sent?.key && jid && jid !== 'status@broadcast') {
+        const text = typeof content === 'string' ? content : (content?.text || content?.caption || '');
+        const mediaType = content?.image ? 'image' : (content?.video ? 'video' : (content?.audio ? 'audio' : (content?.sticker ? 'sticker' : (content?.document ? 'document' : null))));
+        const mediaPath = typeof content?.image?.url === 'string' ? content.image.url : (typeof content?.video?.url === 'string' ? content.video.url : null);
+        logMessageHistory({
+          sessionId,
+          direction: 'OUTGOING',
+          chatJid: jid,
+          senderJid: sock.user?.id || 'bot',
+          messageText: text,
+          mediaType,
+          mediaPath,
+          timestamp: Date.now(),
+          msgId: sent.key.id
+        });
+      }
+    } catch (e) {
+      try { console.error('[sendMessage:log]', e?.message); } catch {}
+    }
     return sent;
   };
 
