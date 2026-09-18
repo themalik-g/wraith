@@ -19,7 +19,6 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@hapi/boom": "^10.0.1",
     "@postfetch/core": "npm:@jsr/postfetch__core@^0.6.0",
-    "@renmu/node-shazam": "^2.0.4",
     "@snwfdhmp/soundcloud-downloader": "^1.0.6",
     "@whiskeysockets/baileys": "^7.0.0-rc.14",
     "applemusic-core": "^1.1.0",

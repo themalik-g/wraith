@@ -22,15 +22,22 @@ const DEBUG = process.env.WRAITH_DEBUG === '1';
 
 fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
-// ★ Sweep stale media files on boot (crash leftovers)
-try {
-  for (const f of fs.readdirSync(MEDIA_DIR)) {
-    const fp = path.join(MEDIA_DIR, f);
-    try {
-      if (Date.now() - fs.statSync(fp).mtimeMs > 24 * 3600 * 1000) fs.unlinkSync(fp);
-    } catch {}
-  }
-} catch {}
+// ★ Sweep stale media files on boot (crash leftovers) — async non-blocking
+(async () => {
+  try {
+    const files = await fs.promises.readdir(MEDIA_DIR);
+    const now = Date.now();
+    for (const f of files) {
+      const fp = path.join(MEDIA_DIR, f);
+      try {
+        const st = await fs.promises.stat(fp);
+        if (now - st.mtimeMs > 24 * 3600 * 1000) {
+          await fs.promises.unlink(fp);
+        }
+      } catch {}
+    }
+  } catch {}
+})();
 
 function read() { return readJson(STATE, []); }
 function write(arr) { writeJsonAtomic(STATE, arr); }

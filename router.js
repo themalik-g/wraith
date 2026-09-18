@@ -14,7 +14,7 @@ import { presenceCommand, shouldReadReceipts, applyAutoPresence } from './module
 import { activityCommand, trackActivity } from './modules/activity.js';
 import { updateCommand } from './modules/update.js';
 import { prefixCommand } from './modules/prefix.js';
-import { songCommand, findaudioCommand } from './modules/song.js';
+import { songCommand } from './modules/song.js';
 import { ytdlCommand, mp3Command, pdlCommand, pdlzipCommand } from './modules/download.js';
 import { urlCommand } from './modules/url.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
@@ -192,7 +192,7 @@ export async function dispatch(sock, update) {
       }
 
       const KNOWN = new Set([...CRITICAL_COMMANDS,
-        'dl', 'download', 'mp3', 'song', 'findaudio', 'songinfo', 'help', 'menu', 'ping', 'usermanual',
+        'dl', 'download', 'mp3', 'song', 'songinfo', 'help', 'menu', 'ping', 'usermanual',
         'currency', 'qr', 'define', 'weather', 'pwned', 'owner', 'script', 'repo',
         'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
         'welcome', 'goodbye', 'getpp', 'ig', 'tiktok', 'fb',
@@ -216,7 +216,6 @@ export async function dispatch(sock, update) {
 
           // ── Song (SoundCloud → Apple → Deezer) ──
           case 'song': await songCommand(sock, chat, msg, rest); break;
-          case 'findaudio': await findaudioCommand(sock, chat, msg); break;
 
           // ── Download (yt-dlp, all platforms) ──
           case 'dl':

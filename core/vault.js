@@ -15,7 +15,16 @@ const MAX_MB = typeof CONFIG.vaultMaxMB === 'number' && CONFIG.vaultMaxMB > 0
 const SWEEP_MS = 60 * 1000;
 
 export function vaultPath(name) {
-    return path.join(VAULT, name);
+    const safeName = path.basename(String(name || ''));
+    if (!safeName || safeName === '.' || safeName === '..') {
+        throw new Error('Invalid vault file name');
+    }
+    const resolvedVault = path.resolve(VAULT);
+    const targetPath = path.resolve(resolvedVault, safeName);
+    if (!targetPath.startsWith(resolvedVault + path.sep)) {
+        throw new Error('Path traversal detected');
+    }
+    return targetPath;
 }
 
 export function vaultSizeMB() {
