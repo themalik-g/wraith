@@ -98,7 +98,7 @@ URLs containing picture posts or carousels (e.g. Instagram `/p/`, TikTok `/photo
 | `.movie <title>` | Search movie/show details (iTunes / TVmaze) |
 | `.songinfo <query>` | Lookup song details & artwork (Deezer / MusicBrainz) |
 | `.lyrics <artist> <title>` | Fetch plain lyrics (LRCLIB / lyrics.ovh) |
-| `.ppt <topic>` | Generate a PowerPoint presentation file (.pptx) |
+| `.ppt <topic>;<subtopics>;<theme>;<slides>` | AI-powered PowerPoint presentation generator (Gemini) |
 | `.couplepp` | Get matching couple profile pictures |
 
 ---
