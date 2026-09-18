@@ -131,7 +131,6 @@ const REGISTRY = [
       c('.pdlzip <post-url>'),
       c('.download <url>'),
       c('.song <query>'),
-      c('.findaudio (reply audio)'),
       c('.gitdl <github-url>', true),
       c('.mfdl <mediafire-url>', true),
     ],

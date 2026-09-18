@@ -78,7 +78,6 @@ All commands use the configurable prefix (default: `.`). In **private mode**, co
 | `.pdlzip <post-url>` | Download post/carousel items as a single ZIP archive |
 | `.mp3 <url>` | Extract MP3 audio from any video or audio URL |
 | `.song <query>` | Download audio from SoundCloud, Apple Music, or Deezer |
-| `.findaudio` (reply audio/video) | Identify song from audio/voice-note/video sample |
 | `.gitdl <github-url>` | Download GitHub repository as a ZIP archive |
 | `.mfdl <mediafire-url>` | Resolve and download MediaFire files directly |
 | `.ig <username\|url>` | Fetch Instagram user profile or download post/carousel |

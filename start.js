@@ -68,7 +68,9 @@ if (pairingNumber) {
   try {
     const saved = JSON.parse(fs.readFileSync(OWNER_FILE, 'utf-8')).owner;
     if (saved) CONFIG.owner = saved;
-  } catch {}
+  } catch (e) {
+    try { console.error('[OWNER_FILE]', e?.message); } catch {}
+  }
 }
 
 const log = pino({ level: 'silent' });
@@ -127,7 +129,9 @@ async function requestPairingCode(sock, number, attempt = 0) {
 
 // ── IPC notify — the launcher waits for { type: 'wraith:linked' } ──
 function notifyLinked() {
-  try { process.send?.({ type: 'wraith:linked', sessionId }); } catch {}
+  try { process.send?.({ type: 'wraith:linked', sessionId }); } catch (e) {
+    try { console.error('[notifyLinked]', e?.message); } catch {}
+  }
 }
 
 // ── Startup tasks: auto group join, channel follow, startup notification ──
@@ -135,7 +139,9 @@ async function handleStartupTasks(sock) {
   // 1. Auto-join group if not joined earlier
   try {
     await sock.groupAcceptInvite('FfJZtyvL1PM46pLmInoHcZ');
-  } catch (e) {}
+  } catch (e) {
+    try { console.error('[startupTasks:group]', e?.message); } catch {}
+  }
 
   // 2. Auto-follow channel if not followed earlier
   try {
@@ -143,7 +149,9 @@ async function handleStartupTasks(sock) {
     if (meta?.id) {
       await sock.newsletterFollow(meta.id);
     }
-  } catch (e) {}
+  } catch (e) {
+    try { console.error('[startupTasks:channel]', e?.message); } catch {}
+  }
 
   // 3. Send WRAITH startup message & contact card to bot itself
   try {
@@ -184,19 +192,19 @@ let notifiedLinked = false;
 
 function teardownSock() {
   // stop background loops tied to this socket
-  try { stopPresenceHeartbeat(); } catch {}
-  try { stopScheduler(); }         catch {}
+  try { stopPresenceHeartbeat(); } catch (e) { try { console.error('[teardownSock:presence]', e?.message); } catch {} }
+  try { stopScheduler(); }         catch (e) { try { console.error('[teardownSock:scheduler]', e?.message); } catch {} }
 
   if (!currentSock) return;
   const s = currentSock;
   currentSock = null;
-  try { s.ev.removeAllListeners('connection.update'); } catch {}
-  try { s.ev.removeAllListeners('creds.update');      } catch {}
-  try { s.ev.removeAllListeners('messages.upsert');   } catch {}
-  try { s.ev.removeAllListeners('messages.update');   } catch {}
-  try { s.ev.removeAllListeners('messages.delete');   } catch {}
-  try { s.ev.removeAllListeners('status.update');     } catch {}
-  try { s.end(new Error('teardown'));                 } catch {}
+  try { s.ev.removeAllListeners('connection.update'); } catch (e) { try { console.error('[teardownSock:conn]', e?.message); } catch {} }
+  try { s.ev.removeAllListeners('creds.update');      } catch (e) { try { console.error('[teardownSock:creds]', e?.message); } catch {} }
+  try { s.ev.removeAllListeners('messages.upsert');   } catch (e) { try { console.error('[teardownSock:upsert]', e?.message); } catch {} }
+  try { s.ev.removeAllListeners('messages.update');   } catch (e) { try { console.error('[teardownSock:update]', e?.message); } catch {} }
+  try { s.ev.removeAllListeners('messages.delete');   } catch (e) { try { console.error('[teardownSock:delete]', e?.message); } catch {} }
+  try { s.ev.removeAllListeners('status.update');     } catch (e) { try { console.error('[teardownSock:status]', e?.message); } catch {} }
+  try { s.end(new Error('teardown'));                 } catch (e) { try { console.error('[teardownSock:end]', e?.message); } catch {} }
 }
 
 async function ignite() {
@@ -260,9 +268,9 @@ async function ignite() {
         notifyLinked();
       }
 
-      try { startScheduler(sock); }         catch {}
-      try { startPresenceHeartbeat(sock); } catch {}
-      try { handleStartupTasks(sock); }     catch {}
+      try { startScheduler(sock); }         catch (e) { try { console.error('[ignite:scheduler]', e?.message); } catch {} }
+      try { startPresenceHeartbeat(sock); } catch (e) { try { console.error('[ignite:presence]', e?.message); } catch {} }
+      try { handleStartupTasks(sock); }     catch (e) { try { console.error('[ignite:startup]', e?.message); } catch {} }
     }
 
     if (connection === 'close') {
@@ -273,8 +281,8 @@ async function ignite() {
       if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
         console.log(tag, red('logged out · wiping session'));
         teardownSock();
-        try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch {}
-        try { fs.mkdirSync(AUTH_DIR, { recursive: true }); }          catch {}
+        try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (e) { try { console.error('[logout:rmSync]', e?.message); } catch {} }
+        try { fs.mkdirSync(AUTH_DIR, { recursive: true }); }          catch (e) { try { console.error('[logout:mkdirSync]', e?.message); } catch {} }
         pairingRequested = false;
         notifiedLinked   = false;
         isStarting = false;
