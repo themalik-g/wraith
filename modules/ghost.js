@@ -49,6 +49,11 @@ function scheduleSave() {
 
 loadLedger();
 
+export function getLedgerEntry(id) {
+    if (!id) return null;
+    return ledger.get(id) || null;
+}
+
 // ─────────────────────────────────────────────
 //  Protocol constants
 // ─────────────────────────────────────────────
