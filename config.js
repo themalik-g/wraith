@@ -11,7 +11,7 @@ const BASE = {
   botName: "WRAITH",
   version: "1.3.2",
   timezone: "Asia/Karachi",
-  memoryTTL: 60 * 60 * 1000,
+  memoryTTL: 24 * 60 * 60 * 1000,
   vaultDir: "vault",
   vaultMaxMB: 200,
   reconnectDelay: 3000,

@@ -179,6 +179,7 @@ function nextSessionId(root) {
 //  children
 // ══════════════════════════════════════════════════
 const children = new Map();
+const restartingSessions = new Set();
 let shuttingDown = false;
 let rl = null;
 
@@ -253,6 +254,15 @@ function spawnSession(root, id, number) {
         spawnSession(root, m.sessionId, m.number || null);
       }
     }
+    if (m?.type === 'wraith:restart_all') {
+      say(cyan(`multi-session update requested by ${id} — restarting all other sessions`));
+      for (const [otherId, otherRec] of children.entries()) {
+        if (otherId !== id) {
+          restartingSessions.add(otherId);
+          try { otherRec.proc.kill('SIGTERM'); } catch {}
+        }
+      }
+    }
   });
 
   proc.on('error', err => console.error(clock(), red('spawn error:'), err.message));
@@ -262,6 +272,12 @@ function spawnSession(root, id, number) {
     try { resolveExit({ code, signal }); } catch {}
 
     if (shuttingDown) return;
+    if (restartingSessions.has(id)) {
+      restartingSessions.delete(id);
+      say(cyan(`restarting session ${id} for update…`));
+      setTimeout(() => { if (!shuttingDown) spawnSession(root, id, rec.number); }, 1000);
+      return;
+    }
     if (signal === 'SIGINT' || signal === 'SIGTERM') return;
 
     rec.restarts++;

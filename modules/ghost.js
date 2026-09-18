@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import { pipeline } from 'stream/promises';
 import { fileURLToPath } from 'url';
-import { writeFile } from 'fs/promises';
 import { downloadContentFromMessage, proto } from '@whiskeysockets/baileys';
 
 import { isOwner, ownerJid, digitsOf } from '../core/identity.js';
@@ -184,13 +184,12 @@ function write(o) {
 }
 
 // ─────────────────────────────────────────────
-//  Media download helper
+//  Media download helper — stream directly to file
 // ─────────────────────────────────────────────
-async function grab(node, kind) {
+async function saveStreamToFile(node, kind, filePath) {
     const stream = await downloadContentFromMessage(node, kind);
-    const chunks = [];
-    for await (const c of stream) chunks.push(c);
-    return Buffer.concat(chunks);
+    const writeStream = fs.createWriteStream(filePath);
+    await pipeline(stream, writeStream);
 }
 
 // ─────────────────────────────────────────────
@@ -275,9 +274,8 @@ export async function remember(sock, msg) {
             record.text = vo.node.caption || '';
 
             const ext = vo.type === 'image' ? 'jpg' : (vo.type === 'video' ? 'mp4' : 'ogg');
-            const buf = await grab(vo.node, vo.type);
             const fp = vaultPath(`${id}.${ext}`);
-            await writeFile(fp, buf);
+            await saveStreamToFile(vo.node, vo.type, fp);
             record.file = fp;
 
             try {
@@ -311,33 +309,29 @@ export async function remember(sock, msg) {
         else if (msg.message?.imageMessage) {
             record.media = 'image';
             record.text = msg.message.imageMessage.caption || '';
-            const buf = await grab(msg.message.imageMessage, 'image');
             const fp = vaultPath(`${id}.jpg`);
-            await writeFile(fp, buf);
+            await saveStreamToFile(msg.message.imageMessage, 'image', fp);
             record.file = fp;
         }
         else if (msg.message?.videoMessage) {
             record.media = 'video';
             record.text = msg.message.videoMessage.caption || '';
-            const buf = await grab(msg.message.videoMessage, 'video');
             const fp = vaultPath(`${id}.mp4`);
-            await writeFile(fp, buf);
+            await saveStreamToFile(msg.message.videoMessage, 'video', fp);
             record.file = fp;
         }
         else if (msg.message?.audioMessage) {
             record.media = 'audio';
             const mime = msg.message.audioMessage.mimetype || '';
             const ext = mime.includes('ogg') ? 'ogg' : 'mp3';
-            const buf = await grab(msg.message.audioMessage, 'audio');
             const fp = vaultPath(`${id}.${ext}`);
-            await writeFile(fp, buf);
+            await saveStreamToFile(msg.message.audioMessage, 'audio', fp);
             record.file = fp;
         }
         else if (msg.message?.stickerMessage) {
             record.media = 'sticker';
-            const buf = await grab(msg.message.stickerMessage, 'sticker');
             const fp = vaultPath(`${id}.webp`);
-            await writeFile(fp, buf);
+            await saveStreamToFile(msg.message.stickerMessage, 'sticker', fp);
             record.file = fp;
         }
         else {

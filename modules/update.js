@@ -169,20 +169,24 @@ export async function updateCommand(sock, chat, msg) {
             return send('✅ wraith is already up to date. Nothing to restart.');
         }
 
+        const sessionId = process.env.WRAITH_SESSION_ID || 'main';
+        const isMain = sessionId === 'main';
+
         // 6) Tell the user what happens next, THEN trigger restart
         await send(
             `✅ *update complete*\n\n` +
             `\`\`\`\n${(out || 'pulled latest').slice(0, 500)}\n\`\`\`\n\n` +
             `_sessions & settings untouched_\n` +
-            `_restarting in 6 seconds — the panel will bring the bot back automatically_`
+            `_restarting ${isMain ? 'all sessions' : 'this session'} in 6 seconds…_`
         );
 
-        // 7) Give time for message delivery, then exit non-zero so the
-        //    panel / pm2 treats it as a crash and auto-restarts.
-        //
-        //    Pterodactyl: exit 0 = "stopped on purpose, don't restart".
-        //                 exit != 0 = "crashed, restart me".
-        //    pm2:         always restarts by default.
+        // 7) If executed from main session, inform parent to restart all secondary sessions
+        if (isMain) {
+            try { process.send?.({ type: 'wraith:restart_all' }); } catch {}
+        }
+
+        // 8) Give time for message delivery, then exit non-zero so the
+        //    panel / launcher auto-restarts this process.
         setTimeout(() => {
             try { process.exit(1); }
             catch {
