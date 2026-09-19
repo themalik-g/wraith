@@ -7,14 +7,13 @@
 //  This heartbeat is the SINGLE presence keep-alive.
 // ─────────────────────────────────────────────
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { isOwner } from '../core/identity.js';
 import { readJson, writeJsonAtomic } from '../core/state-io.js';
 import { sendInteractive, createQuickReply } from '../lib/buttons.js';
 import { getPrefix } from '../core/settings.js';
+import { inState } from '../core/paths.js';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const STATE = path.join(here, '..', 'state', 'presence.json');
+const STATE = () => inState('presence.json');
 const DEBUG = process.env.WRAITH_DEBUG === '1';
 
 const DEFAULTS = {
@@ -25,11 +24,11 @@ const DEFAULTS = {
 };
 
 function read() {
-    return { ...DEFAULTS, ...readJson(STATE, {}) };
+    return { ...DEFAULTS, ...readJson(STATE(), {}) };
 }
 
 function write(o) {
-    writeJsonAtomic(STATE, o);
+    writeJsonAtomic(STATE(), o);
 }
 
 // ─────────────────────────────────────────────

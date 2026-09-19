@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import {
     downloadContentFromMessage,
     generateWAMessageFromContent
@@ -9,30 +8,34 @@ import {
 import { isOwner, ownerJid, digitsOf, isOwnerChat } from '../core/identity.js';
 import { sendInteractive, createQuickReply } from '../lib/buttons.js';
 import { getPrefix } from '../core/settings.js';
+import { inState, statePath } from '../core/paths.js';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const STATE = path.join(here, '..', 'state', 'peek.json');
+const STATE = () => inState('peek.json');
 
 const DEBUG = process.env.WRAITH_DEBUG === '1';
 
 // ─────────────────────────────────────────────
 //  State file bootstrap
 // ─────────────────────────────────────────────
-fs.mkdirSync(path.dirname(STATE), { recursive: true });
-if (!fs.existsSync(STATE)) {
-    fs.writeFileSync(STATE, JSON.stringify({
-        auto: false,
-        dest: 'owner',
-        watchQuoted: true
-    }));
+function initPeekState() {
+    statePath();
+    const file = STATE();
+    if (!fs.existsSync(file)) {
+        fs.writeFileSync(file, JSON.stringify({
+            auto: false,
+            dest: 'owner',
+            watchQuoted: true
+        }));
+    }
 }
+initPeekState();
 
 // ─────────────────────────────────────────────
 //  State helpers
 // ─────────────────────────────────────────────
 function read() {
     try {
-        const raw = JSON.parse(fs.readFileSync(STATE, 'utf-8'));
+        const raw = JSON.parse(fs.readFileSync(STATE(), 'utf-8'));
         return {
             auto: raw.auto === true,
             dest: raw.dest || 'owner',
@@ -43,7 +46,10 @@ function read() {
     }
 }
 function write(o) {
-    try { fs.writeFileSync(STATE, JSON.stringify(o, null, 2)); } catch {}
+    try {
+        statePath();
+        fs.writeFileSync(STATE(), JSON.stringify(o, null, 2));
+    } catch {}
 }
 
 // ─────────────────────────────────────────────
@@ -467,4 +473,4 @@ export async function watchQuotedViewOnce(sock, msg) {
     } catch (e) {
         if (DEBUG) console.log('[peek:watch] ❌', e.message);
     }
-                }
+}

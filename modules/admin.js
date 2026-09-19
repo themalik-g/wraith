@@ -5,25 +5,26 @@
 import fs from 'fs';
 import path from 'path';
 import { CONFIG } from '../config.js';
-import { fileURLToPath } from 'url';
 import { isOwner, ownerJid, digitsOf } from '../core/identity.js';
 import { stripDevice, jidType } from '../core/jid-resolver.js';
+import { inState, statePath } from '../core/paths.js';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const STATE = path.join(here, '..', 'state', 'admin.json');
+const STATE = () => inState('admin.json');
 const DEBUG = process.env.WRAITH_DEBUG === '1';
-
-fs.mkdirSync(path.dirname(STATE), { recursive: true });
 
 function readState() {
     try {
-        if (!fs.existsSync(STATE)) return {};
-        return JSON.parse(fs.readFileSync(STATE, 'utf-8'));
+        const file = STATE();
+        if (!fs.existsSync(file)) return {};
+        return JSON.parse(fs.readFileSync(file, 'utf-8'));
     } catch { return {}; }
 }
 
 function writeState(o) {
-    try { fs.writeFileSync(STATE, JSON.stringify(o, null, 2)); } catch {}
+    try {
+        statePath();
+        fs.writeFileSync(STATE(), JSON.stringify(o, null, 2));
+    } catch {}
 }
 
 function getGroupSettings(groupJid) {

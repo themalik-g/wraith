@@ -1,10 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { CONFIG } from '../config.js';
+import { vaultPathRoot } from './paths.js';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const VAULT = path.join(here, '..', CONFIG.vaultDir);
+const VAULT = vaultPathRoot();
 
 // Ensure it exists
 fs.mkdirSync(VAULT, { recursive: true });

@@ -7,11 +7,12 @@ import path from 'node:path';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import { isOwner, ownerJid } from '../core/identity.js';
 import { readJson, writeJsonAtomic } from '../core/state-io.js';
+import { inState } from '../core/paths.js';
 import { withTempFile } from '../lib/net.js';
 import { chunkText } from '../lib/net.js';
 
-const WELCOME_FILE = path.join(process.cwd(), 'state', 'welcome.json');
-const CALLS_FILE = path.join(process.cwd(), 'state', 'calls.json');
+const WELCOME_FILE = () => inState('welcome.json');
+const CALLS_FILE = () => inState('calls.json');
 
 function ownerOnly(sock, chat, msg) {
   const from = msg.key.participant || msg.key.remoteJid;
@@ -46,12 +47,12 @@ async function sendChunked(sock, chat, msg, text) {
 
 // ── Welcome / Goodbye config (read by core/groupEvents.js) ──────────────────
 export function getWelcomeConfig() {
-  return readJson(WELCOME_FILE, {});
+  return readJson(WELCOME_FILE(), {});
 }
 export function setWelcomeConfig(chat, patch) {
   const cfg = getWelcomeConfig();
   cfg[chat] = { ...(cfg[chat] || {}), ...patch };
-  writeJsonAtomic(WELCOME_FILE, cfg);
+  writeJsonAtomic(WELCOME_FILE(), cfg);
 }
 
 export async function welcomeCommand(sock, chat, msg, args) {
@@ -396,8 +397,8 @@ export async function clearchatCommand(sock, chat, msg) {
 }
 
 // ── .rejectcalls ────────────────────────────────────────────────────────────
-export function getCallsConfig() { return readJson(CALLS_FILE, { reject: false }); }
-export function setCallsConfig(patch) { writeJsonAtomic(CALLS_FILE, { ...getCallsConfig(), ...patch }); }
+export function getCallsConfig() { return readJson(CALLS_FILE(), { reject: false }); }
+export function setCallsConfig(patch) { writeJsonAtomic(CALLS_FILE(), { ...getCallsConfig(), ...patch }); }
 
 export function attachCallRejector(sock) {
   sock.ev.on('call', async (calls) => {

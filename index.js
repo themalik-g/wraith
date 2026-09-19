@@ -1,16 +1,9 @@
 #!/usr/bin/env node
 // ─────────────────────────────────────────────
 //  WRAITH · multi-session launcher  (ESM)
-// ─────────────────────────────────────────────
-//  · single entry point for VPS / pm2 / terminal
-//  · fetches repo automatically if dropped alone
-//  · links multiple WhatsApp numbers (isolated
-//    state/session per number, shared bot files)
-//  · auto-resumes EVERY linked number on restart
-//  · auto-restarts children (crash + .update)
-//
-//  flags:
-//    --add / --setup   resume existing + open wizard
+//  instances/<id>/ holds ONLY: session state vault logs data
+//  all code runs from the repo root — nothing is cloned/symlinked
+//  flags: --add / --setup
 // ─────────────────────────────────────────────
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -18,28 +11,16 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// ══════════════════════════════════════════════════
-//  constants
-// ══════════════════════════════════════════════════
 const SOURCE          = 'https://github.com/themalik-g/wraith.git';
 const BRANCH          = process.env.WRAITH_BRANCH || 'main';
-const EXCLUDE         = new Set([
-  '.git', 'instances',
-  'state', 'session', 'vault', 'logs', 'data',
-  'index.js', 'package-lock.json'
-]);
 const CLONE_TIMEOUT   = 180_000;
 const INSTALL_TIMEOUT = 300_000;
-const LINK_WAIT_MS    = 300_000;   // 5 min per number
+const LINK_WAIT_MS    = 300_000;
 
-const ADD_MODE = process.argv.includes('--add') || process.argv.includes('--setup');
+const ADD_MODE        = process.argv.includes('--add') || process.argv.includes('--setup');
 
-// ══════════════════════════════════════════════════
-//  terminal dye
-// ══════════════════════════════════════════════════
 const dye    = (c, s) => `\x1b[${c}m${s}\x1b[0m`;
 const grey   = s => dye(90, s);
 const cyan   = s => dye(36, s);
@@ -48,8 +29,8 @@ const green  = s => dye(32, s);
 const yellow = s => dye(33, s);
 const red    = s => dye(31, s);
 
-const clock = () => grey(new Date().toTimeString().slice(0, 8));
-const say   = (...p) => console.log(clock(), violet('❯'), ...p);
+const clock  = () => grey(new Date().toTimeString().slice(0, 8));
+const say    = (...p) => console.log(clock(), violet('❯'), ...p);
 
 const veil = () => {
   console.log();
@@ -59,9 +40,6 @@ const veil = () => {
   console.log();
 };
 
-// ══════════════════════════════════════════════════
-//  locate / fetch the repo
-// ══════════════════════════════════════════════════
 function repoRoot() {
   if (fs.existsSync(path.join(__dirname, 'start.js'))) return __dirname;
   const dir = path.join(__dirname, 'wraith');
@@ -84,41 +62,14 @@ function installDeps(dir) {
   say(green('✓ dependencies locked in'));
 }
 
-// ══════════════════════════════════════════════════
-//  per-session instance folders (symlinks + real state)
-// ══════════════════════════════════════════════════
 const instDir = (root, id) => path.join(root, 'instances', id);
 
-function safeSymlink(target, link, type) {
-  try {
-    const existing = fs.lstatSync(link, { throwIfNoEntry: false });
-    if (existing) return;
-  } catch {}
-  try {
-    fs.symlinkSync(target, link, type);
-  } catch (e) {
-    if (e.code !== 'EEXIST') {
-      console.error(clock(), red(`symlink failed: ${link} → ${target}: ${e.message}`));
-    }
-  }
-}
-
+// ★ instances/<id> now contains ONLY private data folders — no code, no symlinks
 function makeInstance(root, id) {
   const dir = instDir(root, id);
-  fs.mkdirSync(dir, { recursive: true });
-
-  for (const ent of fs.readdirSync(root, { withFileTypes: true })) {
-    if (EXCLUDE.has(ent.name)) continue;
-    const target = path.join(root, ent.name);
-    const link   = path.join(dir, ent.name);
-    safeSymlink(target, link, ent.isDirectory() ? 'junction' : 'file');
+  for (const name of ['session', 'state', 'vault', 'logs', 'data']) {
+    fs.mkdirSync(path.join(dir, name), { recursive: true });
   }
-
-  fs.mkdirSync(path.join(dir, 'state'),   { recursive: true });
-  fs.mkdirSync(path.join(dir, 'session'), { recursive: true });
-  fs.mkdirSync(path.join(dir, 'vault'),   { recursive: true });
-  fs.mkdirSync(path.join(dir, 'logs'),    { recursive: true });
-  fs.mkdirSync(path.join(dir, 'data'),    { recursive: true });
   return dir;
 }
 
@@ -135,40 +86,26 @@ function migrateLegacy(root) {
   }
 }
 
-// ══════════════════════════════════════════════════
-//  instance discovery
-// ══════════════════════════════════════════════════
-// "linked" = has session/creds.json (i.e. really paired)
-function isLinked(root, id) {
-  return fs.existsSync(path.join(root, 'instances', id, 'session', 'creds.json'));
-}
+const isLinked = (root, id) =>
+  fs.existsSync(path.join(root, 'instances', id, 'session', 'creds.json'));
 
 function listExistingInstances(root) {
   const dir = path.join(root, 'instances');
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir)
-    .filter(n => {
-      try { return fs.statSync(path.join(dir, n)).isDirectory(); }
-      catch { return false; }
-    })
+    .filter(n => { try { return fs.statSync(path.join(dir, n)).isDirectory(); } catch { return false; } })
     .filter(n => isLinked(root, n))
     .sort();
 }
 
-// FIX: only count LINKED instances, and never skip `main`
 function nextSessionId(root) {
   const dir = path.join(root, 'instances');
   if (!fs.existsSync(dir)) return 'main';
-
   const used = fs.readdirSync(dir).filter(n => {
-    try {
-      return fs.statSync(path.join(dir, n)).isDirectory() && isLinked(root, n);
-    } catch { return false; }
+    try { return fs.statSync(path.join(dir, n)).isDirectory() && isLinked(root, n); }
+    catch { return false; }
   });
-
-  if (used.length === 0) return 'main';
-  if (!used.includes('main')) return 'main';
-
+  if (used.length === 0 || !used.includes('main')) return 'main';
   let maxN = 1;
   for (const id of used) {
     const m = /^sess(\d+)$/.exec(id);
@@ -177,9 +114,6 @@ function nextSessionId(root) {
   return `sess${maxN + 1}`;
 }
 
-// ══════════════════════════════════════════════════
-//  children
-// ══════════════════════════════════════════════════
 const children = new Map();
 const restartingSessions = new Set();
 let shuttingDown = false;
@@ -202,23 +136,26 @@ async function promptNumber(label = 'number') {
 }
 
 function spawnSession(root, id, number) {
-  const dir  = makeInstance(root, id);
-  const args = ['--max-old-space-size=256', '--preserve-symlinks', '--preserve-symlinks-main', 'start.js', '--session', id];
+  const dir = makeInstance(root, id);
+  // ★ no --preserve-symlinks needed anymore; --expose-gc enables the RAM sweeper in start.js
+  const args = ['--max-old-space-size=256', '--expose-gc', 'start.js', '--session', id];
   if (number) args.push('--number', number);
 
-  const env = { ...process.env, WRAITH_REPO_ROOT: root, WRAITH_SESSION_ID: id };
+  const env = {
+    ...process.env,
+    WRAITH_REPO_ROOT: root,
+    WRAITH_SESSION_ID: id,
+    WRAITH_DATA_DIR: dir
+  };
 
   say(cyan(`starting session ${id}${number ? ' · +' + number : ''}`));
 
-  // FIX: stdin is 'ignore' so the child can NEVER steal keystrokes from the wizard.
-  // stdout/stderr are piped so we can mute them while prompting.
   const proc = spawn('node', args, {
-    cwd: dir,
+    cwd: root,               // ★ child runs from repo root, data dir passed via env
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     env
   });
 
-  // output forwarding with mute support
   let muted = false;
   const backlog = [];
   const route = (stream, dest) => {
@@ -273,7 +210,7 @@ function spawnSession(root, id, number) {
         try { targetRec.proc.kill('SIGTERM'); } catch {}
         children.delete(targetId);
       }
-      const targetDir = path.join(root, 'instances', targetId);
+      const targetDir = instDir(root, targetId);
       setTimeout(() => {
         try {
           fs.rmSync(targetDir, { recursive: true, force: true });
@@ -326,15 +263,8 @@ async function waitForLink(spawnResult, id) {
   ]);
 }
 
-// ══════════════════════════════════════════════════
-//  wizard
-// ══════════════════════════════════════════════════
-function muteAll() {
-  for (const rec of children.values()) rec.mute?.();
-}
-function unmuteAll() {
-  for (const rec of children.values()) rec.unmute?.();
-}
+function muteAll()   { for (const rec of children.values()) rec.mute?.(); }
+function unmuteAll() { for (const rec of children.values()) rec.unmute?.(); }
 
 async function linkOne(root, label) {
   const number = await promptNumber(label);
@@ -365,10 +295,9 @@ async function wizard(root) {
   }
 
   while (true) {
-    // FIX: silence every child's output while we ask, so the prompt is visible
     muteAll();
-    await new Promise(r => setTimeout(r, 250));       // let the terminal settle
-    process.stdout.write('\n');                        // clear line
+    await new Promise(r => setTimeout(r, 250));
+    process.stdout.write('\n');
     const ans = await ask(violet('  ❯ ') + 'link another number? ' + grey('[y/N]: '));
     unmuteAll();
 
@@ -385,9 +314,6 @@ async function wizard(root) {
   }
 }
 
-// ══════════════════════════════════════════════════
-//  signals
-// ══════════════════════════════════════════════════
 function quiet(sig) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -398,9 +324,6 @@ function quiet(sig) {
 process.on('SIGINT',  () => quiet('SIGINT'));
 process.on('SIGTERM', () => quiet('SIGTERM'));
 
-// ══════════════════════════════════════════════════
-//  go
-// ══════════════════════════════════════════════════
 (async () => {
   veil();
   const root = repoRoot();
@@ -411,7 +334,6 @@ process.on('SIGTERM', () => quiet('SIGTERM'));
 
   const existing = listExistingInstances(root);
 
-  // ── non-interactive (pm2 / systemd / docker) ──
   if (!process.stdin.isTTY) {
     if (existing.length) {
       say(grey(`[non-interactive] resuming ${existing.length} session(s): ${existing.join(', ')}`));

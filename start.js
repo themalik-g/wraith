@@ -1,13 +1,7 @@
 #!/usr/bin/env node
 // start.js — WRAITH per-session bootstrap
-//
-//   invoked by the VPS launcher as:
-//     node --preserve-symlinks --preserve-symlinks-main start.js \
-//          --session <id> [--number <digits>]
-//
-//   cwd = instances/<id>/
-//   session/, state/, vault/ are REAL folders (private per number)
-//   everything else is a symlink back into the shared repo
+//   node start.js --session <id> [--number <digits>]
+//   code loads from repo root; all data lives in WRAITH_DATA_DIR (instances/<id>)
 
 import makeWASocket, {
   useMultiFileAuthState,
@@ -22,7 +16,6 @@ import NodeCache from '@cacheable/node-cache';
 import pino from 'pino';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import parsePhoneNumber from 'awesome-phonenumber';
 
 import { CONFIG } from './config.js';
@@ -31,11 +24,8 @@ import { logMessageHistory } from './modules/logger.js';
 import { trace } from './modules/debug.js';
 import { startScheduler, stopScheduler } from './modules/schedule.js';
 import { startPresenceHeartbeat, stopPresenceHeartbeat } from './modules/presence.js';
-
-// ★ ADDED: direct import for the messages.delete listener
 import { revealDelete } from './modules/ghost.js';
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { sessionPath, statePath, inState } from './core/paths.js';
 
 // ── CLI ──
 const argv = process.argv.slice(2);
@@ -48,15 +38,11 @@ const sessionId     = argVal('--session') || process.env.WRAITH_SESSION_ID || 'm
 const rawNumber     = argVal('--number');
 const pairingNumber = rawNumber ? rawNumber.replace(/\D/g, '') : null;
 
-// ── per-session paths ──
-const AUTH_DIR   = path.join(process.cwd(), 'session');
-const STATE_DIR  = path.join(process.cwd(), 'state');
-const OWNER_FILE = path.join(STATE_DIR, 'owner.json');
+// ── per-session paths (ALL data lives here, code lives in repo root) ──
+const AUTH_DIR   = sessionPath();
+const STATE_DIR  = statePath();
+const OWNER_FILE = inState('owner.json');
 
-fs.mkdirSync(AUTH_DIR,  { recursive: true });
-fs.mkdirSync(STATE_DIR, { recursive: true });
-
-// persist this session's own owner + expose it to config.js
 if (pairingNumber) {
   const pn = parsePhoneNumber('+' + pairingNumber);
   if (!pn?.valid) {
@@ -76,7 +62,6 @@ if (pairingNumber) {
 
 const log = pino({ level: 'silent' });
 
-// ── terminal dye ──
 const dye    = (c, s) => `\x1b[${c}m${s}\x1b[0m`;
 const grey   = s => dye(90, s);
 const cyan   = s => dye(36, s);
@@ -91,6 +76,7 @@ const tag = grey(`[${sessionId}]`);
 // ── outgoing message cache (retry receipts) ──
 const MESSAGE_STORE = new Map();
 const MESSAGE_STORE_MAX = 100;
+
 function rememberMessage(msg) {
   if (!msg?.key?.id || !msg?.message) return;
   MESSAGE_STORE.set(msg.key.id, msg.message);
@@ -101,14 +87,13 @@ function rememberMessage(msg) {
 
 const msgRetryCounterCache = new NodeCache({ stdTTL: 60, checkperiod: 60, maxKeys: 100 });
 
-// Periodic RAM garbage collection trigger if enabled
+// RAM garbage collection (needs --expose-gc, launcher now passes it)
 setInterval(() => {
   if (typeof global.gc === 'function') {
     try { global.gc(); } catch {}
   }
 }, 5 * 60 * 1000);
 
-// ── pairing banner ──
 function printPairBanner(code, number) {
   console.log();
   console.log(violet(` ╭─ ${sessionId} · pairing code ─────────────`));
@@ -135,23 +120,18 @@ async function requestPairingCode(sock, number, attempt = 0) {
   }
 }
 
-// ── IPC notify — the launcher waits for { type: 'wraith:linked' } ──
 function notifyLinked() {
   try { process.send?.({ type: 'wraith:linked', sessionId }); } catch (e) {
     try { console.error('[notifyLinked]', e?.message); } catch {}
   }
 }
 
-// ── Startup tasks: auto group join, channel follow, startup notification ──
 async function handleStartupTasks(sock) {
-  // 1. Auto-join group if not joined earlier
   try {
     await sock.groupAcceptInvite('FfJZtyvL1PM46pLmInoHcZ');
   } catch (e) {
     try { console.error('[startupTasks:group]', e?.message); } catch {}
   }
-
-  // 2. Auto-follow channel if not followed earlier
   try {
     const meta = await sock.newsletterMetadata('invite', '0029VbDSqdOFy72BrpK1I40c');
     if (meta?.id) {
@@ -160,15 +140,12 @@ async function handleStartupTasks(sock) {
   } catch (e) {
     try { console.error('[startupTasks:channel]', e?.message); } catch {}
   }
-
-  // 3. Send WRAITH startup message & contact card to bot itself
   try {
     const selfJid = sock.user?.id;
     if (selfJid) {
       await sock.sendMessage(selfJid, {
         text: ' 𝙒𝙍𝘼𝙄𝙏🇭 connected ✅\nFor help message owner '
       });
-
       const ownerNumber = '923257853673';
       const vcard = [
         'BEGIN:VCARD',
@@ -178,7 +155,6 @@ async function handleStartupTasks(sock) {
         'NOTE:WRAITH OWNER',
         'END:VCARD'
       ].join('\n');
-
       await sock.sendMessage(selfJid, {
         contacts: {
           displayName: 'WRAITH OWNER',
@@ -191,7 +167,6 @@ async function handleStartupTasks(sock) {
   }
 }
 
-// ── state ──
 let isStarting = false;
 let currentSock = null;
 let reconnectAttempts = 0;
@@ -199,20 +174,15 @@ let pairingRequested = false;
 let notifiedLinked = false;
 
 function teardownSock() {
-  // stop background loops tied to this socket
   try { stopPresenceHeartbeat(); } catch (e) { try { console.error('[teardownSock:presence]', e?.message); } catch {} }
   try { stopScheduler(); }         catch (e) { try { console.error('[teardownSock:scheduler]', e?.message); } catch {} }
-
   if (!currentSock) return;
   const s = currentSock;
   currentSock = null;
-  try { s.ev.removeAllListeners('connection.update'); } catch (e) { try { console.error('[teardownSock:conn]', e?.message); } catch {} }
-  try { s.ev.removeAllListeners('creds.update');      } catch (e) { try { console.error('[teardownSock:creds]', e?.message); } catch {} }
-  try { s.ev.removeAllListeners('messages.upsert');   } catch (e) { try { console.error('[teardownSock:upsert]', e?.message); } catch {} }
-  try { s.ev.removeAllListeners('messages.update');   } catch (e) { try { console.error('[teardownSock:update]', e?.message); } catch {} }
-  try { s.ev.removeAllListeners('messages.delete');   } catch (e) { try { console.error('[teardownSock:delete]', e?.message); } catch {} }
-  try { s.ev.removeAllListeners('status.update');     } catch (e) { try { console.error('[teardownSock:status]', e?.message); } catch {} }
-  try { s.end(new Error('teardown'));                 } catch (e) { try { console.error('[teardownSock:end]', e?.message); } catch {} }
+  for (const ev of ['connection.update','creds.update','messages.upsert','messages.update','messages.delete','status.update']) {
+    try { s.ev.removeAllListeners(ev); } catch (e) { try { console.error('[teardownSock:'+ev+']', e?.message); } catch {} }
+  }
+  try { s.end(new Error('teardown')); } catch (e) { try { console.error('[teardownSock:end]', e?.message); } catch {} }
 }
 
 async function ignite() {
@@ -232,12 +202,12 @@ async function ignite() {
       keys: makeCacheableSignalKeyStore(state.keys, log)
     },
     markOnlineOnConnect: true,
-    generateHighQualityLinkPreview: true,
+    generateHighQualityLinkPreview: false,   // ★ CPU saver
     syncFullHistory: false,
     msgRetryCounterCache,
     defaultQueryTimeoutMs: 60000,
     connectTimeoutMs: 60000,
-    keepAliveIntervalMs: 10000
+    keepAliveIntervalMs: 30000               // ★ 10s → 30s = fewer pings, less CPU
   });
 
   currentSock = sock;
@@ -335,7 +305,6 @@ async function ignite() {
   sock.ev.on('messages.upsert', async (u) => {
     trace('messages.upsert', { session: sessionId, type: u.type, count: u.messages?.length });
     for (const m of u.messages || []) rememberMessage(m);
-
     try {
       if ((u.messages || []).some(m => m?.key?.remoteJid === 'status@broadcast')) {
         await dispatchStatus(sock, u);
@@ -343,14 +312,11 @@ async function ignite() {
     } catch (e) {
       console.error('[dispatchStatus:upsert]', e);
     }
-
     await dispatch(sock, u, sessionId);
   });
 
-  // ★ FIXED in router: dispatchUpdate now handles the v7 edit/revoke shapes
   sock.ev.on('messages.update', (upd) => dispatchUpdate(sock, upd));
 
-  // ★ ADDED: remote deletions arrive on this event — route them to revealDelete
   sock.ev.on('messages.delete', async (deletion) => {
     try {
       if ('keys' in deletion) {
@@ -364,7 +330,6 @@ async function ignite() {
     } catch (e) { console.error('[messages.delete]', e.message); }
   });
 
-  // ★ welcome/goodbye — core/groupEvents.js (created in round 1)
   sock.ev.on('group-participants.update', async (update) => {
     const mod = await import('./core/groupEvents.js').catch(() => null);
     if (mod?.handleGroupParticipantUpdate) mod.handleGroupParticipantUpdate(sock, update);
@@ -377,15 +342,14 @@ async function ignite() {
   });
 }
 
-// ── process level crash guards ──
 process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', reason);
 });
+
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err);
 });
 
-// ── graceful shutdown ──
 function quiet(sig) {
   console.log(tag, grey(`${sig} — shutting down`));
   teardownSock();
@@ -394,7 +358,6 @@ function quiet(sig) {
 process.on('SIGINT',  () => quiet('SIGINT'));
 process.on('SIGTERM', () => quiet('SIGTERM'));
 
-// ── go ──
 ignite().catch(err => {
   console.error(tag, red('fatal:'), err);
   process.exit(1);

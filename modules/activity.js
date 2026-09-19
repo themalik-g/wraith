@@ -5,20 +5,19 @@
 //  real, and all state writes are atomic.
 // ─────────────────────────────────────────────
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { isOwner } from '../core/identity.js';
 import { readJson, writeJsonAtomic } from '../core/state-io.js';
+import { inState } from '../core/paths.js';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const STATE = path.join(here, '..', 'state', 'activity.json');
+const STATE = () => inState('activity.json');
 const DEBUG = process.env.WRAITH_DEBUG === '1';
 
 function read() {
-    return readJson(STATE, {});
+    return readJson(STATE(), {});
 }
 
 function write(o) {
-    writeJsonAtomic(STATE, o);
+    writeJsonAtomic(STATE(), o);
 }
 
 export function trackActivity(chat, msg, text) {

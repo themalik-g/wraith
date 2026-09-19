@@ -1,9 +1,6 @@
 // config.js — WRAITH per-session config
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { statePath, inState } from './core/paths.js';
 
 const BASE = {
   owner: "",
@@ -16,18 +13,10 @@ const BASE = {
   vaultMaxMB: 200,
   reconnectDelay: 3000,
   repoUrl: "https://github.com/themalik-g/wraith",
-  // Feature-specific defaults
-  stalk: {
-    maxEventsPerJid: 500,
-  },
-  weather: {
-    stormThreshold: 50, // percent
-  },
-  media: {
-    maxImages: 10,
-    maxCouplePairs: 5,
-    maxDownloadMB: 100,
-  },
+  bannerChannelJid: "",   // ★ set with .setchannel <jid> — every command response is forwarded here
+  stalk: { maxEventsPerJid: 500 },
+  weather: { stormThreshold: 50 },
+  media: { maxImages: 10, maxCouplePairs: 5, maxDownloadMB: 100 },
 };
 
 function readJson(p, fallback) {
@@ -38,9 +27,8 @@ function readJson(p, fallback) {
 }
 
 function loadSessionConfig() {
-  const stateDir = path.join(here, 'state');
-  const ownerJson = readJson(path.join(stateDir, 'owner.json'), null);
-  const overrides = readJson(path.join(stateDir, 'config.json'), {}) || {};
+  const ownerJson = readJson(inState('owner.json'), null);
+  const overrides = readJson(inState('config.json'), {}) || {};
   const owner = (ownerJson?.owner || overrides.owner || "").replace(/\D/g, "");
   return { ...BASE, ...overrides, owner };
 }
@@ -48,9 +36,8 @@ function loadSessionConfig() {
 export const CONFIG = loadSessionConfig();
 
 export function saveSessionConfig(patch = {}) {
-  const stateDir = path.join(here, 'state');
-  fs.mkdirSync(stateDir, { recursive: true });
-  const target = path.join(stateDir, 'config.json');
+  statePath(); // ensure state dir exists
+  const target = inState('config.json');
   const current = readJson(target, {}) || {};
   const merged = { ...current, ...patch };
   fs.writeFileSync(target, JSON.stringify(merged, null, 2));
