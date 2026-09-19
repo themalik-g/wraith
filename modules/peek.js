@@ -1,11 +1,13 @@
 import fs from 'fs';
 import path from 'path';
+import { pipeline } from 'stream/promises';
 import {
     downloadContentFromMessage,
     generateWAMessageFromContent
 } from '@whiskeysockets/baileys';
 
 import { isOwner, ownerJid, digitsOf, isOwnerChat } from '../core/identity.js';
+import { vaultPath, vaultMediaName, dropFromVault } from '../core/vault.js';
 import { sendInteractive, createQuickReply } from '../lib/buttons.js';
 import { getPrefix } from '../core/settings.js';
 import { inState, statePath } from '../core/paths.js';
@@ -206,13 +208,15 @@ async function downloadAndSend(sock, targetChat, vo, opts = {}) {
     const { quotedMsg = null, mentionSender = null, prefix = '' } = opts;
     if (!vo || !vo.node) return false;
 
+    let fp = null;
     try {
-        const stream = await downloadContentFromMessage(vo.node, vo.type);
-        const chunks = [];
-        for await (const c of stream) chunks.push(c);
-        const buf = Buffer.concat(chunks);
+        const ext = vo.type === 'image' ? 'jpg' : (vo.type === 'video' ? 'mp4' : 'ogg');
+        const fileName = vaultMediaName(mentionSender || 'peek', 'peek', Date.now(), ext);
+        fp = vaultPath(fileName);
 
-        if (DEBUG) console.log('[peek:download] got', buf.length, 'bytes');
+        const stream = await downloadContentFromMessage(vo.node, vo.type);
+        const writeStream = fs.createWriteStream(fp);
+        await pipeline(stream, writeStream);
 
         const caption = [
             prefix,
@@ -225,23 +229,26 @@ async function downloadAndSend(sock, targetChat, vo, opts = {}) {
         if (quotedMsg) sendOpts.quoted = quotedMsg;
 
         if (vo.type === 'image') {
-            await sock.sendMessage(targetChat, { image: buf, ...sendOpts });
+            await sock.sendMessage(targetChat, { image: { url: fp }, ...sendOpts });
         } else if (vo.type === 'video') {
-            await sock.sendMessage(targetChat, { video: buf, ...sendOpts });
+            await sock.sendMessage(targetChat, { video: { url: fp }, ...sendOpts });
         } else if (vo.type === 'audio') {
             await sock.sendMessage(targetChat, {
-                audio: buf,
+                audio: { url: fp },
                 mimetype: vo.node.mimetype || 'audio/mpeg',
                 ptt: false,
                 ...sendOpts
             });
         } else {
+            dropFromVault(fp);
             return false;
         }
 
+        dropFromVault(fp);
         if (DEBUG) console.log('[peek:download] ✅ to', targetChat);
         return true;
     } catch (e) {
+        if (fp) dropFromVault(fp);
         if (DEBUG) console.log('[peek:download] ❌', e.message);
         return false;
     }
@@ -379,6 +386,10 @@ export async function autoPeek(sock, msg) {
     const s = read();
     if (!s.auto) return;
 
+    const chat = msg.key?.remoteJid;
+    const sender = msg.key?.participant || chat;
+    if (chat?.endsWith('@newsletter') || sender?.endsWith('@newsletter')) return;
+
     // ── Skip owner DM — prevents spam loop ──
     if (isOwnerChat(msg.key?.remoteJid)) return;
 
@@ -427,6 +438,10 @@ export async function autoPeek(sock, msg) {
 export async function watchQuotedViewOnce(sock, msg) {
     const s = read();
     if (!s.watchQuoted) return;
+
+    const chat = msg.key?.remoteJid;
+    const sender = msg.key?.participant || chat;
+    if (chat?.endsWith('@newsletter') || sender?.endsWith('@newsletter')) return;
 
     // Skip owner DM — prevents loop when quoted view-once is forwarded/replied to in self-chat
     if (isOwnerChat(msg.key?.remoteJid)) return;

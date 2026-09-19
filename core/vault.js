@@ -13,6 +13,14 @@ const MAX_MB = typeof CONFIG.vaultMaxMB === 'number' && CONFIG.vaultMaxMB > 0
     : 200;
 const SWEEP_MS = 60 * 1000;
 
+export function vaultMediaName(senderJid, category = 'chat', msgId = '', ext = 'bin') {
+    const rawDigits = (senderJid || '').split(':')[0].split('@')[0].replace(/\D/g, '');
+    const cleanPrefix = rawDigits || (senderJid || 'unknown').split('@')[0].replace(/[^a-zA-Z0-9]/g, '');
+    const cleanId = String(msgId || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '');
+    const cleanExt = String(ext).replace(/^\./, '');
+    return `${cleanPrefix}_${category}_${cleanId}.${cleanExt}`;
+}
+
 export function vaultPath(name) {
     const safeName = path.basename(String(name || ''));
     if (!safeName || safeName === '.' || safeName === '..') {
