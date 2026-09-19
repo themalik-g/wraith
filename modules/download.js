@@ -1,12 +1,6 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/download.js
-// .dl / .download  →  @postfetch/core (for post/carousel URLs) + yt-dlp (video/audio)
-// .mp3             →  yt-dlp audio extraction (-x --audio-format mp3)
-// .pdl / .pdlzip   →  @postfetch/core direct post download (images/carousels/zip)
-//
-//  · Media type auto-detected from magic bytes (file-type)
-//  · Everything deleted after send (short delay + sweep)
-//  · Leftovers never accumulate
+// Platform downloaders + @postfetch/core + yt-dlp
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
 import os from 'node:os';
@@ -89,6 +83,8 @@ export function isPostUrl(url) {
     lower.includes('fb.watch/') ||
     lower.includes('twitter.com/') && lower.includes('/status/') ||
     lower.includes('x.com/') && lower.includes('/status/') ||
+    lower.includes('threads.net/') ||
+    lower.includes('reddit.com/') ||
     lower.includes('pinterest.com/pin/') ||
     lower.includes('pin.it/')
   ) {
@@ -161,9 +157,9 @@ export async function downloadPostMediaDirect(sock, chat, msg, url, asZip = fals
         document: zipBuffer,
         fileName: zip.filename || 'post.zip',
         mimetype: zip.mime || 'application/zip',
-        caption: `📦 *Downloaded Post Archive* (${result.items.length} items)\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`,
+        caption: `📦 *Downloaded Post Archive* (${result.items.length} items)\n\nProvided by 𝕎ℝ𝔸I𝕋ℍ`,
       }, { quoted: msg });
-      await edit(sock, chat, status, `✅ *ZIP Download complete*\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`);
+      await edit(sock, chat, status, `✅ *ZIP Download complete*\n\nProvided by 𝕎ℝ𝔸I𝕋ℍ`);
       await react(sock, chat, msg, '☑');
       return;
     }
@@ -219,7 +215,7 @@ export async function downloadPostMediaDirect(sock, chat, msg, url, asZip = fals
 
     if (sentCount === 0) throw new Error('Post media files exceeded size limits or were empty');
 
-    await edit(sock, chat, status, `✅ *Download complete* (${sentCount} items)\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`);
+    await edit(sock, chat, status, `✅ *Download complete* (${sentCount} items)\n\nProvided by 𝕎ℝ𝔸I𝕋ℍ`);
     await react(sock, chat, msg, '☑');
   } catch (e) {
     try { console.error('[postfetch]', e.message); } catch {}
@@ -291,7 +287,7 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
             }
           }
           if (sentCount > 0) {
-            await edit(sock, chat, status, `✅ *Download complete*\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`);
+            await edit(sock, chat, status, `✅ *Download complete*\n\nProvided by 𝕎ℝI𝕋ℍ`);
             await react(sock, chat, msg, '☑');
             return;
           }
@@ -417,7 +413,7 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
 
     if (sentCount === 0) throw new Error('Downloaded files were empty or exceeded size limits');
 
-    await edit(sock, chat, status, `✅ *Download complete*\n_${safeName}_\n\nProvided by 𝙒𝙍𝘼𝙄𝙏🇭`);
+    await edit(sock, chat, status, `✅ *Download complete*\n_${safeName}_\n\nProvided by 𝕎ℝAI𝕋ℍ`);
     await react(sock, chat, msg, '☑');
   } catch (e) {
     try { console.error('[download]', e.message); } catch {}
@@ -432,7 +428,6 @@ export async function ytdlCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
   if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.dl <url or query>`' }, { quoted: msg });
 
-  // If a URL is provided without explicitly asking for audio/video or specific format, prompt with interactive quality options
   const isUrl = /^https?:\/\//i.test(query);
   const isDirectMode = /\b(audio|mp3|video|zip|hd|sd)\b/i.test(query);
 
@@ -443,7 +438,7 @@ export async function ytdlCommand(sock, chat, msg, args) {
       chat,
       {
         body: `⬇️ *Download Media Options*\n\nURL: _${query.slice(0, 70)}${query.length > 70 ? '…' : ''}_\n\nSelect your desired format/quality:`,
-        footer: 'Provided by 𝕎ℝⒶⒾⓉℍ',
+        footer: 'Provided by 𝕎ℝ𝔸I𝕋ℍ',
         buttons: [
           createQuickReply('🎬 Video (Best)', `${p}dl ${query} --direct`),
           createQuickReply('🎵 Audio MP3', `${p}mp3 ${query}`),
@@ -490,4 +485,51 @@ export async function pdlzipCommand(sock, chat, msg, args) {
     }, { quoted: msg });
   }
   return queue.add(() => downloadPostMediaDirect(sock, chat, msg, url, true));
+}
+
+// ── Specific Platform Shortcut Downloader Commands ──────────────────────────
+export async function twitterCommand(sock, chat, msg, args) {
+  const query = (args || []).join(' ').trim();
+  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.twitter <tweet-url>` or `.tw <tweet-url>`' }, { quoted: msg });
+  if (isPostUrl(query)) return pdlCommand(sock, chat, msg, args);
+  return ytdlCommand(sock, chat, msg, args);
+}
+
+export async function pinterestCommand(sock, chat, msg, args) {
+  const query = (args || []).join(' ').trim();
+  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.pinterest <pin-url>` or `.pin <pin-url>`' }, { quoted: msg });
+  if (isPostUrl(query)) return pdlCommand(sock, chat, msg, args);
+  return ytdlCommand(sock, chat, msg, args);
+}
+
+export async function threadsCommand(sock, chat, msg, args) {
+  const query = (args || []).join(' ').trim();
+  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.threads <threads-url>`' }, { quoted: msg });
+  if (isPostUrl(query)) return pdlCommand(sock, chat, msg, args);
+  return ytdlCommand(sock, chat, msg, args);
+}
+
+export async function redditCommand(sock, chat, msg, args) {
+  const query = (args || []).join(' ').trim();
+  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.reddit <reddit-post-url>`' }, { quoted: msg });
+  if (isPostUrl(query)) return pdlCommand(sock, chat, msg, args);
+  return ytdlCommand(sock, chat, msg, args);
+}
+
+export async function soundcloudCommand(sock, chat, msg, args) {
+  const query = (args || []).join(' ').trim();
+  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.soundcloud <url or query>` or `.sc <url or query>`' }, { quoted: msg });
+  return mp3Command(sock, chat, msg, args);
+}
+
+export async function spotifyCommand(sock, chat, msg, args) {
+  const query = (args || []).join(' ').trim();
+  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.spotify <url or track name>` or `.spot <url or track name>`' }, { quoted: msg });
+  return mp3Command(sock, chat, msg, args);
+}
+
+export async function youtubeCommand(sock, chat, msg, args) {
+  const query = (args || []).join(' ').trim();
+  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.youtube <url or query>` or `.yt <url or query>`' }, { quoted: msg });
+  return ytdlCommand(sock, chat, msg, args);
 }
