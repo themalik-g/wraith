@@ -144,7 +144,12 @@ URLs containing picture posts or carousels (e.g. Instagram `/p/`, TikTok `/photo
 | `.setstatus <text>` | Post status update to `status@broadcast` |
 | `.getstatus <num>` | Fetch user's status bio |
 | `.getpair <number>` | Generate pairing code session |
-| `.setsession [number]` | Add new session instance by replying to a `creds.json` document |
+| `.setsession [number]` | Add new session instance by replying to a `creds.json` document (main session only) |
+| `.addsession <number>` | Initialize and pair new session instance by phone number (main session only) |
+| `.delsession <session_id>` | Terminate and delete session instance (main session only) |
+| `.setvar <key> <value>` | Set persistent per-session environment variable (e.g. `.setvar GEMINI_API_KEY ...`) |
+| `.getvar <key\|all>` | View session variable(s) |
+| `.delvar <key>` | Delete session variable |
 | `.setpp` (reply image) | Change bot profile picture |
 | `.setabout <text>` | Change bot WhatsApp about bio |
 | `.chatstats` | Show chat statistics |

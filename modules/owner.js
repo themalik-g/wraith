@@ -8,6 +8,7 @@ import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import { isOwner, isPrimaryOwner, addSecondaryOwner, delSecondaryOwner, getOwnerDetails } from '../core/identity.js';
 import { readJson } from '../core/state-io.js';
 import { CONFIG } from '../config.js';
+import { getVar, setVar, delVar, getAllVars } from '../core/vars.js';
 
 function ownerOnly(sock, chat, msg) {
     const from = msg.key.participant || msg.key.remoteJid;
@@ -16,6 +17,88 @@ function ownerOnly(sock, chat, msg) {
         return true;
     }
     return false;
+}
+
+function mainSessionOnly(sock, chat, msg) {
+    const currentSession = process.env.WRAITH_SESSION_ID || 'main';
+    if (currentSession !== 'main') {
+        sock.sendMessage(chat, { text: '⛔ Session management commands are only allowed from the main session.' }, { quoted: msg }).catch(() => {});
+        return true;
+    }
+    return false;
+}
+
+// ── .addsession / .delsession ────────────────────────────────────────────────
+export async function addsessionCommand(sock, chat, msg, args) {
+    if (ownerOnly(sock, chat, msg)) return;
+    if (mainSessionOnly(sock, chat, msg)) return;
+
+    const rawNumber = args?.[0]?.replace(/\D/g, '');
+    if (!rawNumber || rawNumber.length < 10) {
+        return sock.sendMessage(chat, { text: '❌ Usage: `.addsession <phone_number>`\nExample: `.addsession 923001234567`' }, { quoted: msg });
+    }
+
+    const repoRoot = process.env.WRAITH_REPO_ROOT || process.cwd();
+    const instancesDir = path.join(repoRoot, 'instances');
+
+    let maxN = 1;
+    if (fs.existsSync(instancesDir)) {
+        const used = fs.readdirSync(instancesDir).filter(n => {
+            try { return fs.statSync(path.join(instancesDir, n)).isDirectory(); } catch { return false; }
+        });
+        for (const id of used) {
+            const m = /^sess(\d+)$/.exec(id);
+            if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+        }
+    }
+    const newSessionId = `sess${maxN + 1}`;
+
+    if (typeof process.send === 'function') {
+        process.send({
+            type: 'wraith:spawn_session',
+            sessionId: newSessionId,
+            number: rawNumber
+        });
+        await sock.sendMessage(chat, { text: `✅ Initialized new session \`${newSessionId}\` for +${rawNumber}. Requesting pairing code…` }, { quoted: msg });
+    } else {
+        await sock.sendMessage(chat, { text: `⚠️ Launcher IPC not connected. Cannot spawn session automatically.` }, { quoted: msg });
+    }
+}
+
+export async function delsessionCommand(sock, chat, msg, args) {
+    if (ownerOnly(sock, chat, msg)) return;
+    if (mainSessionOnly(sock, chat, msg)) return;
+
+    const targetId = (args?.[0] || '').trim();
+    if (!targetId) {
+        return sock.sendMessage(chat, { text: '❌ Usage: `.delsession <session_id>`\nExample: `.delsession sess2`' }, { quoted: msg });
+    }
+
+    if (targetId === 'main') {
+        return sock.sendMessage(chat, { text: '❌ Cannot delete the main session.' }, { quoted: msg });
+    }
+
+    const repoRoot = process.env.WRAITH_REPO_ROOT || process.cwd();
+    const targetDir = path.join(repoRoot, 'instances', targetId);
+
+    if (!fs.existsSync(targetDir)) {
+        return sock.sendMessage(chat, { text: `❌ Session \`${targetId}\` does not exist.` }, { quoted: msg });
+    }
+
+    if (typeof process.send === 'function') {
+        process.send({
+            type: 'wraith:delete_session',
+            sessionId: targetId
+        });
+        await sock.sendMessage(chat, { text: `✅ Signaled launcher to stop process and delete instance folder for session \`${targetId}\`.` }, { quoted: msg });
+    } else {
+        try {
+            fs.rmSync(targetDir, { recursive: true, force: true });
+            await sock.sendMessage(chat, { text: `✅ Deleted instance folder for session \`${targetId}\`.` }, { quoted: msg });
+        } catch (e) {
+            await sock.sendMessage(chat, { text: `⚠️ Failed to delete session folder: ${e.message}` }, { quoted: msg });
+        }
+    }
 }
 
 let _jimp = undefined;
@@ -401,6 +484,7 @@ export async function getpairCommand(sock, chat, msg, args) {
 // ── .setsession ─────────────────────────────────────────────────────────────
 export async function setsessionCommand(sock, chat, msg, args) {
     if (ownerOnly(sock, chat, msg)) return;
+    if (mainSessionOnly(sock, chat, msg)) return;
     try {
         const apn = await import('awesome-phonenumber');
         const parsePhoneNumber = apn.parsePhoneNumber || apn.default;
@@ -486,6 +570,77 @@ export async function setsessionCommand(sock, chat, msg, args) {
 
     } catch (e) {
         await sock.sendMessage(chat, { text: `⚠️ setsession failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+    }
+}
+
+// ── .setvar / .getvar / .delvar ─────────────────────────────────────────────
+export async function setvarCommand(sock, chat, msg, args) {
+    if (ownerOnly(sock, chat, msg)) return;
+    try {
+        const key = (args?.[0] || '').trim();
+        const value = (args || []).slice(1).join(' ').trim();
+        if (!key || !value) {
+            return sock.sendMessage(chat, { text: '❌ Usage: `.setvar <KEY> <VALUE>`\nExample: `.setvar GEMINI_API_KEY your_key_here`' }, { quoted: msg });
+        }
+        setVar(key, value);
+        await sock.sendMessage(chat, { text: `✅ Variable \`${key}\` set successfully.` }, { quoted: msg });
+    } catch (e) {
+        await sock.sendMessage(chat, { text: `⚠️ setvar failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+    }
+}
+
+export async function getvarCommand(sock, chat, msg, args) {
+    if (ownerOnly(sock, chat, msg)) return;
+    try {
+        const key = (args?.[0] || '').trim();
+        if (!key || key.toLowerCase() === 'all') {
+            const all = getAllVars();
+            const keys = Object.keys(all);
+            if (!keys.length) {
+                return sock.sendMessage(chat, { text: '⚙️ No variables set for this session.' }, { quoted: msg });
+            }
+            const lines = ['⚙️ *Session Variables:*', ''];
+            for (const k of keys) {
+                const val = all[k] || '';
+                const maskedVal = (k.includes('KEY') || k.includes('TOKEN') || k.includes('SECRET') || k.includes('PASS'))
+                    ? (val.length > 8 ? `${val.slice(0, 4)}...${val.slice(-4)}` : '••••••••')
+                    : val;
+                lines.push(`• \`${k}\`: ${maskedVal}`);
+            }
+            return sock.sendMessage(chat, { text: lines.join('\n') }, { quoted: msg });
+        }
+
+        const value = getVar(key);
+        if (value === null || value === undefined) {
+            return sock.sendMessage(chat, { text: `❌ Variable \`${key}\` is not set.` }, { quoted: msg });
+        }
+
+        const isSensitive = key.includes('KEY') || key.includes('TOKEN') || key.includes('SECRET') || key.includes('PASS');
+        const displayVal = isSensitive && value.length > 8
+            ? `${value.slice(0, 4)}...${value.slice(-4)}`
+            : value;
+
+        await sock.sendMessage(chat, { text: `⚙️ *Variable \`${key}\`:* ${displayVal}` }, { quoted: msg });
+    } catch (e) {
+        await sock.sendMessage(chat, { text: `⚠️ getvar failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+    }
+}
+
+export async function delvarCommand(sock, chat, msg, args) {
+    if (ownerOnly(sock, chat, msg)) return;
+    try {
+        const key = (args?.[0] || '').trim();
+        if (!key) {
+            return sock.sendMessage(chat, { text: '❌ Usage: `.delvar <KEY>`\nExample: `.delvar GEMINI_API_KEY`' }, { quoted: msg });
+        }
+        const removed = delVar(key);
+        if (removed) {
+            await sock.sendMessage(chat, { text: `✅ Deleted variable \`${key}\`.` }, { quoted: msg });
+        } else {
+            await sock.sendMessage(chat, { text: `❌ Variable \`${key}\` was not set.` }, { quoted: msg });
+        }
+    } catch (e) {
+        await sock.sendMessage(chat, { text: `⚠️ delvar failed: ${e.message}` }, { quoted: msg }).catch(() => {});
     }
 }
 

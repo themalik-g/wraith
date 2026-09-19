@@ -90,7 +90,7 @@ const tag = grey(`[${sessionId}]`);
 
 // ── outgoing message cache (retry receipts) ──
 const MESSAGE_STORE = new Map();
-const MESSAGE_STORE_MAX = 1000;
+const MESSAGE_STORE_MAX = 100;
 function rememberMessage(msg) {
   if (!msg?.key?.id || !msg?.message) return;
   MESSAGE_STORE.set(msg.key.id, msg.message);
@@ -99,7 +99,14 @@ function rememberMessage(msg) {
   }
 }
 
-const msgRetryCounterCache = new NodeCache({ stdTTL: 100, checkperiod: 120 });
+const msgRetryCounterCache = new NodeCache({ stdTTL: 60, checkperiod: 60, maxKeys: 100 });
+
+// Periodic RAM garbage collection trigger if enabled
+setInterval(() => {
+  if (typeof global.gc === 'function') {
+    try { global.gc(); } catch {}
+  }
+}, 5 * 60 * 1000);
 
 // ── pairing banner ──
 function printPairBanner(code, number) {

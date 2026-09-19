@@ -121,6 +121,9 @@ export async function bookCommand(sock, chat, msg, args) {
     }
 
     bookCache.set(chat, { time: Date.now(), query, books: r.books });
+    if (bookCache.size > 10) {
+      bookCache.delete(bookCache.keys().next().value);
+    }
 
     const lines = [`📚 *Books* — "${query}"`, ''];
     r.books.forEach((b, i) => {

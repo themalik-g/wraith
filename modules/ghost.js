@@ -344,6 +344,12 @@ export async function remember(sock, msg) {
         }
 
         ledger.set(id, record);
+        if (ledger.size > 200) {
+            const firstKey = ledger.keys().next().value;
+            const firstRec = ledger.get(firstKey);
+            if (firstRec?.file) dropFromVault(firstRec.file);
+            ledger.delete(firstKey);
+        }
         scheduleSave();
 
         if (DEBUG) {
