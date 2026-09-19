@@ -55,7 +55,7 @@ const CRITICAL_COMMANDS = new Set([
   'approveall', 'declineall', 'leave', 'join',
   'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
   'rejectcalls', 'setpp', 'setabout', 'chatstats', 'setsession',
-  'addsession', 'delsession', 'setchannel',
+  'addsession', 'delsession', 'setchannel', 'replymode',
   'setvar', 'getvar', 'delvar',
   'addowner', 'delowner', 'ownerlist',
   'gitdl', 'mfdl', 'url', 'pdl', 'pdlzip', 'restart',
@@ -291,12 +291,12 @@ export async function dispatch(sock, update, sessionId = 'main') {
       const prefix = getPrefix();
       let text = plainText(msg);
 
-      const sender = msg.key.participant || msg.key.remoteJid;
-      const senderIsOwner = msg.key.fromMe || isOwner(sender);
+      const msgSender = msg.key.participant || msg.key.remoteJid;
+      const senderIsOwner = msg.key.fromMe || isOwner(msgSender);
 
       // ★ SHORT-REPLY MODE: bare "1", "2", "3", "on", "off"… answers the last menu
       if (text && !text.startsWith(prefix)) {
-        const chosenId = matchChoice(chat, sender, text);
+        const chosenId = matchChoice(chat, msgSender, text);
         if (chosenId) {
           text = chosenId.startsWith(prefix) ? chosenId : `${prefix}${chosenId}`;
         }
@@ -405,11 +405,23 @@ export async function dispatch(sock, update, sessionId = 'main') {
               await sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
               break;
             }
-            const jid = (rest[0] || '').trim();
-            if (!jid || jid === 'off' || jid === 'disable') {
+            const jidArg = (rest[0] || '').trim();
+            if (!jidArg) {
+              const cur = (CONFIG.bannerChannelJid || '').trim();
+              const statusText = cur ? `✅ Current banner channel:\n\`${cur}\`` : 'ℹ️ Banner channel is currently *disabled*.';
+              await sock.sendMessage(chat, {
+                text: `${statusText}\n\n*Usage:*\n• \`${prefix}setchannel <jid>\`\n• \`${prefix}setchannel off\``
+              }, { quoted: msg });
+              break;
+            }
+            if (jidArg === 'off' || jidArg === 'disable') {
               saveSessionConfig({ bannerChannelJid: '' });
               await sock.sendMessage(chat, { text: '✅ Channel banner disabled.' }, { quoted: msg });
               break;
+            }
+            let jid = jidArg;
+            if (!jid.includes('@') && /^\d+$/.test(jid)) {
+              jid = `${jid}@newsletter`;
             }
             if (!/(@newsletter|@g\.us|@s\.whatsapp\.net|@lid)$/.test(jid)) {
               await sock.sendMessage(chat, {
