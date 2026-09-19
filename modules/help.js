@@ -6,7 +6,7 @@ import { CONFIG } from '../config.js';
 import { isOwner } from '../core/identity.js';
 import { getPrefix } from '../core/settings.js';
 import { getMode } from './utility.js';
-import { sendInteractive, createSingleSelect, createQuickReply } from '../lib/buttons.js';
+import { NEWSLETTER_CONTEXT } from '../lib/buttons.js';
 
 const c = (cmd, ownerOnly = false) => ({ cmd, ownerOnly });
 
@@ -102,6 +102,7 @@ const REGISTRY = [
       c('.weather <city>'),
       c('.pwned <password>'),
       c('.url (reply media)'),
+      c('.reqlocation'),
     ],
   },
   {
@@ -308,7 +309,7 @@ function findGroup(name) {
 async function sendSafe(sock, chat, msg, text) {
   const MAX = 3500;
   if (text.length <= MAX) {
-    return sock.sendMessage(chat, { text }, { quoted: msg });
+    return sock.sendMessage(chat, { text, contextInfo: NEWSLETTER_CONTEXT }, { quoted: msg });
   }
   const parts = [];
   let buf = '';
@@ -322,7 +323,7 @@ async function sendSafe(sock, chat, msg, text) {
   }
   if (buf) parts.push(buf);
   for (const p of parts) {
-    await sock.sendMessage(chat, { text: p }, { quoted: msg });
+    await sock.sendMessage(chat, { text: p, contextInfo: NEWSLETTER_CONTEXT }, { quoted: msg });
   }
 }
 
@@ -338,42 +339,8 @@ export async function helpCommand(sock, chat, msg, args) {
     const target = (args?.[0] || '').toLowerCase().trim();
 
     if (!target) {
-      const headerLines = [
-        '┌──❮ ⓌⓇⒶⒾⓉⒽ ❯',
-        '│',
-        isOwnerUser || mode !== 'public' ? '│ ᴄᴏᴍᴍᴀɴᴅꜱ ᴀʀᴇ ᴏᴡɴᴇʀ-ᴏɴʟʏ' : '│ ᴘᴜʙʟɪᴄ ᴍᴏᴅᴇ · ꜱᴏᴍᴇ ᴄᴏᴍᴍᴀɴᴅꜱ ʜɪᴅᴅᴇɴ',
-        `│ ᴘʀᴇꜰɪx · ${prefix}`,
-        `│ ℹ️ Select a category below or type ${prefix}help <category>`,
-        '│',
-        TAIL,
-      ];
-      const summaryBody = headerLines.join('\n');
-
-      const categories = visibleRegistry(isOwnerUser);
-      const menuRows = categories.map((g) => ({
-        header: g.icon,
-        title: `${g.id.toUpperCase()}`,
-        description: `${g.title} (${g.commands.length} commands)`,
-        id: `menu_${g.id}`
-      }));
-
-      return sendInteractive(
-        sock,
-        chat,
-        {
-          body: summaryBody,
-          footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select a category below',
-          buttons: [
-            createSingleSelect('📜 Select Category', [
-              {
-                title: 'WRAITH Command Categories',
-                rows: menuRows
-              }
-            ])
-          ]
-        },
-        { quoted: msg }
-      );
+      const text = renderAll(prefix, isOwnerUser, mode);
+      return sendSafe(sock, chat, msg, text);
     }
 
     const group = findGroup(target);
@@ -384,7 +351,7 @@ export async function helpCommand(sock, chat, msg, args) {
         .join(' · ');
       return sock.sendMessage(
         chat,
-        { text: `❓ no menu page called _${target}_.\n\n${avail}` },
+        { text: `❓ no menu page called _${target}_.\n\n${avail}`, contextInfo: NEWSLETTER_CONTEXT },
         { quoted: msg }
       );
     }
@@ -396,29 +363,18 @@ export async function helpCommand(sock, chat, msg, args) {
     if (!visible.length) {
       return sock.sendMessage(
         chat,
-        { text: `🔒 _${group.title}_ is owner-only.` },
+        { text: `🔒 _${group.title}_ is owner-only.`, contextInfo: NEWSLETTER_CONTEXT },
         { quoted: msg }
       );
     }
 
     const box = renderBox(group.icon, group.title, visible, prefix);
-    return sendInteractive(
-      sock,
-      chat,
-      {
-        body: box,
-        footer: 'Provided by 𝕎ℝⒶⒾⓉℍ',
-        buttons: [
-          createQuickReply('📜 Main Menu', `${prefix}help`),
-        ]
-      },
-      { quoted: msg }
-    );
+    return sendSafe(sock, chat, msg, box);
   } catch (e) {
     try {
       await sock.sendMessage(
         chat,
-        { text: `⚠️ help failed: ${e.message}` },
+        { text: `⚠️ help failed: ${e.message}`, contextInfo: NEWSLETTER_CONTEXT },
         { quoted: msg }
       );
     } catch {}

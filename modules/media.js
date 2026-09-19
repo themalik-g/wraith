@@ -13,7 +13,8 @@ import {
   fetchLyrics,
 } from '../lib/apis.js';
 import { chunkText, downloadToFile } from '../lib/net.js';
-import { sendInteractive, createSingleSelect } from '../lib/buttons.js';
+import { sendInteractive, createQuickReply, NEWSLETTER_CONTEXT } from '../lib/buttons.js';
+import { getPrefix } from '../core/settings.js';
 
 // ─── Book cache ───
 const bookCache = new Map();
@@ -138,30 +139,40 @@ export async function bookCommand(sock, chat, msg, args) {
       }
     });
 
-    const rows = r.books.map((b, i) => ({
-      header: `${i + 1}`,
-      title: (b.title || 'Untitled').slice(0, 24),
-      description: `${b.author || 'Unknown'} · ${(b.format || 'pdf').toUpperCase()}`.slice(0, 72),
-      id: `book_dl_${i + 1}`
-    }));
+    const p = getPrefix();
+    const downloadables = r.books
+      .map((b, i) => ({ book: b, idx: i + 1 }))
+      .filter((x) => Boolean(x.book.url))
+      .slice(0, 3);
 
-    await sendInteractive(
-      sock,
-      chat,
-      {
-        body: lines.join('\n'),
-        footer: `Source: ${r.source} · Provided by 𝕎ℝⒶⒾⓉℍ`,
-        buttons: [
-          createSingleSelect('📚 Select a Book to Download', [
-            {
-              title: `Results for "${query}"`,
-              rows
-            }
-          ])
-        ]
-      },
-      { quoted: msg }
+    const buttons = downloadables.map((x) =>
+      createQuickReply(`📥 DL ${x.idx}`, `${p}book dl ${x.idx}`)
     );
+
+    lines.push('');
+    lines.push('_💡 Reply directly to this message with a number (e.g. 1 or dl 1) or click a button above to download._');
+
+    if (buttons.length > 0) {
+      await sendInteractive(
+        sock,
+        chat,
+        {
+          body: lines.join('\n'),
+          footer: `Source: ${r.source} · Provided by 𝕎ℝⒶⒾⓉℍ`,
+          buttons,
+        },
+        { quoted: msg }
+      );
+    } else {
+      await sock.sendMessage(
+        chat,
+        {
+          text: lines.join('\n'),
+          contextInfo: NEWSLETTER_CONTEXT,
+        },
+        { quoted: msg }
+      );
+    }
 
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ book failed: ${e.message}` }, { quoted: msg }).catch(() => {});
