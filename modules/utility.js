@@ -11,6 +11,7 @@ import { isOwner, ownerJid } from '../core/identity.js';
 import { readJson, writeJsonAtomic } from '../core/state-io.js';
 import { vaultPath, dropFromVault } from '../core/vault.js';
 import { CONFIG } from '../config.js';
+import { sendInteractive, createCtaUrl, createCtaCopy } from '../lib/buttons.js';
 import { chunkText, withTempFile } from '../lib/net.js';
 import {
   fetchCurrency, defineWord, fetchWeather, checkPwned,
@@ -318,9 +319,19 @@ export async function ownerCommand(sock, chat, msg, args) {
 export async function scriptCommand(sock, chat, msg) {
   try {
     const url = CONFIG.repoUrl || 'https://github.com/themalik-g/wraith';
-    await sock.sendMessage(chat, {
-      text: `📦 *WRAITH*\n\n_${CONFIG.codename || 'WRAITH'} v${CONFIG.version || ''} — a silent watcher for WhatsApp._\n\n${url}`,
-    }, { quoted: msg });
+    await sendInteractive(
+      sock,
+      chat,
+      {
+        body: `📦 *WRAITH*\n\n_${CONFIG.codename || 'WRAITH'} v${CONFIG.version || ''} — a silent watcher for WhatsApp._\n\n${url}`,
+        footer: 'Provided by 𝕎ℝⒶⒾⓉℍ',
+        buttons: [
+          createCtaUrl('🌐 GitHub Repository', url),
+          createCtaCopy('📋 Copy Repo URL', url)
+        ]
+      },
+      { quoted: msg }
+    );
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ script failed: ${e.message}` }, { quoted: msg }).catch(() => {});
   }
