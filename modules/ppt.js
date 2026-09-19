@@ -49,7 +49,7 @@ export async function pptCommand(sock, chat, msg, args) {
     let userMsg = `❌ *PPT generation failed:* ${err.message}`;
 
     if (err.message === 'GEMINI_API_KEY_MISSING') {
-      userMsg = `⚠️ *Please add your GEMINI_API_KEY to environment variables (`.env`) to use the PPT feature.*`;
+      userMsg = '⚠️ *Please add your GEMINI_API_KEY to environment variables (`.env`) to use the PPT feature.*';
     } else if (err.message === 'INVALID_TOPIC') {
       userMsg = `⚠️ *Please provide a valid topic for the presentation.*`;
     }

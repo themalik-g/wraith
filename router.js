@@ -55,7 +55,7 @@ const CRITICAL_COMMANDS = new Set([
   'approveall', 'declineall', 'leave', 'join',
   'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
   'rejectcalls', 'setpp', 'setabout', 'chatstats', 'setsession',
-  'addsession', 'delsession', 'setchannel', 'replymode',
+  'addsession', 'delsession', 'replymode',
   'setvar', 'getvar', 'delvar',
   'addowner', 'delowner', 'ownerlist',
   'gitdl', 'mfdl', 'url', 'pdl', 'pdlzip', 'restart',
@@ -168,53 +168,6 @@ function markCommandProcessed(msgId) {
   return false;
 }
 
-// ★ banner helpers — forward every command response to your channel
-function getBannerJid() {
-  const j = (CONFIG.bannerChannelJid || '').trim();
-  return j && j !== 'off' ? j : null;
-}
-
-async function forwardBanner(sock, sent) {
-  const bannerJid = getBannerJid();
-  if (!bannerJid || !sent?.message) return;
-  try {
-    const to = sent.key?.remoteJid;
-    if (!to || to === bannerJid || to === 'status@broadcast') return;
-    if (sent.message?.reactionMessage) return;
-    await sock.relayMessage(bannerJid, sent.message, {});
-  } catch {}
-}
-
-// wraps sendMessage/relayMessage for the duration of one command so that
-// every response (text or media) is also posted to the banner channel
-function withBanner(sock) {
-  const bannerJid = getBannerJid();
-  if (!bannerJid) return sock;
-  const wrapped = Object.create(Object.getPrototypeOf(sock));
-  Object.defineProperty(wrapped, 'ev', { get: () => sock.ev });
-  Object.assign(wrapped, sock);
-
-  const _send = sock.sendMessage.bind(sock);
-  wrapped.sendMessage = async (jid, content, options) => {
-    const sent = await _send(jid, content, options);
-    await forwardBanner(sock, sent);
-    return sent;
-  };
-
-  const _relay = sock.relayMessage?.bind(sock);
-  if (_relay) {
-    wrapped.relayMessage = async (jid, message, options) => {
-      const res = await _relay(jid, message, options);
-      try {
-        if (jid !== bannerJid && jid !== 'status@broadcast' && message && !message.reactionMessage) {
-          await _relay(bannerJid, message, {});
-        }
-      } catch {}
-      return res;
-    };
-  }
-  return wrapped;
-}
 
 export async function dispatch(sock, update, sessionId = 'main') {
   attachBackground(sock);
@@ -335,8 +288,7 @@ export async function dispatch(sock, update, sessionId = 'main') {
         try { await sock.sendMessage(chat, { react: { text: '⌛', key: msg.key } }); } catch (e) { console.error('[router] react', e.message); }
       }
 
-      // ★ banner-wrapped socket for this command only
-      const csock = withBanner(sock);
+      const csock = sock;
 
       try {
         switch (verb) {
@@ -399,42 +351,6 @@ export async function dispatch(sock, update, sessionId = 'main') {
             break;
           }
           case 'reqlocation': await reqlocationCommand(csock, chat, msg); break;
-          // ★ channel banner config
-          case 'setchannel': {
-            if (!senderIsOwner) {
-              await sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
-              break;
-            }
-            const jidArg = (rest[0] || '').trim();
-            if (!jidArg) {
-              const cur = (CONFIG.bannerChannelJid || '').trim();
-              const statusText = cur ? `✅ Current banner channel:\n\`${cur}\`` : 'ℹ️ Banner channel is currently *disabled*.';
-              await sock.sendMessage(chat, {
-                text: `${statusText}\n\n*Usage:*\n• \`${prefix}setchannel <jid>\`\n• \`${prefix}setchannel off\``
-              }, { quoted: msg });
-              break;
-            }
-            if (jidArg === 'off' || jidArg === 'disable') {
-              saveSessionConfig({ bannerChannelJid: '' });
-              await sock.sendMessage(chat, { text: '✅ Channel banner disabled.' }, { quoted: msg });
-              break;
-            }
-            let jid = jidArg;
-            if (!jid.includes('@') && /^\d+$/.test(jid)) {
-              jid = `${jid}@newsletter`;
-            }
-            if (!/(@newsletter|@g\.us|@s\.whatsapp\.net|@lid)$/.test(jid)) {
-              await sock.sendMessage(chat, {
-                text: `⚠️ Invalid JID.\n\nUsage:\n• \`${prefix}setchannel 12036…@newsletter\`\n• \`${prefix}setchannel 12036…@g.us\` (group)\n• \`${prefix}setchannel off\``
-              }, { quoted: msg });
-              break;
-            }
-            saveSessionConfig({ bannerChannelJid: jid });
-            await sock.sendMessage(chat, {
-              text: `✅ Banner channel set to:\n\`${jid}\`\n\nEvery command response will now be forwarded there.`
-            }, { quoted: msg });
-            break;
-          }
           case 'book':
           case 'books': await bookCommand(csock, chat, msg, rest); break;
           case 'img':
