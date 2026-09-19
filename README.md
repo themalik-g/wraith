@@ -109,8 +109,6 @@ export const CONFIG = {
     owner: "923257853673",
     codename: "WRAITH",
     memoryTTL: 60 * 60 * 1000,
-    vaultDir: "vault",
-    vaultMaxMB: 200,
     reconnectDelay: 3000,
     keepAliveInterval: 30_000
 };
@@ -128,7 +126,6 @@ wraith/
 ├── ecosystem.config.cjs
 ├── core/
 │   ├── identity.js
-│   ├── vault.js
 │   ├── settings.js
 │   └── jid-resolver.js
 ├── lib/
@@ -163,17 +160,14 @@ wraith/
 │   ├── url.js
 │   ├── usermanual.js
 │   └── utility.js
-├── state/
-├── session/
-└── vault/
+└── session/
 ```
 
 ---
 
 ## 🔐 Security & Privacy
 
-- **Never commit** `session/`, `.env`, `keys.env`, `state/owner.json`
-- `state/ghost-ledger.json` contains encrypted message history — keep it private
+- **Never commit** `session/`, `.env`, `keys.env`, or local credentials/state.
 
 ---
 

@@ -407,7 +407,7 @@ export async function autoPeek(sock, msg) {
     if (!vo) return;
 
     const originChat = msg.key.remoteJid;
-    const sender = msg.key.participant || msg.key.remoteJid;
+    const voSender = msg.key.participant || msg.key.remoteJid;
     const prefix = `👁️ *auto-peek · ${vo.type}*`;
 
     const targets = [];
@@ -416,7 +416,7 @@ export async function autoPeek(sock, msg) {
 
     for (const target of targets) {
         const result = await revealViewOnce(sock, target, msg, vo, {
-            mentionSender: sender,
+            mentionSender: voSender,
             prefix
         });
         if (DEBUG) console.log('[peek:auto]', target, '→', result.method, result.ok);

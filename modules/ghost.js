@@ -314,23 +314,23 @@ export async function remember(sock, msg) {
             record.file = fp;
 
             try {
-                const sender = record.from;
+                const voSender = record.from;
                 const caption =
                     `👁️ *ghost captured a view-once ${vo.type}*\n` +
-                    `from @${digitsOf(sender)}`;
+                    `from @${digitsOf(voSender)}`;
 
                 let payload;
                 if (vo.type === 'image') {
-                    payload = { image: { url: fp }, caption, mentions: [sender] };
+                    payload = { image: { url: fp }, caption, mentions: [voSender] };
                 } else if (vo.type === 'video') {
-                    payload = { video: { url: fp }, caption, mentions: [sender] };
+                    payload = { video: { url: fp }, caption, mentions: [voSender] };
                 } else {
                     payload = {
                         audio: { url: fp },
                         mimetype: vo.node.mimetype || 'audio/mpeg',
                         ptt: false,
                         caption,
-                        mentions: [sender]
+                        mentions: [voSender]
                     };
                 }
 

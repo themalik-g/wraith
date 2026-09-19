@@ -14,7 +14,7 @@ All commands use the configurable prefix (default: `.`). In **private mode**, co
 | `.ghost edit on` | Arm anti-edit tracking |
 | `.ghost edit off` | Disarm anti-edit tracking |
 
-**How it works:** Inbound messages are stored in `state/ghost-ledger.json` with text and media (saved to `vault/`). When a message is deleted or edited, the original content is revealed.
+**How it works:** Inbound messages are recorded with text and media in encrypted session memory. When a message is deleted or edited, the original content is revealed.
 
 ---
 
