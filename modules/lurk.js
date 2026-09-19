@@ -91,8 +91,18 @@ export async function lurkCommand(sock, chat, msg, args) {
     if (a0 === 'on' || a0 === 'off') {
         s.on = a0 === 'on';
         write(s);
-        return sock.sendMessage(chat, {
-            text: s.on ? '🌒 lurk engaged.' : '🌒 lurk disengaged.'
+        return sendInteractive(sock, chat, {
+            body: `🌒 Lurk auto-view is now *${s.on ? 'ENGAGED (ON)' : 'DISENGAGED (OFF)'}*.\n\n` +
+                  `auto-view  · ${s.on ? 'ON' : 'OFF'}\n` +
+                  `auto-react · ${s.react ? 'ON' : 'OFF'}\n` +
+                  `download   · ${s.download ? 'ON' : 'OFF'}\n` +
+                  `emoji      · ${s.emoji}\n`,
+            footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select an option below',
+            buttons: [
+                createQuickReply(s.on ? 'Auto-View OFF' : 'Auto-View ON', `${p}lurk ${s.on ? 'off' : 'on'}`),
+                createQuickReply(s.react ? 'Auto-React OFF' : 'Auto-React ON', `${p}lurk react ${s.react ? 'off' : 'on'}`),
+                createQuickReply(s.download ? 'Download OFF' : 'Download ON', `${p}lurk download ${s.download ? 'off' : 'on'}`),
+            ]
         }, { quoted: msg });
     }
 
@@ -102,8 +112,18 @@ export async function lurkCommand(sock, chat, msg, args) {
         }
         s.react = a1 === 'on';
         write(s);
-        return sock.sendMessage(chat, {
-            text: s.react ? '🌒 reactions enabled.' : '🌒 reactions disabled.'
+        return sendInteractive(sock, chat, {
+            body: `🌒 Lurk auto-react is now *${s.react ? 'ENABLED (ON)' : 'DISABLED (OFF)'}*.\n\n` +
+                  `auto-view  · ${s.on ? 'ON' : 'OFF'}\n` +
+                  `auto-react · ${s.react ? 'ON' : 'OFF'}\n` +
+                  `download   · ${s.download ? 'ON' : 'OFF'}\n` +
+                  `emoji      · ${s.emoji}\n`,
+            footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select an option below',
+            buttons: [
+                createQuickReply(s.on ? 'Auto-View OFF' : 'Auto-View ON', `${p}lurk ${s.on ? 'off' : 'on'}`),
+                createQuickReply(s.react ? 'Auto-React OFF' : 'Auto-React ON', `${p}lurk react ${s.react ? 'off' : 'on'}`),
+                createQuickReply(s.download ? 'Download OFF' : 'Download ON', `${p}lurk download ${s.download ? 'off' : 'on'}`),
+            ]
         }, { quoted: msg });
     }
 
@@ -113,10 +133,18 @@ export async function lurkCommand(sock, chat, msg, args) {
         }
         s.download = a1 === 'on';
         write(s);
-        return sock.sendMessage(chat, {
-            text: s.download
-                ? '🌒 status download enabled. When auto-view/react are off, statuses will be saved silently.'
-                : '🌒 status download disabled.'
+        return sendInteractive(sock, chat, {
+            body: `🌒 Status download is now *${s.download ? 'ENABLED (ON)' : 'DISABLED (OFF)'}*.\n\n` +
+                  `auto-view  · ${s.on ? 'ON' : 'OFF'}\n` +
+                  `auto-react · ${s.react ? 'ON' : 'OFF'}\n` +
+                  `download   · ${s.download ? 'ON' : 'OFF'}\n` +
+                  `emoji      · ${s.emoji}\n`,
+            footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select an option below',
+            buttons: [
+                createQuickReply(s.on ? 'Auto-View OFF' : 'Auto-View ON', `${p}lurk ${s.on ? 'off' : 'on'}`),
+                createQuickReply(s.react ? 'Auto-React OFF' : 'Auto-React ON', `${p}lurk react ${s.react ? 'off' : 'on'}`),
+                createQuickReply(s.download ? 'Download OFF' : 'Download ON', `${p}lurk download ${s.download ? 'off' : 'on'}`),
+            ]
         }, { quoted: msg });
     }
 
