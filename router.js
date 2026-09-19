@@ -83,6 +83,21 @@ function attachBackground(sock) {
   try { attachCallRejector(sock); } catch (e) { console.error('[router] attachCallRejector', e.message); }
 }
 
+function extractQuotedText(msg) {
+  const ctx = msg.message?.extendedTextMessage?.contextInfo;
+  if (!ctx?.quotedMessage) return '';
+  const qm = ctx.quotedMessage;
+  return (
+    qm.conversation ||
+    qm.extendedTextMessage?.text ||
+    qm.interactiveMessage?.body?.text ||
+    qm.viewOnceMessage?.message?.interactiveMessage?.body?.text ||
+    qm.imageMessage?.caption ||
+    qm.videoMessage?.caption ||
+    ''
+  ).trim();
+}
+
 function plainText(msg) {
   const direct = (
     msg.message?.conversation ||
@@ -92,11 +107,53 @@ function plainText(msg) {
     ''
   ).trim();
 
-  if (direct) return direct;
+  const prefix = getPrefix();
+
+  if (direct) {
+    if (direct.startsWith(prefix)) return direct;
+
+    // Check if message is a quoted reply to a bot interactive message
+    const quotedText = extractQuotedText(msg);
+    if (quotedText) {
+      const lowerQ = quotedText.toLowerCase();
+      const lowerD = direct.toLowerCase().trim();
+
+      // Ghost status reply
+      if (lowerQ.includes('ghost')) {
+        if (lowerD === 'on' || lowerD === 'off') return `${prefix}ghost ${lowerD}`;
+        if (lowerD === 'edit on' || lowerD === 'edit off') return `${prefix}ghost ${lowerD}`;
+      }
+
+      // Lurk status reply
+      if (lowerQ.includes('lurk')) {
+        if (lowerD === 'on' || lowerD === 'off') return `${prefix}lurk ${lowerD}`;
+        if (lowerD.startsWith('react ') || lowerD.startsWith('download ') || lowerD.startsWith('emoji ')) {
+          return `${prefix}lurk ${lowerD}`;
+        }
+      }
+
+      // Peek status reply
+      if (lowerQ.includes('peek')) {
+        if (lowerD === 'on' || lowerD === 'off') return `${prefix}peek auto ${lowerD}`;
+        if (lowerD.startsWith('auto ') || lowerD.startsWith('watch ') || lowerD.startsWith('dest ')) {
+          return `${prefix}peek ${lowerD}`;
+        }
+      }
+
+      // Book search results reply
+      if (lowerQ.includes('books') || lowerQ.includes('book')) {
+        const match = lowerD.match(/^(?:dl\s*)?(\d+)$/i);
+        if (match) {
+          return `${prefix}book dl ${match[1]}`;
+        }
+      }
+    }
+
+    return direct;
+  }
 
   const interactiveId = extractInteractiveResponse(msg);
   if (interactiveId) {
-    const prefix = getPrefix();
     if (interactiveId.startsWith('book_dl_')) {
       const num = interactiveId.replace('book_dl_', '');
       return `${prefix}book dl ${num}`;

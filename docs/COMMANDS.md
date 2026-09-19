@@ -214,6 +214,7 @@ URLs containing picture posts or carousels (e.g. Instagram `/p/`, TikTok `/photo
 | `.qr <text>` | Generate QR code image |
 | `.readqr` (reply image) | Read and decode QR code from image |
 | `.url` (reply media) | Upload media to temp URL host |
+| `.reqlocation` | Request user location with interactive share location button |
 | `.owner` | Show owner info |
 | `.script` / `.repo` | View bot repository info |
 
