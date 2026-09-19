@@ -27,8 +27,8 @@ const __dirname  = path.dirname(__filename);
 const SOURCE          = 'https://github.com/themalik-g/wraith.git';
 const BRANCH          = process.env.WRAITH_BRANCH || 'main';
 const EXCLUDE         = new Set([
-  'node_modules', '.git', 'instances',
-  'state', 'session', 'vault',
+  '.git', 'instances',
+  'state', 'session', 'vault', 'logs', 'data',
   'index.js', 'package-lock.json'
 ]);
 const CLONE_TIMEOUT   = 180_000;
@@ -117,6 +117,8 @@ function makeInstance(root, id) {
   fs.mkdirSync(path.join(dir, 'state'),   { recursive: true });
   fs.mkdirSync(path.join(dir, 'session'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'vault'),   { recursive: true });
+  fs.mkdirSync(path.join(dir, 'logs'),    { recursive: true });
+  fs.mkdirSync(path.join(dir, 'data'),    { recursive: true });
   return dir;
 }
 
@@ -201,7 +203,7 @@ async function promptNumber(label = 'number') {
 
 function spawnSession(root, id, number) {
   const dir  = makeInstance(root, id);
-  const args = ['--preserve-symlinks', '--preserve-symlinks-main', 'start.js', '--session', id];
+  const args = ['--max-old-space-size=256', '--preserve-symlinks', '--preserve-symlinks-main', 'start.js', '--session', id];
   if (number) args.push('--number', number);
 
   const env = { ...process.env, WRAITH_REPO_ROOT: root, WRAITH_SESSION_ID: id };
@@ -262,6 +264,24 @@ function spawnSession(root, id, number) {
           try { otherRec.proc.kill('SIGTERM'); } catch {}
         }
       }
+    }
+    if (m?.type === 'wraith:delete_session' && m.sessionId) {
+      const targetId = m.sessionId;
+      say(yellow(`delete session request received for ${targetId}`));
+      if (children.has(targetId)) {
+        const targetRec = children.get(targetId);
+        try { targetRec.proc.kill('SIGTERM'); } catch {}
+        children.delete(targetId);
+      }
+      const targetDir = path.join(root, 'instances', targetId);
+      setTimeout(() => {
+        try {
+          fs.rmSync(targetDir, { recursive: true, force: true });
+          say(green(`deleted session instance directory: ${targetId}`));
+        } catch (e) {
+          say(red(`failed to remove directory for ${targetId}: ${e.message}`));
+        }
+      }, 1500);
     }
   });
 

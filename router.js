@@ -48,7 +48,7 @@ import {
   archiveCommand, unarchiveCommand, clearchatCommand,
   rejectcallsCommand, attachCallRejector, getWelcomeConfig,
 } from './modules/group.js';
-import { setppCommand, setaboutCommand, chatstatsCommand, blockCommand, unblockCommand, blocklistCommand, unblockallCommand, setstatusCommand, getstatusCommand, getpairCommand, setsessionCommand, addownerCommand, delownerCommand, ownerlistCommand } from './modules/owner.js';
+import { setppCommand, setaboutCommand, chatstatsCommand, blockCommand, unblockCommand, blocklistCommand, unblockallCommand, setstatusCommand, getstatusCommand, getpairCommand, setsessionCommand, addsessionCommand, delsessionCommand, setvarCommand, getvarCommand, delvarCommand, addownerCommand, delownerCommand, ownerlistCommand } from './modules/owner.js';
 
 // ── Phase 4 ──
 import { gitdlCommand, mfdlCommand } from './modules/downloader.js';
@@ -67,6 +67,8 @@ const CRITICAL_COMMANDS = new Set([
   'approveall', 'declineall', 'leave', 'join',
   'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
   'rejectcalls', 'setpp', 'setabout', 'chatstats', 'setsession',
+  'addsession', 'delsession',
+  'setvar', 'getvar', 'delvar',
   'addowner', 'delowner', 'ownerlist',
   'gitdl', 'mfdl', 'url', 'pdl', 'pdlzip', 'restart',
 ]);
@@ -328,6 +330,11 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'getstatus': await getstatusCommand(sock, chat, msg, rest); break;
           case 'getpair': await getpairCommand(sock, chat, msg, rest); break;
           case 'setsession': await setsessionCommand(sock, chat, msg, rest); break;
+          case 'addsession': await addsessionCommand(sock, chat, msg, rest); break;
+          case 'delsession': await delsessionCommand(sock, chat, msg, rest); break;
+          case 'setvar': await setvarCommand(sock, chat, msg, rest); break;
+          case 'getvar': await getvarCommand(sock, chat, msg, rest); break;
+          case 'delvar': await delvarCommand(sock, chat, msg, rest); break;
           case 'block': await blockCommand(sock, chat, msg, rest); break;
           case 'unblock': await unblockCommand(sock, chat, msg, rest); break;
           case 'blocklist': await blocklistCommand(sock, chat, msg); break;
