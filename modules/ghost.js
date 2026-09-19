@@ -232,8 +232,16 @@ export async function ghostCommand(sock, chat, msg, args) {
     if (a0 === 'on' || a0 === 'off') {
         s.on = a0 === 'on';
         write(s);
-        return sock.sendMessage(chat, {
-            text: s.on ? '👻 antidelete armed.' : '👻 antidelete disarmed.'
+        return sendInteractive(sock, chat, {
+            body: `👻 Antidelete is now *${s.on ? 'ARMED (ON)' : 'DISARMED (OFF)'}*.\n\n` +
+                  `antidelete · ${s.on ? 'ON' : 'OFF'}\n` +
+                  `antiedit   · ${s.edit ? 'ON' : 'OFF'}\n` +
+                  `ledger     · ${ledger.size} entries`,
+            footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select an action below',
+            buttons: [
+                createQuickReply(s.on ? 'Antidelete OFF' : 'Antidelete ON', `${p}ghost ${s.on ? 'off' : 'on'}`),
+                createQuickReply(s.edit ? 'Antiedit OFF' : 'Antiedit ON', `${p}ghost edit ${s.edit ? 'off' : 'on'}`),
+            ]
         }, { quoted: msg });
     }
 
@@ -245,8 +253,16 @@ export async function ghostCommand(sock, chat, msg, args) {
         }
         s.edit = a1 === 'on';
         write(s);
-        return sock.sendMessage(chat, {
-            text: s.edit ? '👻 antiedit armed.' : '👻 antiedit disarmed.'
+        return sendInteractive(sock, chat, {
+            body: `👻 Antiedit is now *${s.edit ? 'ARMED (ON)' : 'DISARMED (OFF)'}*.\n\n` +
+                  `antidelete · ${s.on ? 'ON' : 'OFF'}\n` +
+                  `antiedit   · ${s.edit ? 'ON' : 'OFF'}\n` +
+                  `ledger     · ${ledger.size} entries`,
+            footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select an action below',
+            buttons: [
+                createQuickReply(s.on ? 'Antidelete OFF' : 'Antidelete ON', `${p}ghost ${s.on ? 'off' : 'on'}`),
+                createQuickReply(s.edit ? 'Antiedit OFF' : 'Antiedit ON', `${p}ghost edit ${s.edit ? 'off' : 'on'}`),
+            ]
         }, { quoted: msg });
     }
 

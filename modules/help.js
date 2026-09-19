@@ -6,7 +6,7 @@ import { CONFIG } from '../config.js';
 import { isOwner } from '../core/identity.js';
 import { getPrefix } from '../core/settings.js';
 import { getMode } from './utility.js';
-import { sendInteractive, createSingleSelect } from '../lib/buttons.js';
+import { sendInteractive, createSingleSelect, createQuickReply } from '../lib/buttons.js';
 
 const c = (cmd, ownerOnly = false) => ({ cmd, ownerOnly });
 
@@ -402,7 +402,18 @@ export async function helpCommand(sock, chat, msg, args) {
     }
 
     const box = renderBox(group.icon, group.title, visible, prefix);
-    return sendSafe(sock, chat, msg, box);
+    return sendInteractive(
+      sock,
+      chat,
+      {
+        body: box,
+        footer: 'Provided by 𝕎ℝⒶⒾⓉℍ',
+        buttons: [
+          createQuickReply('📜 Main Menu', `${prefix}help`),
+        ]
+      },
+      { quoted: msg }
+    );
   } catch (e) {
     try {
       await sock.sendMessage(
