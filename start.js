@@ -73,9 +73,9 @@ const bold   = s => dye(1, s);
 
 const tag = grey(`[${sessionId}]`);
 
-// ── outgoing message cache (retry receipts) ──
+// ── outgoing & incoming message cache (retry receipts) ──
 const MESSAGE_STORE = new Map();
-const MESSAGE_STORE_MAX = 100;
+const MESSAGE_STORE_MAX = 500;
 
 function rememberMessage(msg) {
   if (!msg?.key?.id || !msg?.message) return;
@@ -200,6 +200,10 @@ async function ignite() {
     auth: {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, log)
+    },
+    getMessage: async (key) => {
+      const msg = MESSAGE_STORE.get(key.id);
+      return msg || undefined;
     },
     markOnlineOnConnect: true,
     generateHighQualityLinkPreview: false,   // ★ CPU saver

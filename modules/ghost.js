@@ -4,7 +4,7 @@ import { pipeline } from 'stream/promises';
 import { downloadContentFromMessage, proto } from '@whiskeysockets/baileys';
 
 import { isOwner, ownerJid, digitsOf } from '../core/identity.js';
-import { vaultPath, dropFromVault } from '../core/vault.js';
+import { vaultPath, vaultMediaName, dropFromVault } from '../core/vault.js';
 import { CONFIG } from '../config.js';
 import { extractViewOnce } from './peek.js';
 import { sendInteractive, createQuickReply } from '../lib/buttons.js';
@@ -281,6 +281,10 @@ export async function remember(sock, msg) {
     const s = read();
     if (!s.on && !s.edit) return;
 
+    const chat = msg.key?.remoteJid;
+    const sender = msg.key?.participant || chat;
+    if (chat?.endsWith('@newsletter') || sender?.endsWith('@newsletter')) return;
+
     const id = msg.key?.id;
     if (!id) return;
 
@@ -305,7 +309,7 @@ export async function remember(sock, msg) {
             record.text = vo.node.caption || '';
 
             const ext = vo.type === 'image' ? 'jpg' : (vo.type === 'video' ? 'mp4' : 'ogg');
-            const fp = vaultPath(`${id}.${ext}`);
+            const fp = vaultPath(vaultMediaName(record.from, 'ghost', id, ext));
             await saveStreamToFile(vo.node, vo.type, fp);
             record.file = fp;
 
@@ -340,14 +344,14 @@ export async function remember(sock, msg) {
         else if (msg.message?.imageMessage) {
             record.media = 'image';
             record.text = msg.message.imageMessage.caption || '';
-            const fp = vaultPath(`${id}.jpg`);
+            const fp = vaultPath(vaultMediaName(record.from, 'chat', id, 'jpg'));
             await saveStreamToFile(msg.message.imageMessage, 'image', fp);
             record.file = fp;
         }
         else if (msg.message?.videoMessage) {
             record.media = 'video';
             record.text = msg.message.videoMessage.caption || '';
-            const fp = vaultPath(`${id}.mp4`);
+            const fp = vaultPath(vaultMediaName(record.from, 'chat', id, 'mp4'));
             await saveStreamToFile(msg.message.videoMessage, 'video', fp);
             record.file = fp;
         }
@@ -355,13 +359,13 @@ export async function remember(sock, msg) {
             record.media = 'audio';
             const mime = msg.message.audioMessage.mimetype || '';
             const ext = mime.includes('ogg') ? 'ogg' : 'mp3';
-            const fp = vaultPath(`${id}.${ext}`);
+            const fp = vaultPath(vaultMediaName(record.from, 'chat', id, ext));
             await saveStreamToFile(msg.message.audioMessage, 'audio', fp);
             record.file = fp;
         }
         else if (msg.message?.stickerMessage) {
             record.media = 'sticker';
-            const fp = vaultPath(`${id}.webp`);
+            const fp = vaultPath(vaultMediaName(record.from, 'chat', id, 'webp'));
             await saveStreamToFile(msg.message.stickerMessage, 'sticker', fp);
             record.file = fp;
         }

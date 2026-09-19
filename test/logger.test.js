@@ -34,9 +34,8 @@ async function runTests() {
   assert.strictEqual(fs.existsSync(expectedLogFile), true, 'Log file should be created');
   let content = fs.readFileSync(expectedLogFile, 'utf-8');
   assert.ok(content.includes('[INCOMING]'), 'Should contain [INCOMING]');
-  assert.ok(content.includes('Chat: 1234567890@s.whatsapp.net'), 'Should contain chat JID');
-  assert.ok(content.includes('From: 9876543210@s.whatsapp.net'), 'Should contain sender JID');
-  assert.ok(content.includes('Message: Hello WRAITH bot!'), 'Should contain message text');
+  assert.ok(content.includes('+9876543210 -> +1234567890'), 'Should contain formatted phone numbers');
+  assert.ok(content.includes('Hello WRAITH bot!'), 'Should contain message text');
 
   // Test 2: Log duplicate message ID (should be skipped)
   logMessageHistory({
@@ -65,8 +64,7 @@ async function runTests() {
 
   content = fs.readFileSync(expectedLogFile, 'utf-8');
   assert.ok(content.includes('[OUTGOING]'), 'Should contain [OUTGOING]');
-  assert.ok(content.includes('Media: image'), 'Should contain media type');
-  assert.ok(content.includes('Location: /path/to/vault/TEST_MSG_2.jpg'), 'Should contain media vault path');
+  assert.ok(content.includes('<Media: image (/path/to/vault/TEST_MSG_2.jpg)>'), 'Should contain media tag with path');
 
   // Clean up test file
   if (fs.existsSync(expectedLogFile)) {
