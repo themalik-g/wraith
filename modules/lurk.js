@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import { isOwner, ownerJid } from '../core/identity.js';
 import { vaultPath, dropFromVault } from '../core/vault.js';
+import { sendInteractive, createQuickReply } from '../lib/buttons.js';
+import { getPrefix } from '../core/settings.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const STATE = path.join(here, '..', 'state', 'lurk.json');
@@ -68,22 +70,21 @@ export async function lurkCommand(sock, chat, msg, args) {
     const a0 = (args?.[0] || '').toLowerCase();
     const a1 = (args?.[1] || '').toLowerCase();
 
+    const p = getPrefix();
     if (!a0) {
-        return sock.sendMessage(chat, {
-            text:
+        return sendInteractive(sock, chat, {
+            body:
                 `🌒 *lurk* — status watcher\n\n` +
-                `auto-view  · ${s.on ? 'on' : 'off'}\n` +
-                `auto-react · ${s.react ? 'on' : 'off'}\n` +
-                `download   · ${s.download ? 'on' : 'off'}\n` +
-                `emoji      · ${s.emoji}\n\n` +
-                `_.lurk on | off_\n` +
-                `_.lurk react on | off_\n` +
-                `_.lurk download on | off_\n` +
-                `_.lurk emoji ❤️_        — set a custom emoji\n` +
-                `_.lurk emoji random_    — pick a random emoji per status\n` +
-                `_.lurk emoji none_      — revert to empty reaction\n\n` +
-                `_When download is ON and auto-view/react are OFF,\n` +
-                `statuses are downloaded without sending seen or reaction._`
+                `auto-view  · ${s.on ? 'ON' : 'OFF'}\n` +
+                `auto-react · ${s.react ? 'ON' : 'OFF'}\n` +
+                `download   · ${s.download ? 'ON' : 'OFF'}\n` +
+                `emoji      · ${s.emoji}\n`,
+            footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select an option below',
+            buttons: [
+                createQuickReply(s.on ? 'Auto-View OFF' : 'Auto-View ON', `${p}lurk ${s.on ? 'off' : 'on'}`),
+                createQuickReply(s.react ? 'Auto-React OFF' : 'Auto-React ON', `${p}lurk react ${s.react ? 'off' : 'on'}`),
+                createQuickReply(s.download ? 'Download OFF' : 'Download ON', `${p}lurk download ${s.download ? 'off' : 'on'}`),
+            ]
         }, { quoted: msg });
     }
 

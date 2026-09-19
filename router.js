@@ -19,9 +19,10 @@ import { songCommand } from './modules/song.js';
 import { ytdlCommand, mp3Command, pdlCommand, pdlzipCommand } from './modules/download.js';
 import { urlCommand } from './modules/url.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
-import { getPrefix } from './core/settings.js';
+import { getPrefix, getReplyMode, setReplyMode } from './core/settings.js';
 import { isOwner } from './core/identity.js';
 import { CONFIG } from './config.js';
+import { reqlocationCommand, handleIncomingLocation } from './modules/location.js';
 
 // ── Baileys protocol constants (for edit/revoke detection) ──
 import { WAMessageStubType } from '@whiskeysockets/baileys';
@@ -220,6 +221,11 @@ export async function dispatch(sock, update, sessionId = 'main') {
         if (blocked) continue;
       } catch (e) { console.error('[router] handleProtection', e.message); }
 
+      // Check if this is an incoming location message
+      if (msg.message?.locationMessage || msg.message?.liveLocationMessage) {
+        try { await handleIncomingLocation(sock, chat, msg); } catch (e) { console.error('[router] handleIncomingLocation', e.message); }
+      }
+
       const text = plainText(msg);
       const prefix = getPrefix();
 
@@ -315,6 +321,22 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'script':
           case 'repo': await scriptCommand(sock, chat, msg); break;
           case 'mode': await modeCommand(sock, chat, msg, rest); break;
+          case 'replymode': {
+            if (!senderIsOwner) {
+              await sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
+              break;
+            }
+            const modeArg = (rest[0] || '').toLowerCase();
+            if (modeArg === 'text' || modeArg === 'buttons') {
+              setReplyMode(modeArg);
+              await sock.sendMessage(chat, { text: `✅ Reply mode set to *${modeArg}*` }, { quoted: msg });
+            } else {
+              const cur = getReplyMode();
+              await sock.sendMessage(chat, { text: `ℹ️ Current reply mode: *${cur}*\n\nUsage:\n• \`${prefix}replymode buttons\`\n• \`${prefix}replymode text\`` }, { quoted: msg });
+            }
+            break;
+          }
+          case 'reqlocation': await reqlocationCommand(sock, chat, msg); break;
 
           // ── Phase 2 ──
           case 'book':
