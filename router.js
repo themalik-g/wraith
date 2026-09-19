@@ -56,6 +56,7 @@ import { igCommand, tiktokCommand, fbCommand } from './modules/social.js';
 
 // ── Phase 5 ──
 import { attachPresenceTracker, stalkCommand } from './modules/presence-track.js';
+import { extractInteractiveResponse } from './lib/buttons.js';
 
 const CRITICAL_COMMANDS = new Set([
   'ghost', 'peek', 'lurk', 'schedule',
@@ -82,13 +83,37 @@ function attachBackground(sock) {
 }
 
 function plainText(msg) {
-  return (
+  const direct = (
     msg.message?.conversation ||
     msg.message?.extendedTextMessage?.text ||
     msg.message?.imageMessage?.caption ||
     msg.message?.videoMessage?.caption ||
     ''
   ).trim();
+
+  if (direct) return direct;
+
+  const interactiveId = extractInteractiveResponse(msg);
+  if (interactiveId) {
+    const prefix = getPrefix();
+    if (interactiveId.startsWith('book_dl_')) {
+      const num = interactiveId.replace('book_dl_', '');
+      return `${prefix}book dl ${num}`;
+    }
+    if (interactiveId.startsWith('menu_')) {
+      const cat = interactiveId.replace('menu_', '');
+      return `${prefix}help ${cat}`;
+    }
+    if (interactiveId.startsWith('.')) {
+      return prefix === '.' ? interactiveId : prefix + interactiveId.slice(1);
+    }
+    if (!interactiveId.startsWith(prefix)) {
+      return `${prefix}${interactiveId}`;
+    }
+    return interactiveId;
+  }
+
+  return '';
 }
 
 // ── Helper: extract original message ID from an edit payload ──

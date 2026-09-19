@@ -13,6 +13,7 @@ import {
   fetchLyrics,
 } from '../lib/apis.js';
 import { chunkText, downloadToFile } from '../lib/net.js';
+import { sendInteractive, createSingleSelect } from '../lib/buttons.js';
 
 // ─── Book cache ───
 const bookCache = new Map();
@@ -136,8 +137,31 @@ export async function bookCommand(sock, chat, msg, args) {
         lines.push(`   🔗 ${b.webUrl}`);
       }
     });
-    lines.push('', `_Source: ${r.source}_`);
-    await sendChunked(sock, chat, msg, lines.join('\n'));
+
+    const rows = r.books.map((b, i) => ({
+      header: `${i + 1}`,
+      title: (b.title || 'Untitled').slice(0, 24),
+      description: `${b.author || 'Unknown'} · ${(b.format || 'pdf').toUpperCase()}`.slice(0, 72),
+      id: `book_dl_${i + 1}`
+    }));
+
+    await sendInteractive(
+      sock,
+      chat,
+      {
+        body: lines.join('\n'),
+        footer: `Source: ${r.source} · Provided by 𝕎ℝⒶⒾⓉℍ`,
+        buttons: [
+          createSingleSelect('📚 Select a Book to Download', [
+            {
+              title: `Results for "${query}"`,
+              rows
+            }
+          ])
+        ]
+      },
+      { quoted: msg }
+    );
 
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ book failed: ${e.message}` }, { quoted: msg }).catch(() => {});

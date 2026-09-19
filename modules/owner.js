@@ -9,6 +9,7 @@ import { isOwner, isPrimaryOwner, addSecondaryOwner, delSecondaryOwner, getOwner
 import { readJson } from '../core/state-io.js';
 import { CONFIG } from '../config.js';
 import { getVar, setVar, delVar, getAllVars } from '../core/vars.js';
+import { sendInteractive, createCtaCopy } from '../lib/buttons.js';
 
 function ownerOnly(sock, chat, msg) {
     const from = msg.key.participant || msg.key.remoteJid;
@@ -422,9 +423,18 @@ export async function getpairCommand(sock, chat, msg, args) {
                     try {
                         let code = await tempSock.requestPairingCode(rawNumber);
                         code = code?.match(/.{1,4}/g)?.join('-') || code;
-                        await sock.sendMessage(chat, {
-                            text: `🔑 *Pairing Code for +${rawNumber}:*\n\n\`\`\`${code}\`\`\`\n\nEnter this code in WhatsApp → Linked Devices.`
-                        }, { quoted: msg });
+                        await sendInteractive(
+                            sock,
+                            chat,
+                            {
+                                body: `🔑 *Pairing Code for +${rawNumber}:*\n\n\`\`\`${code}\`\`\`\n\nEnter this code in WhatsApp → Linked Devices.`,
+                                footer: 'Provided by 𝕎ℝⒶⒾⓉℍ',
+                                buttons: [
+                                    createCtaCopy('📋 Copy Code', code)
+                                ]
+                            },
+                            { quoted: msg }
+                        );
                     } catch (err) {
                         await sock.sendMessage(chat, { text: `❌ Failed to request pairing code: ${err.message}` }, { quoted: msg });
                         cleanup();

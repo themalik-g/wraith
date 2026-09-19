@@ -6,6 +6,7 @@ import { CONFIG } from '../config.js';
 import { isOwner } from '../core/identity.js';
 import { getPrefix } from '../core/settings.js';
 import { getMode } from './utility.js';
+import { sendInteractive, createSingleSelect } from '../lib/buttons.js';
 
 const c = (cmd, ownerOnly = false) => ({ cmd, ownerOnly });
 
@@ -338,7 +339,31 @@ export async function helpCommand(sock, chat, msg, args) {
 
     if (!target) {
       const text = renderAll(prefix, isOwnerUser, mode);
-      return sendSafe(sock, chat, msg, text);
+      const categories = visibleRegistry(isOwnerUser);
+      const menuRows = categories.map((g) => ({
+        header: g.icon,
+        title: `${g.id.toUpperCase()}`,
+        description: `${g.title} (${g.commands.length} commands)`,
+        id: `menu_${g.id}`
+      }));
+
+      return sendInteractive(
+        sock,
+        chat,
+        {
+          body: text,
+          footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select a category below',
+          buttons: [
+            createSingleSelect('📜 Select Category', [
+              {
+                title: 'WRAITH Command Categories',
+                rows: menuRows
+              }
+            ])
+          ]
+        },
+        { quoted: msg }
+      );
     }
 
     const group = findGroup(target);
