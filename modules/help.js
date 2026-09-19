@@ -338,7 +338,17 @@ export async function helpCommand(sock, chat, msg, args) {
     const target = (args?.[0] || '').toLowerCase().trim();
 
     if (!target) {
-      const text = renderAll(prefix, isOwnerUser, mode);
+      const headerLines = [
+        '┌──❮ ⓌⓇⒶⒾⓉⒽ ❯',
+        '│',
+        isOwnerUser || mode !== 'public' ? '│ ᴄᴏᴍᴍᴀɴᴅꜱ ᴀʀᴇ ᴏᴡɴᴇʀ-ᴏɴʟʏ' : '│ ᴘᴜʙʟɪᴄ ᴍᴏᴅᴇ · ꜱᴏᴍᴇ ᴄᴏᴍᴍᴀɴᴅꜱ ʜɪᴅᴅᴇɴ',
+        `│ ᴘʀᴇꜰɪx · ${prefix}`,
+        `│ ℹ️ Select a category below or type ${prefix}help <category>`,
+        '│',
+        TAIL,
+      ];
+      const summaryBody = headerLines.join('\n');
+
       const categories = visibleRegistry(isOwnerUser);
       const menuRows = categories.map((g) => ({
         header: g.icon,
@@ -351,7 +361,7 @@ export async function helpCommand(sock, chat, msg, args) {
         sock,
         chat,
         {
-          body: text,
+          body: summaryBody,
           footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select a category below',
           buttons: [
             createSingleSelect('📜 Select Category', [

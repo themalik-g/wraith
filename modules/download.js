@@ -16,6 +16,8 @@ import PQueue from 'p-queue';
 import ffmpegPath from 'ffmpeg-static';
 import { fileTypeFromBuffer } from 'file-type';
 import { postfetch, download as pfDownload, archive as pfArchive, detect as pfDetect } from '@postfetch/core';
+import { sendInteractive, createQuickReply } from '../lib/buttons.js';
+import { getPrefix } from '../core/settings.js';
 
 const TMP = path.join(os.tmpdir(), 'wraith-dl');
 fs.mkdirSync(TMP, { recursive: true });
@@ -429,7 +431,31 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
 export async function ytdlCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
   if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.dl <url or query>`' }, { quoted: msg });
-  return queue.add(() => downloadMedia(sock, chat, msg, query, false));
+
+  // If a URL is provided without explicitly asking for audio/video or specific format, prompt with interactive quality options
+  const isUrl = /^https?:\/\//i.test(query);
+  const isDirectMode = /\b(audio|mp3|video|zip|hd|sd)\b/i.test(query);
+
+  if (isUrl && !isDirectMode && !args.includes('--direct')) {
+    const p = getPrefix();
+    return sendInteractive(
+      sock,
+      chat,
+      {
+        body: `⬇️ *Download Media Options*\n\nURL: _${query.slice(0, 70)}${query.length > 70 ? '…' : ''}_\n\nSelect your desired format/quality:`,
+        footer: 'Provided by 𝕎ℝⒶⒾⓉℍ',
+        buttons: [
+          createQuickReply('🎬 Video (Best)', `${p}dl ${query} --direct`),
+          createQuickReply('🎵 Audio MP3', `${p}mp3 ${query}`),
+          isPostUrl(query) ? createQuickReply('📦 ZIP Archive', `${p}pdlzip ${query}`) : null,
+        ].filter(Boolean)
+      },
+      { quoted: msg }
+    );
+  }
+
+  const cleanQuery = query.replace(/--direct/gi, '').trim();
+  return queue.add(() => downloadMedia(sock, chat, msg, cleanQuery, false));
 }
 
 export async function mp3Command(sock, chat, msg, args) {

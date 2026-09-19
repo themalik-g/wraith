@@ -7,6 +7,8 @@ import {
 } from '@whiskeysockets/baileys';
 
 import { isOwner, ownerJid, digitsOf, isOwnerChat } from '../core/identity.js';
+import { sendInteractive, createQuickReply } from '../lib/buttons.js';
+import { getPrefix } from '../core/settings.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const STATE = path.join(here, '..', 'state', 'peek.json');
@@ -319,16 +321,19 @@ export async function peekCommand(sock, chat, msg, args) {
     // ── Status card ──
     if (!hasQuote) {
         const s = read();
-        return sock.sendMessage(chat, {
-            text:
+        const p = getPrefix();
+        return sendInteractive(sock, chat, {
+            body:
                 `👁️ *peek*\n\n` +
-                `auto-peek    · ${s.auto ? 'on' : 'off'}\n` +
-                `quoted-watch · ${s.watchQuoted ? 'on' : 'off'}\n` +
-                `destination  · ${s.dest}\n\n` +
-                `Reply to a view-once with _.peek_ to reveal it.\n` +
-                `_.peek auto on|off_\n` +
-                `_.peek watch on|off_\n` +
-                `_.peek dest owner|same|both_`
+                `auto-peek    · ${s.auto ? 'ON' : 'OFF'}\n` +
+                `quoted-watch · ${s.watchQuoted ? 'ON' : 'OFF'}\n` +
+                `destination  · ${s.dest}\n`,
+            footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select an option below',
+            buttons: [
+                createQuickReply(s.auto ? 'Auto-Peek OFF' : 'Auto-Peek ON', `${p}peek auto ${s.auto ? 'off' : 'on'}`),
+                createQuickReply(s.watchQuoted ? 'Watch OFF' : 'Watch ON', `${p}peek watch ${s.watchQuoted ? 'off' : 'on'}`),
+                createQuickReply(`Dest: ${s.dest === 'owner' ? 'same' : s.dest === 'same' ? 'both' : 'owner'}`, `${p}peek dest ${s.dest === 'owner' ? 'same' : s.dest === 'same' ? 'both' : 'owner'}`),
+            ]
         }, { quoted: msg });
     }
 

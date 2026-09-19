@@ -8,6 +8,8 @@ import { isOwner, ownerJid, digitsOf } from '../core/identity.js';
 import { vaultPath, dropFromVault } from '../core/vault.js';
 import { CONFIG } from '../config.js';
 import { extractViewOnce } from './peek.js';
+import { sendInteractive, createQuickReply } from '../lib/buttons.js';
+import { getPrefix } from '../core/settings.js';
 
 const STATE = path.join(process.cwd(), 'state', 'ghost.json');
 const LEDGER_FILE = path.join(process.cwd(), 'state', 'ghost-ledger.json');
@@ -211,16 +213,19 @@ export async function ghostCommand(sock, chat, msg, args) {
     const a0 = (args?.[0] || '').toLowerCase();
     const a1 = (args?.[1] || '').toLowerCase();
 
+    const p = getPrefix();
     if (!a0) {
-        return sock.sendMessage(chat, {
-            text:
+        return sendInteractive(sock, chat, {
+            body:
                 `👻 *ghost* — watcher status\n\n` +
-                `antidelete · ${s.on ? 'on' : 'off'}\n` +
-                `antiedit   · ${s.edit ? 'on' : 'off'}\n` +
-                `ledger     · ${ledger.size} entries\n\n` +
-                `_.ghost on | off_          — toggle antidelete\n` +
-                `_.ghost edit on | off_     — toggle antiedit\n` +
-                `_.ghost_                    — show this`
+                `antidelete · ${s.on ? 'ON' : 'OFF'}\n` +
+                `antiedit   · ${s.edit ? 'ON' : 'OFF'}\n` +
+                `ledger     · ${ledger.size} entries\n`,
+            footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select an action below',
+            buttons: [
+                createQuickReply(s.on ? 'Antidelete OFF' : 'Antidelete ON', `${p}ghost ${s.on ? 'off' : 'on'}`),
+                createQuickReply(s.edit ? 'Antiedit OFF' : 'Antiedit ON', `${p}ghost edit ${s.edit ? 'off' : 'on'}`),
+            ]
         }, { quoted: msg });
     }
 

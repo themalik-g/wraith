@@ -53,3 +53,13 @@ export function setSetting(key, value) {
   s[key] = value;
   persist();
 }
+
+export function getReplyMode() {
+  return load().replyMode || 'buttons';
+}
+
+export function setReplyMode(mode) {
+  const s = load();
+  s.replyMode = mode === 'text' ? 'text' : 'buttons';
+  persist();
+}

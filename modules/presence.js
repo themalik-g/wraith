@@ -10,6 +10,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { isOwner } from '../core/identity.js';
 import { readJson, writeJsonAtomic } from '../core/state-io.js';
+import { sendInteractive, createQuickReply } from '../lib/buttons.js';
+import { getPrefix } from '../core/settings.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const STATE = path.join(here, '..', 'state', 'presence.json');
@@ -99,18 +101,21 @@ export async function presenceCommand(sock, chat, msg, args) {
     const a0 = (args?.[0] || '').toLowerCase();
     const a1 = (args?.[1] || '').toLowerCase();
 
+    const p = getPrefix();
     if (!a0) {
-        return sock.sendMessage(chat, {
-            text:
+        return sendInteractive(sock, chat, {
+            body:
                 `⚙️ *presence* — status control\n\n` +
-                `always online · ${s.alwaysOnline ? '✅ on' : '❌ off'}\n` +
-                `auto typing   · ${s.autoTyping ? '✅ on' : '❌ off'}\n` +
-                `auto recording · ${s.autoRecording ? '✅ on' : '❌ off'}\n` +
-                `read receipts · ${s.readReceipts ? '✅ on' : '❌ off'}\n\n` +
-                `_.presence online on|off_\n` +
-                `_.presence typing on|off_\n` +
-                `_.presence recording on|off_\n` +
-                `_.presence reads on|off_`
+                `always online · ${s.alwaysOnline ? 'ON' : 'OFF'}\n` +
+                `auto typing   · ${s.autoTyping ? 'ON' : 'OFF'}\n` +
+                `auto recording · ${s.autoRecording ? 'ON' : 'OFF'}\n` +
+                `read receipts · ${s.readReceipts ? 'ON' : 'OFF'}\n`,
+            footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select an option below',
+            buttons: [
+                createQuickReply(s.alwaysOnline ? 'Online OFF' : 'Online ON', `${p}presence online ${s.alwaysOnline ? 'off' : 'on'}`),
+                createQuickReply(s.autoTyping ? 'Typing OFF' : 'Typing ON', `${p}presence typing ${s.autoTyping ? 'off' : 'on'}`),
+                createQuickReply(s.readReceipts ? 'Reads OFF' : 'Reads ON', `${p}presence reads ${s.readReceipts ? 'off' : 'on'}`),
+            ]
         }, { quoted: msg });
     }
 
