@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { pipeline } from 'stream/promises';
-import { fileURLToPath } from 'url';
 import { downloadContentFromMessage, proto } from '@whiskeysockets/baileys';
 
 import { isOwner, ownerJid, digitsOf } from '../core/identity.js';
@@ -10,9 +9,10 @@ import { CONFIG } from '../config.js';
 import { extractViewOnce } from './peek.js';
 import { sendInteractive, createQuickReply } from '../lib/buttons.js';
 import { getPrefix } from '../core/settings.js';
+import { inState, statePath } from '../core/paths.js';
 
-const STATE = path.join(process.cwd(), 'state', 'ghost.json');
-const LEDGER_FILE = path.join(process.cwd(), 'state', 'ghost-ledger.json');
+const STATE = () => inState('ghost.json');
+const LEDGER_FILE = () => inState('ghost-ledger.json');
 
 const DEBUG = process.env.WRAITH_DEBUG === '1';
 
@@ -24,8 +24,9 @@ let saveTimer = null;
 
 function loadLedger() {
     try {
-        if (!fs.existsSync(LEDGER_FILE)) return;
-        const raw = JSON.parse(fs.readFileSync(LEDGER_FILE, 'utf-8'));
+        const file = LEDGER_FILE();
+        if (!fs.existsSync(file)) return;
+        const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
         const cutoff = Date.now() - CONFIG.memoryTTL;
         for (const [id, rec] of Object.entries(raw)) {
             if (rec?.at >= cutoff) ledger.set(id, rec);
@@ -41,8 +42,9 @@ function scheduleSave() {
     saveTimer = setTimeout(() => {
         saveTimer = null;
         try {
+            statePath();
             const obj = Object.fromEntries(ledger);
-            fs.writeFileSync(LEDGER_FILE, JSON.stringify(obj));
+            fs.writeFileSync(LEDGER_FILE(), JSON.stringify(obj));
         } catch (e) {
             if (DEBUG) console.log('[ghost] ledger save failed:', e.message);
         }
@@ -177,7 +179,7 @@ export function classifyMessage(msg) {
 // ─────────────────────────────────────────────
 function read() {
     try {
-        const raw = JSON.parse(fs.readFileSync(STATE, 'utf-8'));
+        const raw = JSON.parse(fs.readFileSync(STATE(), 'utf-8'));
         return {
             on: raw.on !== false,
             edit: raw.edit !== false
@@ -187,7 +189,10 @@ function read() {
     }
 }
 function write(o) {
-    try { fs.writeFileSync(STATE, JSON.stringify(o, null, 2)); } catch {}
+    try {
+        statePath();
+        fs.writeFileSync(STATE(), JSON.stringify(o, null, 2));
+    } catch {}
 }
 
 // ─────────────────────────────────────────────

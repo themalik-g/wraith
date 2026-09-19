@@ -5,10 +5,10 @@
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import { isOwner, ownerJid } from '../core/identity.js';
 import { readJson, writeJsonAtomic } from '../core/state-io.js';
+import { inState } from '../core/paths.js';
 import { vaultPath, dropFromVault } from '../core/vault.js';
 import { CONFIG } from '../config.js';
 import { sendInteractive, createCtaUrl, createCtaCopy } from '../lib/buttons.js';
@@ -18,16 +18,15 @@ import {
   generateQr, decodeQr,
 } from '../lib/apis.js';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const MODE_FILE = path.join(here, '..', 'state', 'mode.json');
+const MODE_FILE = () => inState('mode.json');
 
 // ── Mode ────────────────────────────────────────────────────────────────────
 export function getMode() {
-  const m = readJson(MODE_FILE, { mode: 'private' });
+  const m = readJson(MODE_FILE(), { mode: 'private' });
   return m.mode === 'public' ? 'public' : 'private';
 }
 export function setMode(mode) {
-  writeJsonAtomic(MODE_FILE, { mode: mode === 'public' ? 'public' : 'private' });
+  writeJsonAtomic(MODE_FILE(), { mode: mode === 'public' ? 'public' : 'private' });
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

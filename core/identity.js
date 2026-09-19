@@ -3,16 +3,16 @@
 //  Owner identification & multi-owner helpers.
 // ─────────────────────────────────────────────
 import fs from 'fs';
-import path from 'path';
 import { CONFIG } from '../config.js';
+import { inState, statePath } from './paths.js';
 
-const STATE_DIR = path.join(process.cwd(), 'state');
-const OWNER_FILE = path.join(STATE_DIR, 'owner.json');
+const OWNER_FILE = () => inState('owner.json');
 
 function readOwnerData() {
     try {
-        if (fs.existsSync(OWNER_FILE)) {
-            const raw = JSON.parse(fs.readFileSync(OWNER_FILE, 'utf-8'));
+        const file = OWNER_FILE();
+        if (fs.existsSync(file)) {
+            const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
             return {
                 owner: (raw.owner || CONFIG.owner || '').replace(/\D/g, ''),
                 owners: Array.isArray(raw.owners) ? raw.owners.map(x => String(x).replace(/\D/g, '')).filter(Boolean) : []
@@ -25,8 +25,8 @@ function readOwnerData() {
 
 function saveOwnerData(data) {
     try {
-        fs.mkdirSync(STATE_DIR, { recursive: true });
-        fs.writeFileSync(OWNER_FILE, JSON.stringify(data, null, 2));
+        statePath();
+        fs.writeFileSync(OWNER_FILE(), JSON.stringify(data, null, 2));
     } catch {}
 }
 

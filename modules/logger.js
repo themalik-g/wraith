@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
+import { logsPath } from '../core/paths.js';
 
-const LOGS_DIR = path.join(process.cwd(), 'logs');
+const LOGS_DIR = logsPath();
 
 const loggedMsgIds = new Set();
 function isDuplicateMsg(msgId) {
@@ -57,12 +58,10 @@ export function logMessageHistory({
     const seconds = String(now.getSeconds()).padStart(2, '0');
     const timeStr = `${dateStr} ${hours}:${minutes}:${seconds}`;
 
-    if (!fs.existsSync(LOGS_DIR)) {
-      fs.mkdirSync(LOGS_DIR, { recursive: true });
-    }
+    const logsDirectory = logsPath();
 
     const logFileName = `messages_${sessionId}_${dateStr}.txt`;
-    const logFilePath = path.join(LOGS_DIR, logFileName);
+    const logFilePath = path.join(logsDirectory, logFileName);
 
     const parts = [
       `[${timeStr}]`,

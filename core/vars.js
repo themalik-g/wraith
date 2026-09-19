@@ -4,13 +4,15 @@
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
 import path from 'node:path';
+import { inState, statePath } from './paths.js';
 
-const VARS_FILE = path.join(process.cwd(), 'state', 'vars.json');
+const VARS_FILE = () => inState('vars.json');
 
 function loadVars() {
     try {
-        if (fs.existsSync(VARS_FILE)) {
-            return JSON.parse(fs.readFileSync(VARS_FILE, 'utf-8')) || {};
+        const file = VARS_FILE();
+        if (fs.existsSync(file)) {
+            return JSON.parse(fs.readFileSync(file, 'utf-8')) || {};
         }
     } catch (e) {
         try { console.error('[vars] loadVars error:', e.message); } catch {}
@@ -20,9 +22,9 @@ function loadVars() {
 
 function saveVars(data) {
     try {
-        const dir = path.dirname(VARS_FILE);
-        fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(VARS_FILE, JSON.stringify(data, null, 2));
+        const file = VARS_FILE();
+        statePath();
+        fs.writeFileSync(file, JSON.stringify(data, null, 2));
     } catch (e) {
         try { console.error('[vars] saveVars error:', e.message); } catch {}
     }

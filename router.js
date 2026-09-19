@@ -1,6 +1,4 @@
-// ─────────────────────────────────────────────
-// WRAITH · router.js — Full router with all phases
-// ─────────────────────────────────────────────
+// router.js — WRAITH full router
 import { remember, revealDelete, revealEdit, revealSecretEdit, ghostCommand, classifyMessage, getLedgerEntry } from './modules/ghost.js';
 import { logMessageHistory } from './modules/logger.js';
 import { peekCommand, autoPeek, watchQuotedViewOnce } from './modules/peek.js';
@@ -21,43 +19,31 @@ import { urlCommand } from './modules/url.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 import { getPrefix, getReplyMode, setReplyMode } from './core/settings.js';
 import { isOwner } from './core/identity.js';
-import { CONFIG } from './config.js';
+import { CONFIG, saveSessionConfig } from './config.js';
 import { reqlocationCommand, handleIncomingLocation } from './modules/location.js';
-
-// ── Baileys protocol constants (for edit/revoke detection) ──
 import { WAMessageStubType } from '@whiskeysockets/baileys';
-
-// ── Phase 1 ──
 import { usermanualCommand } from './modules/usermanual.js';
 import {
   currencyCommand, qrCommand, defineCommand, weatherCommand, pwnedCommand,
   ownerCommand, scriptCommand, modeCommand, getMode,
 } from './modules/utility.js';
-
-// ── Phase 2 ──
 import {
   bookCommand, imageCommand, movieCommand, songCommand as songInfoCommand, lyricsCommand,
   coupleppCommand,
 } from './modules/media.js';
 import { pptCommand } from './modules/ppt.js';
-
-// ── Phase 3 ──
 import {
   welcomeCommand, goodbyeCommand, kickallCommand, kickccCommand,
-  setdescCommand as setgdescCommand, setdescCommand, setgppCommand, approveallCommand, declineallCommand,
+  setdescCommand as setgdescCommand, setgppCommand, approveallCommand, declineallCommand,
   leaveCommand, joinCommand, openCommand, closeCommand, tagallCommand, hidetagCommand, muteCommand, unmuteCommand,
   archiveCommand, unarchiveCommand, clearchatCommand,
-  rejectcallsCommand, attachCallRejector, getWelcomeConfig,
+  rejectcallsCommand, attachCallRejector,
 } from './modules/group.js';
 import { setppCommand, setaboutCommand, chatstatsCommand, blockCommand, unblockCommand, blocklistCommand, unblockallCommand, setstatusCommand, getstatusCommand, getpairCommand, setsessionCommand, addsessionCommand, delsessionCommand, setvarCommand, getvarCommand, delvarCommand, addownerCommand, delownerCommand, ownerlistCommand } from './modules/owner.js';
-
-// ── Phase 4 ──
 import { gitdlCommand, mfdlCommand } from './modules/downloader.js';
 import { igCommand, tiktokCommand, fbCommand } from './modules/social.js';
-
-// ── Phase 5 ──
 import { attachPresenceTracker, stalkCommand } from './modules/presence-track.js';
-import { extractInteractiveResponse } from './lib/buttons.js';
+import { extractInteractiveResponse, matchChoice } from './lib/buttons.js';
 
 const CRITICAL_COMMANDS = new Set([
   'ghost', 'peek', 'lurk', 'schedule',
@@ -69,13 +55,14 @@ const CRITICAL_COMMANDS = new Set([
   'approveall', 'declineall', 'leave', 'join',
   'mute', 'unmute', 'archive', 'unarchive', 'clearchat',
   'rejectcalls', 'setpp', 'setabout', 'chatstats', 'setsession',
-  'addsession', 'delsession',
+  'addsession', 'delsession', 'setchannel',
   'setvar', 'getvar', 'delvar',
   'addowner', 'delowner', 'ownerlist',
   'gitdl', 'mfdl', 'url', 'pdl', 'pdlzip', 'restart',
 ]);
 
 const attachedSockets = new WeakSet();
+
 function attachBackground(sock) {
   if (!sock || attachedSockets.has(sock)) return;
   attachedSockets.add(sock);
@@ -112,55 +99,42 @@ function plainText(msg) {
   if (direct) {
     if (direct.startsWith(prefix)) return direct;
 
-    // Check if message is a quoted reply to a bot interactive message
     const quotedText = extractQuotedText(msg);
     if (quotedText) {
       const lowerQ = quotedText.toLowerCase();
       const lowerD = direct.toLowerCase().trim();
 
-      // Ghost status reply
       if (lowerQ.includes('ghost')) {
         if (lowerD === 'on' || lowerD === 'off') return `${prefix}ghost ${lowerD}`;
         if (lowerD === 'edit on' || lowerD === 'edit off') return `${prefix}ghost ${lowerD}`;
       }
-
-      // Lurk status reply
       if (lowerQ.includes('lurk')) {
         if (lowerD === 'on' || lowerD === 'off') return `${prefix}lurk ${lowerD}`;
         if (lowerD.startsWith('react ') || lowerD.startsWith('download ') || lowerD.startsWith('emoji ')) {
           return `${prefix}lurk ${lowerD}`;
         }
       }
-
-      // Peek status reply
       if (lowerQ.includes('peek')) {
         if (lowerD === 'on' || lowerD === 'off') return `${prefix}peek auto ${lowerD}`;
         if (lowerD.startsWith('auto ') || lowerD.startsWith('watch ') || lowerD.startsWith('dest ')) {
           return `${prefix}peek ${lowerD}`;
         }
       }
-
-      // Book search results reply
       if (lowerQ.includes('books') || lowerQ.includes('book')) {
         const match = lowerD.match(/^(?:dl\s*)?(\d+)$/i);
-        if (match) {
-          return `${prefix}book dl ${match[1]}`;
-        }
+        if (match) return `${prefix}book dl ${match[1]}`;
       }
     }
-
     return direct;
   }
 
   const interactiveId = extractInteractiveResponse(msg);
   if (interactiveId) {
     if (interactiveId.startsWith('book_dl_')) {
-      const num = interactiveId.replace('book_dl_', '');
-      return `${prefix}book dl ${num}`;
+      return `${prefix}book dl ${interactiveId.replace('book_dl_', '')}`;
     }
     if (interactiveId.startsWith('menu_')) {
-      const cat = interactiveId.replace('menu_', '');
-      return `${prefix}help ${cat}`;
+      return `${prefix}help ${interactiveId.replace('menu_', '')}`;
     }
     if (interactiveId.startsWith('.')) {
       return prefix === '.' ? interactiveId : prefix + interactiveId.slice(1);
@@ -174,16 +148,12 @@ function plainText(msg) {
   return '';
 }
 
-// ── Helper: extract original message ID from an edit payload ──
 function extractEditKeyId(update) {
   const msg = update.update?.message || update.message;
-  // messages.upsert path: protocolMessage.key.id
   const protoKey = msg?.protocolMessage?.key;
   if (protoKey?.id) return protoKey.id;
-  // messages.update path: editedMessage.key.id (if present)
   const editedKey = msg?.editedMessage?.key;
   if (editedKey?.id) return editedKey.id;
-  // Fallback: the update key itself
   return update.key?.id || null;
 }
 
@@ -193,10 +163,57 @@ function markCommandProcessed(msgId) {
   if (processedCommands.has(msgId)) return true;
   processedCommands.add(msgId);
   if (processedCommands.size > 1000) {
-    const first = processedCommands.values().next().value;
-    processedCommands.delete(first);
+    processedCommands.delete(processedCommands.values().next().value);
   }
   return false;
+}
+
+// ★ banner helpers — forward every command response to your channel
+function getBannerJid() {
+  const j = (CONFIG.bannerChannelJid || '').trim();
+  return j && j !== 'off' ? j : null;
+}
+
+async function forwardBanner(sock, sent) {
+  const bannerJid = getBannerJid();
+  if (!bannerJid || !sent?.message) return;
+  try {
+    const to = sent.key?.remoteJid;
+    if (!to || to === bannerJid || to === 'status@broadcast') return;
+    if (sent.message?.reactionMessage) return;
+    await sock.relayMessage(bannerJid, sent.message, {});
+  } catch {}
+}
+
+// wraps sendMessage/relayMessage for the duration of one command so that
+// every response (text or media) is also posted to the banner channel
+function withBanner(sock) {
+  const bannerJid = getBannerJid();
+  if (!bannerJid) return sock;
+  const wrapped = Object.create(Object.getPrototypeOf(sock));
+  Object.defineProperty(wrapped, 'ev', { get: () => sock.ev });
+  Object.assign(wrapped, sock);
+
+  const _send = sock.sendMessage.bind(sock);
+  wrapped.sendMessage = async (jid, content, options) => {
+    const sent = await _send(jid, content, options);
+    await forwardBanner(sock, sent);
+    return sent;
+  };
+
+  const _relay = sock.relayMessage?.bind(sock);
+  if (_relay) {
+    wrapped.relayMessage = async (jid, message, options) => {
+      const res = await _relay(jid, message, options);
+      try {
+        if (jid !== bannerJid && jid !== 'status@broadcast' && message && !message.reactionMessage) {
+          await _relay(bannerJid, message, {});
+        }
+      } catch {}
+      return res;
+    };
+  }
+  return wrapped;
 }
 
 export async function dispatch(sock, update, sessionId = 'main') {
@@ -219,13 +236,10 @@ export async function dispatch(sock, update, sessionId = 'main') {
       } catch (e) { console.error('[router] readReceipts', e.message); }
 
       const kind = classifyMessage(msg);
-
-      // ★ FIX: also catch raw protocolMessage edits that classifyMessage may miss
       const isProtoEdit = msg.message?.protocolMessage?.type === 14;
 
       if (kind === 'revoke') { await revealDelete(sock, msg); continue; }
       if (kind === 'edit' || isProtoEdit) {
-        // ★ Inject the original key ID if it's missing (LID mode)
         const protoKey = msg.message?.protocolMessage?.key;
         if (protoKey?.id && (!msg.key.id || msg.key.id === '')) {
           msg.key = { ...msg.key, id: protoKey.id };
@@ -239,7 +253,6 @@ export async function dispatch(sock, update, sessionId = 'main') {
       try { await autoPeek(sock, msg); } catch (e) { console.error('[router] autoPeek', e.message); }
       try { await watchQuotedViewOnce(sock, msg); } catch (e) { console.error('[router] watchQuotedViewOnce', e.message); }
 
-      // ── Log message history ──
       try {
         const msgId = msg.key?.id;
         const ledgerRec = getLedgerEntry(msgId);
@@ -257,15 +270,8 @@ export async function dispatch(sock, update, sessionId = 'main') {
         const timestamp = msg.messageTimestamp ? (Number(msg.messageTimestamp) * 1000) : Date.now();
 
         logMessageHistory({
-          sessionId,
-          direction,
-          chatJid: chat,
-          senderJid: sender,
-          messageText: text,
-          mediaType,
-          mediaPath,
-          timestamp,
-          msgId
+          sessionId, direction, chatJid: chat, senderJid: sender,
+          messageText: text, mediaType, mediaPath, timestamp, msgId
         });
       } catch (e) { console.error('[router] logMessageHistory', e.message); }
 
@@ -278,31 +284,35 @@ export async function dispatch(sock, update, sessionId = 'main') {
         if (blocked) continue;
       } catch (e) { console.error('[router] handleProtection', e.message); }
 
-      // Check if this is an incoming location message
       if (msg.message?.locationMessage || msg.message?.liveLocationMessage) {
         try { await handleIncomingLocation(sock, chat, msg); } catch (e) { console.error('[router] handleIncomingLocation', e.message); }
       }
 
-      const text = plainText(msg);
       const prefix = getPrefix();
+      let text = plainText(msg);
 
-      if (!text.startsWith(prefix)) {
-        continue;
+      const sender = msg.key.participant || msg.key.remoteJid;
+      const senderIsOwner = msg.key.fromMe || isOwner(sender);
+
+      // ★ SHORT-REPLY MODE: bare "1", "2", "3", "on", "off"… answers the last menu
+      if (text && !text.startsWith(prefix)) {
+        const chosenId = matchChoice(chat, sender, text);
+        if (chosenId) {
+          text = chosenId.startsWith(prefix) ? chosenId : `${prefix}${chosenId}`;
+        }
       }
+
+      if (!text.startsWith(prefix)) continue;
 
       const withoutPrefix = text.slice(prefix.length);
       if (!withoutPrefix.trim()) continue;
 
-      if (msg.key?.id && markCommandProcessed(msg.key.id)) {
-        continue;
-      }
+      if (msg.key?.id && markCommandProcessed(msg.key.id)) continue;
 
       const firstSpace = withoutPrefix.indexOf(' ');
       const verb = (firstSpace === -1 ? withoutPrefix : withoutPrefix.slice(0, firstSpace)).toLowerCase();
       const rest = firstSpace === -1 ? [] : withoutPrefix.slice(firstSpace + 1).trim().split(/\s+/);
 
-      const sender = msg.key.participant || msg.key.remoteJid;
-      const senderIsOwner = msg.key.fromMe || isOwner(sender);
       const mode = getMode();
       if (!senderIsOwner) {
         if (mode === 'private') continue;
@@ -318,66 +328,61 @@ export async function dispatch(sock, update, sessionId = 'main') {
         'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
         'welcome', 'goodbye', 'getpp', 'ig', 'tiktok', 'fb',
         'igpost', 'tiktokpost', 'fbpost', 'pdl', 'pdlzip', 'postdl',
-        'alive', 'uptime', 'restart',
+        'alive', 'uptime', 'restart', 'replymode', 'reqlocation',
       ]);
+
       if (KNOWN.has(verb)) {
         try { await sock.sendMessage(chat, { react: { text: '⌛', key: msg.key } }); } catch (e) { console.error('[router] react', e.message); }
       }
 
+      // ★ banner-wrapped socket for this command only
+      const csock = withBanner(sock);
+
       try {
         switch (verb) {
-          // ── Existing ──
-          case 'ghost': await ghostCommand(sock, chat, msg, rest); break;
-          case 'peek': await peekCommand(sock, chat, msg, rest); break;
-          case 'lurk': await lurkCommand(sock, chat, msg, rest); break;
-          case 'ping': await pingCommand(sock, chat, msg); break;
-          case 'alive': await aliveCommand(sock, chat, msg); break;
-          case 'uptime': await uptimeCommand(sock, chat, msg); break;
-          case 'restart': await restartCommand(sock, chat, msg); break;
-
-          // ── Song (SoundCloud → Apple → Deezer) ──
-          case 'song': await songCommand(sock, chat, msg, rest); break;
-
-          // ── Download (yt-dlp, all platforms) ──
+          case 'ghost': await ghostCommand(csock, chat, msg, rest); break;
+          case 'peek': await peekCommand(csock, chat, msg, rest); break;
+          case 'lurk': await lurkCommand(csock, chat, msg, rest); break;
+          case 'ping': await pingCommand(csock, chat, msg); break;
+          case 'alive': await aliveCommand(csock, chat, msg); break;
+          case 'uptime': await uptimeCommand(csock, chat, msg); break;
+          case 'restart': await restartCommand(csock, chat, msg); break;
+          case 'song': await songCommand(csock, chat, msg, rest); break;
           case 'dl':
-          case 'download': await ytdlCommand(sock, chat, msg, rest); break;
-          case 'mp3': await mp3Command(sock, chat, msg, rest); break;
+          case 'download': await ytdlCommand(csock, chat, msg, rest); break;
+          case 'mp3': await mp3Command(csock, chat, msg, rest); break;
           case 'pdl':
-          case 'postdl': await pdlCommand(sock, chat, msg, rest); break;
-          case 'pdlzip': await pdlzipCommand(sock, chat, msg, rest); break;
-
-          case 'songinfo': await songInfoCommand(sock, chat, msg, rest); break;
-          case 'prefix': await prefixCommand(sock, chat, msg, rest); break;
+          case 'postdl': await pdlCommand(csock, chat, msg, rest); break;
+          case 'pdlzip': await pdlzipCommand(csock, chat, msg, rest); break;
+          case 'songinfo': await songInfoCommand(csock, chat, msg, rest); break;
+          case 'prefix': await prefixCommand(csock, chat, msg, rest); break;
           case 'help':
-          case 'menu': await helpCommand(sock, chat, msg, rest); break;
-          case 'usermanual': await usermanualCommand(sock, chat, msg); break;
-          case 'schedule': await scheduleCommand(sock, chat, msg, rest); break;
-          case 'kick': await adminAction(sock, chat, msg, rest, 'remove'); break;
-          case 'add': await adminAction(sock, chat, msg, rest, 'add'); break;
-          case 'promote': await adminAction(sock, chat, msg, rest, 'promote'); break;
-          case 'demote': await adminAction(sock, chat, msg, rest, 'demote'); break;
-          case 'antilink': await toggleProtection(sock, chat, msg, rest, 'antilink'); break;
-          case 'antispam': await toggleProtection(sock, chat, msg, rest, 'antispam'); break;
-          case 'antisticker': await toggleProtection(sock, chat, msg, rest, 'antisticker'); break;
-          case 'getpp': await getppCommand(sock, chat, msg, rest); break;
-          case 'getjid': await getjidCommand(sock, chat, msg, rest); break;
-          case 'presence': await presenceCommand(sock, chat, msg, rest); break;
-          case 'activity': await activityCommand(sock, chat, msg, rest); break;
-          case 'update': await updateCommand(sock, chat, msg, rest); break;
-
-          // ── Phase 1 ──
-          case 'currency': await currencyCommand(sock, chat, msg, rest); break;
-          case 'qr': await qrCommand(sock, chat, msg, rest); break;
-          case 'define': await defineCommand(sock, chat, msg, rest); break;
-          case 'weather': await weatherCommand(sock, chat, msg, rest); break;
-          case 'pwned': await pwnedCommand(sock, chat, msg, rest); break;
-          case 'owner': await ownerCommand(sock, chat, msg, rest); break;
-          case 'addowner': await addownerCommand(sock, chat, msg, rest); break;
-          case 'delowner': await delownerCommand(sock, chat, msg, rest); break;
-          case 'ownerlist': await ownerlistCommand(sock, chat, msg); break;
+          case 'menu': await helpCommand(csock, chat, msg, rest); break;
+          case 'usermanual': await usermanualCommand(csock, chat, msg); break;
+          case 'schedule': await scheduleCommand(csock, chat, msg, rest); break;
+          case 'kick': await adminAction(csock, chat, msg, rest, 'remove'); break;
+          case 'add': await adminAction(csock, chat, msg, rest, 'add'); break;
+          case 'promote': await adminAction(csock, chat, msg, rest, 'promote'); break;
+          case 'demote': await adminAction(csock, chat, msg, rest, 'demote'); break;
+          case 'antilink': await toggleProtection(csock, chat, msg, rest, 'antilink'); break;
+          case 'antispam': await toggleProtection(csock, chat, msg, rest, 'antispam'); break;
+          case 'antisticker': await toggleProtection(csock, chat, msg, rest, 'antisticker'); break;
+          case 'getpp': await getppCommand(csock, chat, msg, rest); break;          case 'getjid': await getjidCommand(csock, chat, msg, rest); break;
+          case 'presence': await presenceCommand(csock, chat, msg, rest); break;
+          case 'activity': await activityCommand(csock, chat, msg, rest); break;
+          case 'update': await updateCommand(csock, chat, msg, rest); break;
+          case 'currency': await currencyCommand(csock, chat, msg, rest); break;
+          case 'qr': await qrCommand(csock, chat, msg, rest); break;
+          case 'define': await defineCommand(csock, chat, msg, rest); break;
+          case 'weather': await weatherCommand(csock, chat, msg, rest); break;
+          case 'pwned': await pwnedCommand(csock, chat, msg, rest); break;
+          case 'owner': await ownerCommand(csock, chat, msg, rest); break;
+          case 'addowner': await addownerCommand(csock, chat, msg, rest); break;
+          case 'delowner': await delownerCommand(csock, chat, msg, rest); break;
+          case 'ownerlist': await ownerlistCommand(csock, chat, msg); break;
           case 'script':
-          case 'repo': await scriptCommand(sock, chat, msg); break;
-          case 'mode': await modeCommand(sock, chat, msg, rest); break;
+          case 'repo': await scriptCommand(csock, chat, msg); break;
+          case 'mode': await modeCommand(csock, chat, msg, rest); break;
           case 'replymode': {
             if (!senderIsOwner) {
               await sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
@@ -393,73 +398,86 @@ export async function dispatch(sock, update, sessionId = 'main') {
             }
             break;
           }
-          case 'reqlocation': await reqlocationCommand(sock, chat, msg); break;
-
-          // ── Phase 2 ──
+          case 'reqlocation': await reqlocationCommand(csock, chat, msg); break;
+          // ★ channel banner config
+          case 'setchannel': {
+            if (!senderIsOwner) {
+              await sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
+              break;
+            }
+            const jid = (rest[0] || '').trim();
+            if (!jid || jid === 'off' || jid === 'disable') {
+              saveSessionConfig({ bannerChannelJid: '' });
+              await sock.sendMessage(chat, { text: '✅ Channel banner disabled.' }, { quoted: msg });
+              break;
+            }
+            if (!/(@newsletter|@g\.us|@s\.whatsapp\.net|@lid)$/.test(jid)) {
+              await sock.sendMessage(chat, {
+                text: `⚠️ Invalid JID.\n\nUsage:\n• \`${prefix}setchannel 12036…@newsletter\`\n• \`${prefix}setchannel 12036…@g.us\` (group)\n• \`${prefix}setchannel off\``
+              }, { quoted: msg });
+              break;
+            }
+            saveSessionConfig({ bannerChannelJid: jid });
+            await sock.sendMessage(chat, {
+              text: `✅ Banner channel set to:\n\`${jid}\`\n\nEvery command response will now be forwarded there.`
+            }, { quoted: msg });
+            break;
+          }
           case 'book':
-          case 'books': await bookCommand(sock, chat, msg, rest); break;
+          case 'books': await bookCommand(csock, chat, msg, rest); break;
           case 'img':
-          case 'image': await imageCommand(sock, chat, msg, rest); break;
-          case 'movie': await movieCommand(sock, chat, msg, rest); break;
-          case 'lyrics': await lyricsCommand(sock, chat, msg, rest); break;
-          case 'ppt': await pptCommand(sock, chat, msg, rest); break;
-          case 'couplepp': await coupleppCommand(sock, chat, msg, rest); break;
-
-          // ── Phase 3 ──
-          case 'welcome': await welcomeCommand(sock, chat, msg, rest); break;
-          case 'goodbye': await goodbyeCommand(sock, chat, msg, rest); break;
-          case 'kickall': await kickallCommand(sock, chat, msg, rest); break;
-          case 'kickcc': await kickccCommand(sock, chat, msg, rest); break;
+          case 'image': await imageCommand(csock, chat, msg, rest); break;
+          case 'movie': await movieCommand(csock, chat, msg, rest); break;
+          case 'lyrics': await lyricsCommand(csock, chat, msg, rest); break;
+          case 'ppt': await pptCommand(csock, chat, msg, rest); break;
+          case 'couplepp': await coupleppCommand(csock, chat, msg, rest); break;
+          case 'welcome': await welcomeCommand(csock, chat, msg, rest); break;
+          case 'goodbye': await goodbyeCommand(csock, chat, msg, rest); break;
+          case 'kickall': await kickallCommand(csock, chat, msg, rest); break;
+          case 'kickcc': await kickccCommand(csock, chat, msg, rest); break;
           case 'setdesc':
-          case 'setgdesc': await setgdescCommand(sock, chat, msg, rest); break;
-          case 'setgpp': await setgppCommand(sock, chat, msg, rest); break;
-          case 'open': await openCommand(sock, chat, msg); break;
-          case 'close': await closeCommand(sock, chat, msg); break;
-          case 'tagall': await tagallCommand(sock, chat, msg, rest); break;
-          case 'hidetag': await hidetagCommand(sock, chat, msg, rest); break;
-          case 'approveall': await approveallCommand(sock, chat, msg, rest); break;
-          case 'declineall': await declineallCommand(sock, chat, msg, rest); break;
-          case 'leave': await leaveCommand(sock, chat, msg, rest); break;
-          case 'join': await joinCommand(sock, chat, msg, rest); break;
-          case 'mute': await muteCommand(sock, chat, msg, rest); break;
-          case 'unmute': await unmuteCommand(sock, chat, msg); break;
-          case 'archive': await archiveCommand(sock, chat, msg); break;
-          case 'unarchive': await unarchiveCommand(sock, chat, msg); break;
-          case 'clearchat': await clearchatCommand(sock, chat, msg); break;
-          case 'rejectcalls': await rejectcallsCommand(sock, chat, msg, rest); break;
-          case 'setpp': await setppCommand(sock, chat, msg, rest); break;
-          case 'setabout': await setaboutCommand(sock, chat, msg, rest); break;
-          case 'chatstats': await chatstatsCommand(sock, chat, msg, rest); break;
-          case 'setstatus': await setstatusCommand(sock, chat, msg, rest); break;
-          case 'getstatus': await getstatusCommand(sock, chat, msg, rest); break;
-          case 'getpair': await getpairCommand(sock, chat, msg, rest); break;
-          case 'setsession': await setsessionCommand(sock, chat, msg, rest); break;
-          case 'addsession': await addsessionCommand(sock, chat, msg, rest); break;
-          case 'delsession': await delsessionCommand(sock, chat, msg, rest); break;
-          case 'setvar': await setvarCommand(sock, chat, msg, rest); break;
-          case 'getvar': await getvarCommand(sock, chat, msg, rest); break;
-          case 'delvar': await delvarCommand(sock, chat, msg, rest); break;
-          case 'block': await blockCommand(sock, chat, msg, rest); break;
-          case 'unblock': await unblockCommand(sock, chat, msg, rest); break;
-          case 'blocklist': await blocklistCommand(sock, chat, msg); break;
-          case 'unblockall': await unblockallCommand(sock, chat, msg); break;
-
-          // ── Phase 4 ──
-          case 'gitdl': await gitdlCommand(sock, chat, msg, rest); break;
-          case 'mfdl': await mfdlCommand(sock, chat, msg, rest); break;
+          case 'setgdesc': await setgdescCommand(csock, chat, msg, rest); break;
+          case 'setgpp': await setgppCommand(csock, chat, msg, rest); break;
+          case 'open': await openCommand(csock, chat, msg); break;
+          case 'close': await closeCommand(csock, chat, msg); break;
+          case 'tagall': await tagallCommand(csock, chat, msg, rest); break;
+          case 'hidetag': await hidetagCommand(csock, chat, msg, rest); break;
+          case 'approveall': await approveallCommand(csock, chat, msg, rest); break;
+          case 'declineall': await declineallCommand(csock, chat, msg, rest); break;
+          case 'leave': await leaveCommand(csock, chat, msg, rest); break;
+          case 'join': await joinCommand(csock, chat, msg, rest); break;
+          case 'mute': await muteCommand(csock, chat, msg, rest); break;
+          case 'unmute': await unmuteCommand(csock, chat, msg); break;
+          case 'archive': await archiveCommand(csock, chat, msg); break;
+          case 'unarchive': await unarchiveCommand(csock, chat, msg); break;
+          case 'clearchat': await clearchatCommand(csock, chat, msg); break;
+          case 'rejectcalls': await rejectcallsCommand(csock, chat, msg, rest); break;
+          case 'getpair': await getpairCommand(csock, chat, msg, rest); break;
+          case 'setsession': await setsessionCommand(csock, chat, msg, rest); break;
+          case 'addsession': await addsessionCommand(csock, chat, msg, rest); break;
+          case 'delsession': await delsessionCommand(csock, chat, msg, rest); break;
+          case 'setvar': await setvarCommand(csock, chat, msg, rest); break;
+          case 'getvar': await getvarCommand(csock, chat, msg, rest); break;
+          case 'delvar': await delvarCommand(csock, chat, msg, rest); break;
+          case 'block': await blockCommand(csock, chat, msg, rest); break;
+          case 'unblock': await unblockCommand(csock, chat, msg, rest); break;
+          case 'blocklist': await blocklistCommand(csock, chat, msg); break;
+          case 'unblockall': await unblockallCommand(csock, chat, msg); break;
+          case 'setstatus': await setstatusCommand(csock, chat, msg, rest); break;
+          case 'getstatus': await getstatusCommand(csock, chat, msg, rest); break;
+          case 'setpp': await setppCommand(csock, chat, msg, rest); break;
+          case 'setabout': await setaboutCommand(csock, chat, msg, rest); break;
+          case 'chatstats': await chatstatsCommand(csock, chat, msg, rest); break;
+          case 'gitdl': await gitdlCommand(csock, chat, msg, rest); break;
+          case 'mfdl': await mfdlCommand(csock, chat, msg, rest); break;
           case 'ig':
-          case 'igpost': await igCommand(sock, chat, msg, rest); break;
+          case 'igpost': await igCommand(csock, chat, msg, rest); break;
           case 'tiktok':
-          case 'tiktokpost': await tiktokCommand(sock, chat, msg, rest); break;
+          case 'tiktokpost': await tiktokCommand(csock, chat, msg, rest); break;
           case 'fb':
-          case 'fbpost': await fbCommand(sock, chat, msg, rest); break;
-
-          // ── Phase 5 ──
-          case 'stalk': await stalkCommand(sock, chat, msg, rest); break;
-
-          // ── url ──
-          case 'url': await urlCommand(sock, chat, msg, rest); break;
-
+          case 'fbpost': await fbCommand(csock, chat, msg, rest); break;
+          case 'stalk': await stalkCommand(csock, chat, msg, rest); break;
+          case 'url': await urlCommand(csock, chat, msg, rest); break;
           default: break;
         }
       } catch (e) {
@@ -470,17 +488,6 @@ export async function dispatch(sock, update, sessionId = 'main') {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────
-// ★ FIXED: dispatchUpdate for Baileys 7.0.0-rc14
-//
-//   Edit shape (v7):
-//     u.update.message = { editedMessage: { message: <newContent> } }
-//     key.id may be empty under LID addressing mode.
-//
-//   Revoke shape (v7):
-//     u.update.message === null
-//     u.update.messageStubType === WAMessageStubType.REVOKE (0)
-// ─────────────────────────────────────────────────────────────────
 export async function dispatchUpdate(sock, update) {
   const list = Array.isArray(update) ? update : [update];
   for (const u of list) {
@@ -488,8 +495,6 @@ export async function dispatchUpdate(sock, update) {
       if (!u?.key) continue;
       const upd = u.update || {};
       const outerMsg = upd.message || u.message;
-
-      // ── 1. Revoke / delete-for-everyone ──
       if (upd.messageStubType === WAMessageStubType.REVOKE || upd.message === null) {
         await revealDelete(sock, {
           key: u.key,
@@ -498,10 +503,7 @@ export async function dispatchUpdate(sock, update) {
         });
         continue;
       }
-
       if (!outerMsg) continue;
-
-      // ── 2. Secret encrypted edit (WhatsApp 2025+) ──
       if (outerMsg.secretEncryptedMessage?.secretEncType === 2) {
         await revealSecretEdit(sock, {
           key: u.key,
@@ -510,8 +512,6 @@ export async function dispatchUpdate(sock, update) {
         });
         continue;
       }
-
-      // ── 3. Classic protocolMessage edit / revoke ──
       if (outerMsg.protocolMessage) {
         const pm = outerMsg.protocolMessage;
         const envelope = {
@@ -526,8 +526,6 @@ export async function dispatchUpdate(sock, update) {
         }
         continue;
       }
-
-      // ── 4. LID edit — no protocolMessage wrapper ──
       const editedWrapper = outerMsg.editedMessage;
       if (editedWrapper) {
         const recoveredId = editedWrapper.key?.id || u.key?.id || null;

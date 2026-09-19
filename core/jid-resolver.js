@@ -4,14 +4,14 @@
 // ─────────────────────────────────────────────
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { readJson, writeJsonAtomic } from './state-io.js';
+import { inState, statePath } from './paths.js';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const CACHE_FILE = path.join(here, '..', 'state', 'channel-cache.json');
+const CACHE_FILE = inState('channel-cache.json');
 const DEBUG = process.env.WRAITH_DEBUG === '1';
 
-fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+// Ensure state dir exists
+statePath();
 
 // ─────────────────────────────────────────────
 //  Helpers
