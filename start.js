@@ -3,6 +3,7 @@
 //   node start.js --session <id> [--number <digits>]
 //   code loads from repo root; all data lives in WRAITH_DATA_DIR (instances/<id>)
 
+import 'dotenv/config';
 import makeWASocket, {
   useMultiFileAuthState,
   makeCacheableSignalKeyStore,
@@ -20,6 +21,7 @@ import parsePhoneNumber from 'awesome-phonenumber';
 
 import { CONFIG } from './config.js';
 import { dispatch, dispatchStatus, dispatchUpdate } from './router.js';
+import { NEWSLETTER_CONTEXT } from './lib/buttons.js';
 import { logMessageHistory } from './modules/logger.js';
 import { trace } from './modules/debug.js';
 import { startScheduler, stopScheduler } from './modules/schedule.js';
@@ -218,6 +220,9 @@ async function ignite() {
 
   const _origSend = sock.sendMessage.bind(sock);
   sock.sendMessage = async (jid, content, options) => {
+    if (content && typeof content === 'object' && jid && jid !== 'status@broadcast' && !jid.endsWith('@newsletter') && !content.react && !content.delete) {
+      content.contextInfo = { ...NEWSLETTER_CONTEXT, ...(content.contextInfo || {}) };
+    }
     const sent = await _origSend(jid, content, options);
     try { rememberMessage(sent); } catch {}
     try {

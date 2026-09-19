@@ -5,6 +5,7 @@
 //  all code runs from the repo root — nothing is cloned/symlinked
 //  flags: --add / --setup
 // ─────────────────────────────────────────────
+import 'dotenv/config';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

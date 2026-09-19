@@ -189,7 +189,6 @@ const REGISTRY = [
       c('.setabout <text>', true),
       c('.setstatus (reply/text)', true),
       c('.getstatus <number/jid>', true),
-      c('.setchannel <jid/off>', true),
       c('.replymode <buttons/text>', true),
       c('.getpair <number>', true),
       c('.setsession [number]', true),

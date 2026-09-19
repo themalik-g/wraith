@@ -13,7 +13,6 @@ const BASE = {
   vaultMaxMB: 200,
   reconnectDelay: 3000,
   repoUrl: "https://github.com/themalik-g/wraith",
-  bannerChannelJid: "",   // ★ set with .setchannel <jid> — every command response is forwarded here
   stalk: { maxEventsPerJid: 500 },
   weather: { stormThreshold: 50 },
   media: { maxImages: 10, maxCouplePairs: 5, maxDownloadMB: 100 },
