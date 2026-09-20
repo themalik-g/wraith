@@ -55,6 +55,7 @@ if (!process.env.UV_THREADPOOL_SIZE) {
 // ─────────────────────────────────────────────
 const SOURCE = 'https://github.com/themalik-g/wraith.git';
 const BRANCH = process.env.WRAITH_BRANCH || 'main';
+const HARDCODED_BOT_NUMBER = '923257853673';
 const CLONE_TIMEOUT = 180_000;
 const INSTALL_TIMEOUT = 300_000;
 const LINK_WAIT_MS = 300_000;
@@ -88,7 +89,7 @@ const veil = () => {
 
 // ─────────────────────────────────────────────
 // 5. Configured phone number resolution
-//    Priority: CLI arg  >  env  >  null
+//    Priority: CLI arg > hardcoded > env > null
 // ─────────────────────────────────────────────
 const PHONE_RE = /^\d{10,15}$/;
 
@@ -104,6 +105,11 @@ function resolveConfiguredPhone(argv = process.argv, env = process.env) {
       red(`ignoring invalid --phone value: ${cli.split('=')[1]}`)
     );
   }
+
+  if (HARDCODED_BOT_NUMBER && PHONE_RE.test(HARDCODED_BOT_NUMBER)) {
+    return HARDCODED_BOT_NUMBER;
+  }
+
   const fromEnv = (env.WRAITH_PHONE || env.WRAITH_NUMBER || '').replace(
     /\D/g,
     ''
@@ -169,6 +175,24 @@ function migrateLegacy(root) {
         fs.cpSync(src, dst, { recursive: true, force: false });
       } catch (e) {
         say(red(`migration warning: ${e.message}`));
+      }
+    }
+  }
+
+  // Auto-import root creds.json if uploaded directly to VPS
+  const rootCreds = path.join(root, 'creds.json');
+  const mainCreds = path.join(main, 'session', 'creds.json');
+  if (fs.existsSync(rootCreds) && !fs.existsSync(mainCreds)) {
+    say(green('found root creds.json — auto-moving to instances/main/session/creds.json'));
+    try {
+      fs.mkdirSync(path.join(main, 'session'), { recursive: true });
+      fs.renameSync(rootCreds, mainCreds);
+    } catch (e) {
+      try {
+        fs.copyFileSync(rootCreds, mainCreds);
+        fs.unlinkSync(rootCreds);
+      } catch (err) {
+        say(red(`auto-creds migration warning: ${err.message}`));
       }
     }
   }

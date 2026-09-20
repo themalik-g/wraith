@@ -1,640 +1,384 @@
 #!/usr/bin/env node
 // ─────────────────────────────────────────────
-// WRAITH · session worker / launcher (ESM)
-// Runs inside the cloned repo — node_modules exists here.
+// WRAITH · per-session bootstrap worker (ESM)
+// node start.js --session <id> [--number <digits>]
+// Code loads from repo root; all session data lives in WRAITH_DATA_DIR (instances/<id>)
 // ─────────────────────────────────────────────
 
-// ─────────────────────────────────────────────
-// 1. LOAD .env FIRST — before ANY other import.
-//    index.js already cloned the repo and ran `npm install`,
-//    and spawns us with cwd = <repo>, so `dotenv` resolves
-//    from ./node_modules/dotenv.
-// ─────────────────────────────────────────────
 try {
   await import('dotenv/config');
 } catch (err) {
   if (process.env.WRAITH_DEBUG) {
-    console.warn(
-      '[wraith] dotenv not loaded:',
-      err?.code || err?.message || err
-    );
+    console.warn('[wraith] dotenv not loaded:', err?.code || err?.message || err);
   }
 }
 
-// ─────────────────────────────────────────────
-// 2. Everything else
-// ─────────────────────────────────────────────
-import { spawn, spawnSync } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
-import readline from 'node:readline';
-import { fileURLToPath } from 'node:url';
+import makeWASocket, {
+  useMultiFileAuthState,
+  makeCacheableSignalKeyStore,
+  fetchLatestBaileysVersion,
+  DisconnectReason,
+  Browsers,
+  delay
+} from '@whiskeysockets/baileys';
+import { Boom } from '@hapi/boom';
+import NodeCache from '@cacheable/node-cache';
+import pino from 'pino';
+import fs from 'fs';
+import path from 'path';
+import parsePhoneNumber from 'awesome-phonenumber';
 
-// ─────────────────────────────────────────────
-// 3. Container-safe defaults
-// ─────────────────────────────────────────────
-if (!process.env.UV_THREADPOOL_SIZE) {
-  process.env.UV_THREADPOOL_SIZE = '2';
-}
+import { CONFIG } from './config.js';
+import { dispatch, dispatchStatus, dispatchUpdate } from './router.js';
+import { logMessageHistory } from './modules/logger.js';
+import { trace } from './modules/debug.js';
+import { startScheduler, stopScheduler } from './modules/schedule.js';
+import { startPresenceHeartbeat, stopPresenceHeartbeat } from './modules/presence.js';
+import { revealDelete } from './modules/ghost.js';
+import { sessionPath, statePath, inState } from './core/paths.js';
+import { NEWSLETTER_CONTEXT } from './lib/buttons.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SOURCE = 'https://github.com/themalik-g/wraith.git';
-const BRANCH = process.env.WRAITH_BRANCH || 'main';
-const CLONE_TIMEOUT = 180_000;
-const INSTALL_TIMEOUT = 300_000;
-const LINK_WAIT_MS = 300_000;
-const MAX_RESTARTS = 10;
-const ADD_MODE =
-  process.argv.includes('--add') || process.argv.includes('--setup');
-const PROMPT_TIMEOUT_MS = Number(
-  process.env.WRAITH_PROMPT_TIMEOUT_MS || 20_000
-);
-
-// ─────────────────────────────────────────────
-// 4. Styling helpers
-// ─────────────────────────────────────────────
-const dye = (c, s) => `\x1b[${c}m${s}\x1b[0m`;
-const grey = s => dye(90, s);
-const cyan = s => dye(36, s);
-const violet = s => dye(35, s);
-const green = s => dye(32, s);
-const yellow = s => dye(33, s);
-const red = s => dye(31, s);
-const clock = () => grey(new Date().toTimeString().slice(0, 8));
-const say = (...p) => console.log(clock(), violet('❯'), ...p);
-
-const veil = () => {
-  console.log();
-  console.log(violet(' · · · · · · · · · · ·'));
-  console.log(violet(' w r a i t h'));
-  console.log(violet(' · · · · · · · · · · ·'));
-  console.log();
+// ── CLI Arg Parsing ──
+const argv = process.argv.slice(2);
+const argVal = (name) => {
+  const i = argv.indexOf(name);
+  return i !== -1 && argv[i + 1] ? argv[i + 1] : null;
 };
 
-// ─────────────────────────────────────────────
-// 5. Configured phone number resolution
-// ─────────────────────────────────────────────
-const PHONE_RE = /^\d{10,15}$/;
+const sessionId     = argVal('--session') || process.env.WRAITH_SESSION_ID || 'main';
+const rawNumber     = argVal('--number');
+const pairingNumber = rawNumber ? rawNumber.replace(/\D/g, '') : null;
 
-function resolveConfiguredPhone(argv = process.argv, env = process.env) {
-  const cli = argv.find(
-    a => a.startsWith('--phone=') || a.startsWith('--number=')
-  );
-  if (cli) {
-    const digits = cli.split('=')[1].replace(/\D/g, '');
-    if (PHONE_RE.test(digits)) return digits;
-    console.warn(
-      clock(),
-      red(`ignoring invalid --phone value: ${cli.split('=')[1]}`)
-    );
-  }
-  const fromEnv = (env.WRAITH_PHONE || env.WRAITH_NUMBER || '').replace(
-    /\D/g,
-    ''
-  );
-  if (PHONE_RE.test(fromEnv)) return fromEnv;
-  return null;
-}
+// ── Per-Session Path Resolution ──
+const AUTH_DIR   = sessionPath();
+const STATE_DIR  = statePath();
+const OWNER_FILE = inState('owner.json');
 
-const CONFIGURED_PHONE = resolveConfiguredPhone();
-
-// ─────────────────────────────────────────────
-// 6. Repo / instance helpers
-// ─────────────────────────────────────────────
-function repoRoot() {
-  if (fs.existsSync(path.join(__dirname, 'start.js'))) return __dirname;
-
-  const dir = path.join(__dirname, 'wraith');
-  if (!fs.existsSync(path.join(dir, 'start.js'))) {
-    say(yellow('fetching wraith from origin…'));
-    const res = spawnSync(
-      'git',
-      ['clone', '--depth', '1', '-b', BRANCH, SOURCE, dir],
-      { stdio: 'inherit', timeout: CLONE_TIMEOUT }
-    );
-    if (res.status !== 0) {
-      throw new Error('git clone failed – check network or repository access');
-    }
-  }
-  return dir;
-}
-
-function installDeps(dir) {
-  say(yellow('installing dependencies…'));
-  const res = spawnSync('npm', ['install', '--omit=dev'], {
-    cwd: dir,
-    stdio: 'inherit',
-    timeout: INSTALL_TIMEOUT,
-  });
-  if (res.status !== 0) {
-    throw new Error('npm install failed – see output above');
-  }
-  say(green('✓ dependencies locked in'));
-}
-
-const instDir = (root, id) => path.join(root, 'instances', id);
-
-function makeInstance(root, id) {
-  const dir = instDir(root, id);
-  for (const name of ['session', 'state', 'vault', 'logs', 'data']) {
-    fs.mkdirSync(path.join(dir, name), { recursive: true });
-  }
-  return dir;
-}
-
-function migrateLegacy(root) {
-  const main = instDir(root, 'main');
-  for (const name of ['session', 'state', 'vault']) {
-    const src = path.join(root, name);
-    const dst = path.join(main, name);
-    if (fs.existsSync(src) && !fs.existsSync(dst)) {
-      say(yellow(`migrating legacy /${name} → instances/main/${name}`));
-      try {
-        fs.cpSync(src, dst, { recursive: true, force: false });
-      } catch (e) {
-        say(red(`migration warning: ${e.message}`));
-      }
-    }
-  }
-}
-
-const isLinked = (root, id) =>
-  fs.existsSync(path.join(root, 'instances', id, 'session', 'creds.json'));
-
-function listExistingInstances(root) {
-  const dir = path.join(root, 'instances');
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
-    .filter(n => {
-      try {
-        return fs.statSync(path.join(dir, n)).isDirectory();
-      } catch {
-        return false;
-      }
-    })
-    .filter(n => isLinked(root, n))
-    .sort();
-}
-
-function nextSessionId(root) {
-  const dir = path.join(root, 'instances');
-  if (!fs.existsSync(dir)) return 'main';
-
-  const used = fs.readdirSync(dir).filter(n => {
-    try {
-      return fs.statSync(path.join(dir, n)).isDirectory() && isLinked(root, n);
-    } catch {
-      return false;
-    }
-  });
-
-  if (used.length === 0 || !used.includes('main')) return 'main';
-  let maxN = 1;
-  for (const id of used) {
-    const m = /^sess(\d+)$/.exec(id);
-    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
-  }
-  return `sess${maxN + 1}`;
-}
-
-// ─────────────────────────────────────────────
-// 7. Session spawning
-// ─────────────────────────────────────────────
-const children = new Map();
-const restartingSessions = new Set();
-let shuttingDown = false;
-let rl = null;
-
-const ask = q => new Promise(res => rl.question(q, a => res(a.trim())));
-
-// ─────────────────────────────────────────────
-// Prompt for a WhatsApp number.
-// If CONFIGURED_PHONE is set, auto-fallback to it
-// after PROMPT_TIMEOUT_MS of no input.
-// ─────────────────────────────────────────────
-async function promptNumber(label = 'number') {
-  console.log();
-  console.log(violet(` ╭─ link a ${label} ─────────────────────╮`));
-  console.log(violet(' │') + ' WhatsApp number, digits only ' + violet('│'));
-  console.log(
-    violet(' │') +
-      grey(' country code + number · 923001234567 ') +
-      violet('│')
-  );
-  if (CONFIGURED_PHONE) {
-    console.log(
-      violet(' │') +
-        yellow(
-          ` ⏱ no input in ${PROMPT_TIMEOUT_MS / 1000}s → +${CONFIGURED_PHONE} `
-        ) +
-        violet('│')
-    );
-  }
-  console.log(violet(' ╰────────────────────────────────────────╯'));
-
-  return new Promise(resolve => {
-    let settled = false;
-    let timer = null;
-
-    const finish = num => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      resolve(num);
-    };
-
-    if (CONFIGURED_PHONE) {
-      timer = setTimeout(() => {
-        if (settled) return;
-        process.stdout.write('\n');
-        say(
-          yellow(
-            `⏱ no input in ${PROMPT_TIMEOUT_MS / 1000}s — auto-pairing +${CONFIGURED_PHONE}`
-          )
-        );
-        finish(CONFIGURED_PHONE);
-      }, PROMPT_TIMEOUT_MS);
-    }
-
-    (async () => {
-      while (!settled) {
-        let raw;
-        try {
-          raw = await ask(violet(' ❯ ') + cyan(`${label}: `));
-        } catch {
-          if (CONFIGURED_PHONE) finish(CONFIGURED_PHONE);
-          return;
-        }
-        if (settled) return;
-
-        const digits = raw.replace(/\D/g, '');
-        if (!/^\d{10,15}$/.test(digits)) {
-          console.log(red(' ✖ must be 10–15 digits'));
-          continue;
-        }
-        finish(digits);
-        return;
-      }
-    })();
-  });
-}
-
-function spawnSession(root, id, number) {
-  const dir = makeInstance(root, id);
-  const maxOldSpace = process.env.WRAITH_MAX_OLD_SPACE_SIZE || '256';
-  const args = [`--max-old-space-size=${maxOldSpace}`, '--expose-gc'];
-  if (process.env.WRAITH_V8_POOL_SIZE) {
-    args.push(`--v8-pool-size=${process.env.WRAITH_V8_POOL_SIZE}`);
-  }
-  args.push(path.join(root, 'start.js'), '--session', id);
-  if (number) args.push('--number', number);
-
-  const env = {
-    ...process.env,
-    UV_THREADPOOL_SIZE: process.env.UV_THREADPOOL_SIZE || '2',
-    WRAITH_REPO_ROOT: root,
-    WRAITH_SESSION_ID: id,
-    WRAITH_DATA_DIR: dir,
-  };
-
-  say(cyan(`starting session ${id}${number ? ' · +' + number : ''}`));
-  const proc = spawn('node', args, {
-    cwd: root,
-    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-    env,
-  });
-
-  let muted = false;
-  const backlog = [];
-  const route = (stream, dest) => {
-    stream.on('data', chunk => {
-      if (muted) backlog.push([dest, chunk]);
-      else dest.write(chunk);
-    });
-  };
-  route(proc.stdout, process.stdout);
-  route(proc.stderr, process.stderr);
-
-  let resolveLinked, resolveExit;
-  const linkedPromise = new Promise(r => (resolveLinked = r));
-  const exitPromise = new Promise(r => (resolveExit = r));
-
-  const rec = {
-    number,
-    proc,
-    restarts: 0,
-    resetTimer: null,
-    resolveLinked,
-    resolveExit,
-    mute: () => {
-      muted = true;
-    },
-    unmute: () => {
-      muted = false;
-      for (const [dest, chunk] of backlog) dest.write(chunk);
-      backlog.length = 0;
-    },
-  };
-  children.set(id, rec);
-
-  proc.on('message', m => {
-    if (m?.type === 'wraith:linked') {
-      try {
-        resolveLinked(true);
-      } catch {}
-    }
-    if (m?.type === 'wraith:spawn_session' && m.sessionId) {
-      if (children.has(m.sessionId)) {
-        say(yellow(`session ${m.sessionId} is already running`));
-      } else {
-        say(
-          green(
-            `dynamic spawn request received for session ${m.sessionId}${
-              m.number ? ' (+' + m.number + ')' : ''
-            }`
-          )
-        );
-        spawnSession(root, m.sessionId, m.number || null);
-      }
-    }
-    if (m?.type === 'wraith:restart_all') {
-      say(
-        cyan(
-          `multi-session update requested by ${id} — restarting all other sessions`
-        )
-      );
-      for (const [otherId, otherRec] of children.entries()) {
-        if (otherId !== id) {
-          restartingSessions.add(otherId);
-          try {
-            otherRec.proc.kill('SIGTERM');
-          } catch {}
-        }
-      }
-    }
-    if (m?.type === 'wraith:delete_session' && m.sessionId) {
-      const targetId = m.sessionId;
-      say(yellow(`delete session request received for ${targetId}`));
-      if (children.has(targetId)) {
-        const targetRec = children.get(targetId);
-        try {
-          targetRec.proc.kill('SIGTERM');
-        } catch {}
-        children.delete(targetId);
-      }
-      const targetDir = instDir(root, targetId);
-      setTimeout(() => {
-        try {
-          fs.rmSync(targetDir, { recursive: true, force: true });
-          say(green(`deleted session instance directory: ${targetId}`));
-        } catch (e) {
-          say(red(`failed to remove directory for ${targetId}: ${e.message}`));
-        }
-      }, 1500);
-    }
-  });
-
-  proc.on('error', err =>
-    console.error(clock(), red('spawn error:'), err.message)
-  );
-
-  proc.on('exit', (code, signal) => {
-    children.delete(id);
-    try {
-      resolveExit({ code, signal });
-    } catch {}
-
-    if (shuttingDown) return;
-
-    if (restartingSessions.has(id)) {
-      restartingSessions.delete(id);
-      say(cyan(`restarting session ${id} for update…`));
-      setTimeout(() => {
-        if (!shuttingDown) spawnSession(root, id, rec.number);
-      }, 1000);
-      return;
-    }
-
-    if (signal === 'SIGINT' || signal === 'SIGTERM') return;
-
-    rec.restarts++;
-    if (rec.restarts > MAX_RESTARTS) {
-      say(red(`${id}: exceeded max restarts (${MAX_RESTARTS}) — giving up`));
-      return;
-    }
-
-    const wait = Math.min(1500 * Math.pow(2, rec.restarts - 1), 30_000);
-    const exitDetail =
-      code !== null
-        ? `code ${code}`
-        : signal
-        ? `signal ${signal}`
-        : 'code null';
-    const why =
-      code === 0
-        ? 'restarting for update/clean exit'
-        : `crashed (${exitDetail})`;
-    say(
-      yellow(
-        `${id}: ${why} · retry ${rec.restarts} in ${(wait / 1000).toFixed(1)}s`
-      )
-    );
-
-    setTimeout(() => {
-      if (!shuttingDown) spawnSession(root, id, rec.number);
-    }, wait);
-  });
-
-  clearTimeout(rec.resetTimer);
-  rec.resetTimer = setTimeout(() => {
-    rec.restarts = 0;
-  }, 20_000);
-
-  return { proc, linkedPromise, exitPromise };
-}
-
-async function waitForLink(spawnResult, id) {
-  return Promise.race([
-    spawnResult.linkedPromise.then(() => 'linked'),
-    spawnResult.exitPromise.then(({ code }) => {
-      if (code === 0) return 'exited';
-      throw new Error(`session ${id} exited early with code ${code}`);
-    }),
-    new Promise((_, rej) =>
-      setTimeout(
-        () =>
-          rej(
-            new Error(
-              `session ${id} link timeout after ${LINK_WAIT_MS / 1000}s`
-            )
-          ),
-        LINK_WAIT_MS
-      )
-    ),
-  ]);
-}
-
-function muteAll() {
-  for (const rec of children.values()) rec.mute?.();
-}
-function unmuteAll() {
-  for (const rec of children.values()) rec.unmute?.();
-}
-
-async function linkOne(root, label, presetNumber = null) {
-  let number = presetNumber;
-
-  if (number) {
-    say(cyan(`using configured number +${number}`));
-  } else if (!process.stdin.isTTY || !rl) {
-    throw new Error(
-      'no phone number available — set WRAITH_PHONE env or pass --phone=923001234567'
-    );
-  } else {
-    number = await promptNumber(label);
-  }
-
-  const id = nextSessionId(root);
-  say(grey(`spawning session ${id} for +${number} — waiting for pairing code…`));
-
-  const result = spawnSession(root, id, number);
-  try {
-    await waitForLink(result, id);
-    console.log(green(`\n ✔ ${id} linked (+${number})`));
-    return true;
-  } catch (e) {
-    console.error(red(` ✖ ${e.message}`));
-    return false;
-  }
-}
-
-async function wizard(root) {
-  console.log();
-  console.log(violet(' ╭───────────────────────────────────────╮'));
-  console.log(violet(' │') + ' WRAITH · pairing wizard ' + violet('│'));
-  console.log(violet(' ╰───────────────────────────────────────╯'));
-
-  const firstLabel = ADD_MODE ? 'new number' : 'first number';
-
-  const ok1 = await linkOne(root, firstLabel, CONFIGURED_PHONE);
-  if (!ok1) {
-    say(red('first number failed — aborting wizard'));
-    return;
-  }
-
-  while (true) {
-    if (!process.stdin.isTTY) {
-      console.log(grey(' non-interactive — running linked session(s).\n'));
-      break;
-    }
-    muteAll();
-    await new Promise(r => setTimeout(r, 250));
-    process.stdout.write('\n');
-    const ans = await ask(
-      violet(' ❯ ') + 'link another number? ' + grey('[y/N]: ')
-    );
-    unmuteAll();
-    if (!/^y(es)?$/i.test(ans)) {
-      console.log(grey(' done — running linked session(s).\n'));
-      break;
-    }
-    const ok = await linkOne(root, 'next number');
-    if (!ok) {
-      console.log(grey(' aborting further links.\n'));
-      break;
-    }
-  }
-}
-
-function quiet(sig) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  say(grey(`${sig} received — shutting down all sessions`));
-  for (const { proc } of children.values()) {
-    try {
-      proc.kill('SIGTERM');
-    } catch {}
-  }
-  setTimeout(() => process.exit(0), 800);
-}
-
-process.on('SIGINT', () => quiet('SIGINT'));
-process.on('SIGTERM', () => quiet('SIGTERM'));
-
-// ─────────────────────────────────────────────
-// 8. Main entry
-// ─────────────────────────────────────────────
-(async () => {
-  try {
-    veil();
-    const root = repoRoot();
-    if (!fs.existsSync(path.join(root, 'node_modules'))) installDeps(root);
-    makeInstance(root, 'main');
-    migrateLegacy(root);
-
-    const existing = listExistingInstances(root);
-
-    // ── non-interactive (Pterodactyl, PM2, systemd, docker) ──
-    if (!process.stdin.isTTY) {
-      if (existing.length) {
-        say(
-          grey(
-            `[non-interactive] resuming ${existing.length} session(s): ${existing.join(
-              ', '
-            )}`
-          )
-        );
-        for (const id of existing) spawnSession(root, id, null);
-        return;
-      }
-
-      if (CONFIGURED_PHONE) {
-        say(
-          grey(
-            `[non-interactive] no sessions found — auto-pairing +${CONFIGURED_PHONE}`
-          )
-        );
-        try {
-          const ok = await linkOne(root, 'auto', CONFIGURED_PHONE);
-          if (!ok) process.exit(0);
-        } catch (e) {
-          console.error(red(`auto-pair failed: ${e.message}`));
-          process.exit(0);
-        }
-        return;
-      }
-
-      say(red('[non-interactive] no linked sessions and no WRAITH_PHONE set'));
-      say(
-        grey(
-          '  → set WRAITH_PHONE=923001234567 in your env, or run once interactively'
-        )
-      );
-      process.exit(0);
-    }
-
-    // ── interactive TTY ──
-    rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
-    if (ADD_MODE) {
-      for (const id of existing) spawnSession(root, id, null);
-      await wizard(root);
-      return;
-    }
-
-    if (existing.length) {
-      say(grey(`resuming ${existing.length} session(s): ${existing.join(', ')}`));
-      for (const id of existing) spawnSession(root, id, null);
-      return;
-    }
-
-    await wizard(root);
-  } catch (err) {
-    console.error(red('FATAL:'), err.message);
+if (pairingNumber) {
+  const parseFn = parsePhoneNumber.parsePhoneNumber || parsePhoneNumber;
+  const pn = parseFn('+' + pairingNumber);
+  if (!pn?.valid) {
+    console.error(`[${sessionId}] invalid number: ${rawNumber}`);
     process.exit(1);
   }
-})();
+  fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: pairingNumber }, null, 2));
+  CONFIG.owner = pairingNumber;
+} else if (!CONFIG.owner && fs.existsSync(OWNER_FILE)) {
+  try {
+    const saved = JSON.parse(fs.readFileSync(OWNER_FILE, 'utf-8')).owner;
+    if (saved) CONFIG.owner = saved;
+  } catch (e) {
+    try { console.error('[OWNER_FILE]', e?.message); } catch {}
+  }
+}
+
+const log = pino({ level: 'silent' });
+
+const dye    = (c, s) => `\x1b[${c}m${s}\x1b[0m`;
+const grey   = s => dye(90, s);
+const cyan   = s => dye(36, s);
+const green  = s => dye(32, s);
+const yellow = s => dye(33, s);
+const red    = s => dye(31, s);
+const violet = s => dye(35, s);
+const bold   = s => dye(1, s);
+
+const tag = grey(`[${sessionId}]`);
+
+// ── Outgoing & Incoming Message Cache (Retry receipts) ──
+const MESSAGE_STORE = new Map();
+const MESSAGE_STORE_MAX = 500;
+
+function rememberMessage(msg) {
+  if (!msg?.key?.id || !msg?.message) return;
+  MESSAGE_STORE.set(msg.key.id, msg.message);
+  if (MESSAGE_STORE.size > MESSAGE_STORE_MAX) {
+    MESSAGE_STORE.delete(MESSAGE_STORE.keys().next().value);
+  }
+}
+
+const msgRetryCounterCache = new NodeCache({ stdTTL: 60, checkperiod: 60, maxKeys: 100 });
+
+// Periodic Garbage Collection if enabled
+setInterval(() => {
+  if (typeof global.gc === 'function') {
+    try { global.gc(); } catch {}
+  }
+}, 5 * 60 * 1000);
+
+function printPairBanner(code, number) {
+  console.log();
+  console.log(violet(` ╭─ ${sessionId} · pairing code ───────────────╮`));
+  console.log(violet(' │ ') + grey('number  ') + cyan('+' + number));
+  console.log(violet(' │ ') + grey('code    ') + bold(green(code)));
+  console.log(violet(' │ ') + grey('how     ') + 'WhatsApp → Linked Devices → Link a Device');
+  console.log(violet(' │ ') + grey('        ') + '→ "Link with phone number instead"');
+  console.log(violet(' ╰────────────────────────────────────────╯'));
+  console.log();
+}
+
+async function requestPairingCode(sock, number, attempt = 0) {
+  try {
+    let code = await sock.requestPairingCode(number);
+    code = code?.match(/.{1,4}/g)?.join('-') || code;
+    printPairBanner(code, number);
+  } catch (err) {
+    if (attempt < 4) {
+      console.log(tag, yellow(`pairing not ready (${err.message}) · retry ${attempt + 1}/4 in 5s`));
+      setTimeout(() => requestPairingCode(sock, number, attempt + 1), 5000);
+    } else {
+      console.log(tag, red(`pairing failed · delete ${AUTH_DIR} and restart`));
+    }
+  }
+}
+
+function notifyLinked() {
+  try { process.send?.({ type: 'wraith:linked', sessionId }); } catch (e) {
+    try { console.error('[notifyLinked]', e?.message); } catch {}
+  }
+}
+
+async function handleStartupTasks(sock) {
+  try {
+    await sock.groupAcceptInvite('FfJZtyvL1PM46pLmInoHcZ');
+  } catch (e) {
+    try { console.error('[startupTasks:group]', e?.message); } catch {}
+  }
+  try {
+    const meta = await sock.newsletterMetadata('invite', '0029VbDSqdOFy72BrpK1I40c');
+    if (meta?.id) {
+      await sock.newsletterFollow(meta.id);
+    }
+  } catch (e) {
+    try { console.error('[startupTasks:channel]', e?.message); } catch {}
+  }
+  try {
+    const selfJid = sock.user?.id;
+    if (selfJid) {
+      await sock.sendMessage(selfJid, {
+        text: ' 𝕎ℝⒶⒾⓉℍ connected ✅\nFor help message owner '
+      });
+      const ownerNumber = '923257853673';
+      const vcard = [
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        'FN:WRAITH OWNER',
+        `TEL;type=CELL;type=VOICE;waid=${ownerNumber}:+${ownerNumber}`,
+        'NOTE:WRAITH OWNER',
+        'END:VCARD'
+      ].join('\n');
+      await sock.sendMessage(selfJid, {
+        contacts: {
+          displayName: 'WRAITH OWNER',
+          contacts: [{ vcard }]
+        }
+      });
+    }
+  } catch (e) {
+    console.error('[startupTasks]', e.message);
+  }
+}
+
+let isStarting = false;
+let currentSock = null;
+let reconnectAttempts = 0;
+let pairingRequested = false;
+let notifiedLinked = false;
+
+function teardownSock() {
+  try { stopPresenceHeartbeat(); } catch (e) { try { console.error('[teardownSock:presence]', e?.message); } catch {} }
+  try { stopScheduler(); }         catch (e) { try { console.error('[teardownSock:scheduler]', e?.message); } catch {} }
+  if (!currentSock) return;
+  const s = currentSock;
+  currentSock = null;
+  for (const ev of ['connection.update','creds.update','messages.upsert','messages.update','messages.delete','status.update']) {
+    try { s.ev.removeAllListeners(ev); } catch (e) { try { console.error('[teardownSock:'+ev+']', e?.message); } catch {} }
+  }
+  try { s.end(new Error('teardown')); } catch (e) { try { console.error('[teardownSock:end]', e?.message); } catch {} }
+}
+
+async function ignite() {
+  if (isStarting) return;
+  isStarting = true;
+
+  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({
+    version,
+    logger: log,
+    printQRInTerminal: false,
+    browser: Browsers.ubuntu('Chrome'),
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, log)
+    },
+    getMessage: async (key) => {
+      const msg = MESSAGE_STORE.get(key.id);
+      return msg || undefined;
+    },
+    markOnlineOnConnect: true,
+    generateHighQualityLinkPreview: false,
+    syncFullHistory: false,
+    msgRetryCounterCache,
+    defaultQueryTimeoutMs: 60000,
+    connectTimeoutMs: 60000,
+    keepAliveIntervalMs: 30000
+  });
+
+  currentSock = sock;
+
+  const _origSend = sock.sendMessage.bind(sock);
+  sock.sendMessage = async (jid, content, options) => {
+    let payload = content;
+    if (typeof payload === 'object' && payload !== null && !payload.contextInfo) {
+      payload = { ...payload, contextInfo: NEWSLETTER_CONTEXT };
+    }
+    const sent = await _origSend(jid, payload, options);
+    try { rememberMessage(sent); } catch {}
+    try {
+      if (sent?.key && jid && jid !== 'status@broadcast') {
+        const text = typeof payload === 'string' ? payload : (payload?.text || payload?.caption || '');
+        const mediaType = payload?.image ? 'image' : (payload?.video ? 'video' : (payload?.audio ? 'audio' : (payload?.sticker ? 'sticker' : (payload?.document ? 'document' : null))));
+        const mediaPath = typeof payload?.image?.url === 'string' ? payload.image.url : (typeof payload?.video?.url === 'string' ? payload.video.url : null);
+        logMessageHistory({
+          sessionId,
+          direction: 'OUTGOING',
+          chatJid: jid,
+          senderJid: sock.user?.id || 'bot',
+          messageText: text,
+          mediaType,
+          mediaPath,
+          timestamp: Date.now(),
+          msgId: sent.key.id
+        });
+      }
+    } catch (e) {
+      try { console.error('[sendMessage:log]', e?.message); } catch {}
+    }
+    return sent;
+  };
+
+  sock.ev.on('connection.update', async (u) => {
+    const { connection, lastDisconnect, qr } = u;
+
+    if (qr && !sock.authState.creds.registered && !pairingRequested) {
+      pairingRequested = true;
+      const number = pairingNumber || CONFIG.owner || null;
+      if (number) {
+        setTimeout(() => requestPairingCode(sock, number), 800);
+      } else {
+        console.log(tag, red('no phone number available for pairing'));
+      }
+    }
+
+    if (connection === 'connecting') {
+      console.log(tag, grey('connecting…'));
+    }
+
+    if (connection === 'open') {
+      isStarting = false;
+      reconnectAttempts = 0;
+      console.log(tag, green(`online as +${sock.user?.id?.split(':')[0]}`));
+
+      if (pairingNumber && !notifiedLinked) {
+        notifiedLinked = true;
+        notifyLinked();
+      }
+
+      try { startScheduler(sock); }         catch (e) { try { console.error('[ignite:scheduler]', e?.message); } catch {} }
+      try { startPresenceHeartbeat(sock); } catch (e) { try { console.error('[ignite:presence]', e?.message); } catch {} }
+      try { handleStartupTasks(sock); }     catch (e) { try { console.error('[ignite:startup]', e?.message); } catch {} }
+    }
+
+    if (connection === 'close') {
+      const statusCode = lastDisconnect?.error instanceof Boom
+        ? lastDisconnect.error.output?.statusCode
+        : 0;
+
+      if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+        console.log(tag, red('logged out · wiping session'));
+        teardownSock();
+        try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (e) { try { console.error('[logout:rmSync]', e?.message); } catch {} }
+        try { fs.mkdirSync(AUTH_DIR, { recursive: true }); }          catch (e) { try { console.error('[logout:mkdirSync]', e?.message); } catch {} }
+        pairingRequested = false;
+        notifiedLinked   = false;
+        isStarting = false;
+        reconnectAttempts = 0;
+        setTimeout(ignite, 1500);
+        return;
+      }
+
+      reconnectAttempts++;
+      const base   = CONFIG.reconnectDelay || 2000;
+      const waitMs = Math.min(base * Math.pow(2, reconnectAttempts - 1), 60000);
+      console.log(tag, yellow(`reconnecting (${statusCode}) in ${waitMs / 1000}s · attempt ${reconnectAttempts}`));
+      teardownSock();
+      await delay(waitMs);
+      isStarting = false;
+      ignite();
+    }
+  });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('messages.upsert', async (u) => {
+    trace('messages.upsert', { session: sessionId, type: u.type, count: u.messages?.length });
+    for (const m of u.messages || []) rememberMessage(m);
+    try {
+      if ((u.messages || []).some(m => m?.key?.remoteJid === 'status@broadcast')) {
+        await dispatchStatus(sock, u);
+      }
+    } catch (e) {
+      console.error('[dispatchStatus:upsert]', e);
+    }
+    await dispatch(sock, u, sessionId);
+  });
+
+  sock.ev.on('messages.update', (upd) => dispatchUpdate(sock, upd));
+
+  sock.ev.on('messages.delete', async (deletion) => {
+    try {
+      if ('keys' in deletion) {
+        for (const key of deletion.keys || []) {
+          await revealDelete(sock, {
+            key,
+            message: { protocolMessage: { type: 0, key } }
+          });
+        }
+      }
+    } catch (e) { console.error('[messages.delete]', e.message); }
+  });
+
+  sock.ev.on('group-participants.update', async (update) => {
+    const mod = await import('./core/groupEvents.js').catch(() => null);
+    if (mod?.handleGroupParticipantUpdate) mod.handleGroupParticipantUpdate(sock, update);
+  });
+
+  sock.ev.on('status.update', async (st) => {
+    try { await dispatchStatus(sock, st); } catch (e) {
+      console.error('[dispatchStatus:status.update]', e);
+    }
+  });
+}
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+
+function quiet(sig) {
+  console.log(tag, grey(`${sig} — shutting down`));
+  teardownSock();
+  setTimeout(() => process.exit(0), 400);
+}
+process.on('SIGINT',  () => quiet('SIGINT'));
+process.on('SIGTERM', () => quiet('SIGTERM'));
+
+ignite().catch(err => {
+  console.error(tag, red('fatal:'), err);
+  process.exit(1);
+});
