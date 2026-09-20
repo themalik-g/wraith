@@ -144,15 +144,15 @@ async function promptNumber(label = 'number') {
 function spawnSession(root, id, number) {
   const dir = makeInstance(root, id);
   // ★ no --preserve-symlinks needed anymore; --expose-gc enables the RAM sweeper in start.js
-  const v8PoolSize = process.env.WRAITH_V8_POOL_SIZE || '2';
+  const maxOldSpace = process.env.WRAITH_MAX_OLD_SPACE_SIZE || '256';
   const args = [
-    `--v8-pool-size=${v8PoolSize}`,
-    '--max-old-space-size=256',
-    '--expose-gc',
-    'start.js',
-    '--session',
-    id
+    `--max-old-space-size=${maxOldSpace}`,
+    '--expose-gc'
   ];
+  if (process.env.WRAITH_V8_POOL_SIZE) {
+    args.push(`--v8-pool-size=${process.env.WRAITH_V8_POOL_SIZE}`);
+  }
+  args.push('start.js', '--session', id);
   if (number) args.push('--number', number);
 
   const env = {
@@ -254,7 +254,8 @@ function spawnSession(root, id, number) {
 
     rec.restarts++;
     const wait = Math.min(1500 * Math.pow(2, rec.restarts - 1), 30_000);
-    const why  = code === 0 ? 'restarting for update/clean exit' : `crashed (code ${code})`;
+    const exitDetail = code !== null ? `code ${code}` : (signal ? `signal ${signal}` : 'code null');
+    const why  = code === 0 ? 'restarting for update/clean exit' : `crashed (${exitDetail})`;
     say(yellow(`${id}: ${why} · retry ${rec.restarts} in ${(wait / 1000).toFixed(1)}s`));
     setTimeout(() => { if (!shuttingDown) spawnSession(root, id, rec.number); }, wait);
   });
