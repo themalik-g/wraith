@@ -3,6 +3,7 @@
 // 30 popular Ephoto 360 textmaker commands
 // ─────────────────────────────────────────────
 import { EPHOTO_EFFECTS, createEphotoImage } from '../lib/ephoto360.js';
+import { sendWithCta } from '../lib/buttons.js';
 
 function parseTextArgs(args, isDual) {
   const raw = (args || []).join(' ').trim();
@@ -39,7 +40,7 @@ export async function handleTextmakerCommand(sock, chat, msg, effectKey, args) {
     const usage = effect.dual
       ? ` Usage: \`.${effectKey} text1 ; text2\` or \`.${effectKey} text1 | text2\` or \`.${effectKey} text1 text2\``
       : ` Usage: \`.${effectKey} text\``;
-    return sock.sendMessage(chat, { text: `🎨 *Ephoto360 (${effectKey})* —${usage}` }, { quoted: msg });
+    return sendWithCta(sock, chat, `🎨 *Ephoto360 (${effectKey})* —${usage}`, { quoted: msg });
   }
 
   const statusMsg = await sock.sendMessage(chat, {
@@ -67,9 +68,7 @@ export async function textmakerCommand(sock, chat, msg, args) {
   const sub = (args?.[0] || '').toLowerCase().trim();
   if (!sub || !EPHOTO_EFFECTS[sub]) {
     const available = Object.keys(EPHOTO_EFFECTS).map((k) => `• \`.${k}\``).join(' ');
-    return sock.sendMessage(chat, {
-      text: `🎨 *Ephoto360 Textmaker*\n\nUsage: \`.textmaker <effect> <text>\` or use direct shortcuts below:\n\n${available}`
-    }, { quoted: msg });
+    return sendWithCta(sock, chat, `🎨 *Ephoto360 Textmaker*\n\nUsage: \`.textmaker <effect> <text>\` or use direct shortcuts below:\n\n${available}`, { quoted: msg });
   }
 
   return handleTextmakerCommand(sock, chat, msg, sub, args.slice(1));

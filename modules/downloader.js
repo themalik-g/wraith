@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { isOwner } from '../core/identity.js';
 import { CONFIG } from '../config.js';
 import { downloadToFile, withTempFile, chunkText } from '../lib/net.js';
+import { sendWithCta } from '../lib/buttons.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -25,7 +26,7 @@ export async function gitdlCommand(sock, chat, msg, args) {
   if (ownerOnly(sock, chat, msg)) return;
   try {
     const url = (args?.[0] || '').trim();
-    if (!url) return sock.sendMessage(chat, { text: '📦 *gitdl*\n\nUsage: `.gitdl <github-repo-url>`' }, { quoted: msg });
+    if (!url) return sendWithCta(sock, chat, '📦 *gitdl*\n\nUsage: `.gitdl <github-repo-url>`', { quoted: msg });
 
     const match = url.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/|$)/);
     if (!match) return sock.sendMessage(chat, { text: '❌ Only GitHub repositories are supported.' }, { quoted: msg });
@@ -57,7 +58,7 @@ export async function mfdlCommand(sock, chat, msg, args) {
   try {
     const url = (args?.[0] || '').trim();
     if (!url || !url.includes('mediafire.com')) {
-      return sock.sendMessage(chat, { text: '📥 *mfdl*\n\nUsage: `.mfdl <mediafire-url>`' }, { quoted: msg });
+      return sendWithCta(sock, chat, '📥 *mfdl*\n\nUsage: `.mfdl <mediafire-url>`', { quoted: msg });
     }
 
     const maxMB = CONFIG.media?.maxDownloadMB || 100;

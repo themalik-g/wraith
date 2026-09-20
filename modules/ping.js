@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import { isOwner } from '../core/identity.js';
+import { sendWithCta } from '../lib/buttons.js';
 
 const BOOT_TIME = Date.now();
 
@@ -275,7 +276,7 @@ export async function pingCommand(sock, chat, msg) {
     const body = lines.join('\n');
 
     try {
-        await sock.sendMessage(chat, { text: body, edit: sent.key });
+        await sendWithCta(sock, chat, body, { quoted: msg });
     } catch {
         await sock.sendMessage(chat, { text: body });
     }
@@ -285,7 +286,7 @@ export async function pingCommand(sock, chat, msg) {
 //  .alive
 // ─────────────────────────────────────────────
 export async function aliveCommand(sock, chat, msg) {
-    return sock.sendMessage(chat, { text: '𝗪𝗥𝗔𝗜𝗧𝗛 𝗜𝗦 𝗔𝗟𝗜𝗩𝗘 ✅' }, { quoted: msg });
+    return sendWithCta(sock, chat, '𝗪𝗥𝗔𝗜𝗧𝗛 𝗜𝗦 𝗔𝗟𝗜𝗩𝗘 ✅', { quoted: msg });
 }
 
 // ─────────────────────────────────────────────

@@ -13,7 +13,7 @@ import {
   fetchLyrics,
 } from '../lib/apis.js';
 import { chunkText, downloadToFile } from '../lib/net.js';
-import { sendInteractive, createQuickReply, NEWSLETTER_CONTEXT } from '../lib/buttons.js';
+import { sendInteractive, createQuickReply, NEWSLETTER_CONTEXT, sendWithCta } from '../lib/buttons.js';
 import { getPrefix } from '../core/settings.js';
 
 // ─── Book cache ───
@@ -110,9 +110,7 @@ export async function bookCommand(sock, chat, msg, args) {
     // ── .book <query> ──
     const query = (args || []).join(' ').trim();
     if (!query) {
-      return sock.sendMessage(chat, {
-        text: '📚 *book*\n\n`.book <title>` — search\n`.book dl <number>` — download from last results'
-      }, { quoted: msg });
+      return sendWithCta(chat ? sock : sock, chat, '📚 *book*\n\n`.book <title>` — search\n`.book dl <number>` — download from last results', { quoted: msg });
     }
 
     const r = await searchBooks(query, 8);
@@ -191,9 +189,7 @@ export async function imageCommand(sock, chat, msg, args) {
     }
     const query = parts.join(' ').trim();
     if (!query) {
-      return sock.sendMessage(chat, {
-        text: '🖼️ *img*\n\nUsage: `.img <query> [count]`\nCount default 5, max 10.'
-      }, { quoted: msg });
+      return sendWithCta(sock, chat, '🖼️ *img*\n\nUsage: `.img <query> [count]`\nCount default 5, max 10.', { quoted: msg });
     }
 
     await sock.sendMessage(chat, { text: `🔎 Searching images for *${query}*…` }, { quoted: msg });
@@ -230,7 +226,7 @@ export async function movieCommand(sock, chat, msg, args) {
   try {
     const query = (args || []).join(' ').trim();
     if (!query) {
-      return sock.sendMessage(chat, { text: '🎬 *movie*\n\nUsage: `.movie <title>`' }, { quoted: msg });
+      return sendWithCta(sock, chat, '🎬 *movie*\n\nUsage: `.movie <title>`', { quoted: msg });
     }
 
     const r = await searchMovie(query);
@@ -270,7 +266,7 @@ export async function songCommand(sock, chat, msg, args) {
   try {
     const query = (args || []).join(' ').trim();
     if (!query) {
-      return sock.sendMessage(chat, { text: '🎵 *songinfo*\n\nUsage: `.songinfo <title>`' }, { quoted: msg });
+      return sendWithCta(sock, chat, '🎵 *songinfo*\n\nUsage: `.songinfo <title>`', { quoted: msg });
     }
 
     const r = await searchSong(query);
@@ -311,9 +307,7 @@ export async function lyricsCommand(sock, chat, msg, args) {
   try {
     const full = (args || []).join(' ').trim();
     if (!full) {
-      return sock.sendMessage(chat, {
-        text: '📜 *lyrics*\n\nUsage: `.lyrics <artist> - <title>`'
-      }, { quoted: msg });
+      return sendWithCta(sock, chat, '📜 *lyrics*\n\nUsage: `.lyrics <artist> - <title>`', { quoted: msg });
     }
 
     const sep = full.indexOf(' - ');

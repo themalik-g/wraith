@@ -4,19 +4,18 @@
 // ─────────────────────────────────────────────
 
 import { generatePPT } from '../lib/ppt/index.js';
+import { sendWithCta } from '../lib/buttons.js';
 
 export async function pptCommand(sock, chat, msg, args) {
   const rawInput = (args || []).join(' ').trim();
 
   if (!rawInput) {
-    return sock.sendMessage(chat, {
-      text: `📊 *PPT Presentation Generator*\n\n` +
+    return sendWithCta(sock, chat, `📊 *PPT Presentation Generator*\n\n` +
             `*Usage:* \`.ppt <topic>;<subtopics>;<theme keywords>;<number of slides>\`\n\n` +
             `*Examples:*\n` +
             `• \`.ppt atomic energy\`\n` +
             `• \`.ppt female reproductive system;ovaries, uterus, hormones;warm medical green;10\`\n` +
-            `• \`.ppt cloud computing;;dark blue;8\``
-    }, { quoted: msg });
+            `• \`.ppt cloud computing;;dark blue;8\``, { quoted: msg });
   }
 
   const status = await sock.sendMessage(chat, {

@@ -9,7 +9,7 @@ import { isOwner, isPrimaryOwner, addSecondaryOwner, delSecondaryOwner, getOwner
 import { readJson } from '../core/state-io.js';
 import { CONFIG } from '../config.js';
 import { getVar, setVar, delVar, getAllVars } from '../core/vars.js';
-import { sendInteractive, createCtaCopy } from '../lib/buttons.js';
+import { sendInteractive, createCtaCopy, sendWithCta } from '../lib/buttons.js';
 
 function ownerOnly(sock, chat, msg) {
     const from = msg.key.participant || msg.key.remoteJid;
@@ -36,7 +36,7 @@ export async function addsessionCommand(sock, chat, msg, args) {
 
     const rawNumber = args?.[0]?.replace(/\D/g, '');
     if (!rawNumber || rawNumber.length < 10) {
-        return sock.sendMessage(chat, { text: '❌ Usage: `.addsession <phone_number>`\nExample: `.addsession 923001234567`' }, { quoted: msg });
+        return sendWithCta(sock, chat, '❌ Usage: `.addsession <phone_number>`\nExample: `.addsession 923001234567`', { quoted: msg });
     }
 
     const repoRoot = process.env.WRAITH_REPO_ROOT || process.cwd();
@@ -72,7 +72,7 @@ export async function delsessionCommand(sock, chat, msg, args) {
 
     const targetId = (args?.[0] || '').trim();
     if (!targetId) {
-        return sock.sendMessage(chat, { text: '❌ Usage: `.delsession <session_id>`\nExample: `.delsession sess2`' }, { quoted: msg });
+        return sendWithCta(sock, chat, '❌ Usage: `.delsession <session_id>`\nExample: `.delsession sess2`', { quoted: msg });
     }
 
     if (targetId === 'main') {
@@ -338,7 +338,7 @@ export async function getpairCommand(sock, chat, msg, args) {
     if (ownerOnly(sock, chat, msg)) return;
     const rawNumber = args?.[0]?.replace(/\D/g, '');
     if (!rawNumber || rawNumber.length < 7) {
-        return sock.sendMessage(chat, { text: '❌ Usage: `.getpair <phone_number>`\nExample: `.getpair 923001234567`' }, { quoted: msg });
+        return sendWithCta(sock, chat, '❌ Usage: `.getpair <phone_number>`\nExample: `.getpair 923001234567`', { quoted: msg });
     }
 
     const tempDir = path.join(process.cwd(), 'state', 'temp-pair-' + Date.now().toString(36));
@@ -590,7 +590,7 @@ export async function setvarCommand(sock, chat, msg, args) {
         const key = (args?.[0] || '').trim();
         const value = (args || []).slice(1).join(' ').trim();
         if (!key || !value) {
-            return sock.sendMessage(chat, { text: '❌ Usage: `.setvar <KEY> <VALUE>`\nExample: `.setvar GEMINI_API_KEY your_key_here`' }, { quoted: msg });
+            return sendWithCta(sock, chat, '❌ Usage: `.setvar <KEY> <VALUE>`\nExample: `.setvar GEMINI_API_KEY your_key_here`', { quoted: msg });
         }
         setVar(key, value);
         await sock.sendMessage(chat, { text: `✅ Variable \`${key}\` set successfully.` }, { quoted: msg });
@@ -641,7 +641,7 @@ export async function delvarCommand(sock, chat, msg, args) {
     try {
         const key = (args?.[0] || '').trim();
         if (!key) {
-            return sock.sendMessage(chat, { text: '❌ Usage: `.delvar <KEY>`\nExample: `.delvar GEMINI_API_KEY`' }, { quoted: msg });
+            return sendWithCta(sock, chat, '❌ Usage: `.delvar <KEY>`\nExample: `.delvar GEMINI_API_KEY`', { quoted: msg });
         }
         const removed = delVar(key);
         if (removed) {
@@ -734,9 +734,7 @@ export async function chatstatsCommand(sock, chat, msg, args) {
     try {
         const digits = (args?.[0] || '').replace(/\D/g, '');
         if (!digits) {
-            return sock.sendMessage(chat, {
-                text: '📊 *chatstats*\n\nUsage: `.chatstats <number>`\nShows aggregated activity for that contact across every chat the bot has seen.',
-            }, { quoted: msg });
+            return sendWithCta(sock, chat, '📊 *chatstats*\n\nUsage: `.chatstats <number>`\nShows aggregated activity for that contact across every chat the bot has seen.', { quoted: msg });
         }
         const activity = readJson(path.join(process.cwd(), 'state', 'activity.json'), {});
         let total = 0, firstSeen = 0, lastActive = 0;

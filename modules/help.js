@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────
 import { isOwner } from '../core/identity.js';
 import { getPrefix } from '../core/settings.js';
-import { NEWSLETTER_CONTEXT } from '../lib/buttons.js';
+import { NEWSLETTER_CONTEXT, sendWithCta } from '../lib/buttons.js';
 
 const c = (cmd, ownerOnly = false) => ({ cmd, ownerOnly });
 
@@ -411,7 +411,7 @@ export async function helpCommand(sock, chat, msg, args) {
 
     if (!target) {
       const text = renderAllPlainText(prefix, isOwnerUser);
-      return await sock.sendMessage(chat, { text, contextInfo: NEWSLETTER_CONTEXT }, { quoted: msg });
+      return await sendWithCta(sock, chat, text, { quoted: msg });
     }
 
     const group = findGroup(target);
@@ -420,9 +420,10 @@ export async function helpCommand(sock, chat, msg, args) {
       const avail = visibleRegistry(isOwnerUser)
         .map((g) => `• ${g.id}`)
         .join(' · ');
-      return await sock.sendMessage(
+      return await sendWithCta(
+        sock,
         chat,
-        { text: `❓ Unknown menu category: *${target}*\n\nAvailable categories:\n${avail}`, contextInfo: NEWSLETTER_CONTEXT },
+        `❓ Unknown menu category: *${target}*\n\nAvailable categories:\n${avail}`,
         { quoted: msg }
       );
     }
@@ -430,18 +431,20 @@ export async function helpCommand(sock, chat, msg, args) {
     const box = renderCategoryBox(group, prefix, isOwnerUser);
 
     if (!box) {
-      return await sock.sendMessage(
+      return await sendWithCta(
+        sock,
         chat,
-        { text: `🔒 Category *${group.title}* is owner-only.`, contextInfo: NEWSLETTER_CONTEXT },
+        `🔒 Category *${group.title}* is owner-only.`,
         { quoted: msg }
       );
     }
 
     const text = [renderHeaderBox(prefix, isOwnerUser), box].join('\n');
 
-    return await sock.sendMessage(
+    return await sendWithCta(
+      sock,
       chat,
-      { text, contextInfo: NEWSLETTER_CONTEXT },
+      text,
       { quoted: msg }
     );
   } catch (e) {

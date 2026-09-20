@@ -5,6 +5,7 @@
 // ─────────────────────────────────────────────
 import { getKey } from '../core/keys.js';
 import { fetchBuffer, httpGetText } from '../lib/net.js';
+import { sendWithCta } from '../lib/buttons.js';
 
 function getQuotedText(msg) {
   const ctx = msg.message?.extendedTextMessage?.contextInfo;
@@ -28,9 +29,7 @@ export async function geminiCommand(sock, chat, msg, args) {
   const quoted = getQuotedText(msg);
 
   if (!userText && !quoted) {
-    return sock.sendMessage(chat, {
-      text: `🤖 *Gemini AI Assistant*\n\nUsage: \`.gemini <question or prompt>\`\nOr reply to a message with \`.gemini <question>\`\n\nExample: \`.gemini Explain quantum physics in simple terms\``
-    }, { quoted: msg });
+    return sendWithCta(sock, chat, `🤖 *Gemini AI Assistant*\n\nUsage: \`.gemini <question or prompt>\`\nOr reply to a message with \`.gemini <question>\`\n\nExample: \`.gemini Explain quantum physics in simple terms\``, { quoted: msg });
   }
 
   let fullPrompt = userText;
@@ -51,7 +50,7 @@ export async function geminiCommand(sock, chat, msg, args) {
 
     // 1. Try Gemini API if API key is configured
     if (apiKey) {
-      const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+      const models = ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
       for (const model of models) {
         try {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
@@ -122,9 +121,7 @@ export async function photoCommand(sock, chat, msg, args) {
   const prompt = (args || []).join(' ').trim();
 
   if (!prompt) {
-    return sock.sendMessage(chat, {
-      text: `📸 *AI Photo Generator*\n\nUsage: \`.photo <image prompt>\`\n\nExample: \`.photo futuristic city with glowing neon skyscrapers at night\``
-    }, { quoted: msg });
+    return sendWithCta(sock, chat, `📸 *AI Photo Generator*\n\nUsage: \`.photo <image prompt>\`\n\nExample: \`.photo futuristic city with glowing neon skyscrapers at night\``, { quoted: msg });
   }
 
   const apiKey = process.env.GEMINI_API_KEY || getKey('GEMINI_API_KEY');
@@ -136,28 +133,56 @@ export async function photoCommand(sock, chat, msg, args) {
   try {
     let imageBuffer = null;
 
-    // 1. Try Imagen 3 API via Gemini Google REST endpoint if API key present
+    // 1. Try Gemini Image Generation API if API key present
     if (apiKey) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            instances: [{ prompt }],
-            parameters: { sampleCount: 1, aspectRatio: '1:1', outputOptions: { mimeType: 'image/jpeg' } }
-          })
-        });
-
-        if (res.ok) {
-          const json = await res.json();
-          const base64Data = json?.predictions?.[0]?.bytesBase64Encoded;
-          if (base64Data) {
-            imageBuffer = Buffer.from(base64Data, 'base64');
+      const imageModels = [
+        'gemini-3.1-flash-lite-image',
+        'imagen-3.0-generate-002'
+      ];
+      for (const model of imageModels) {
+        try {
+          if (model.startsWith('gemini')) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }]
+              })
+            });
+            if (res.ok) {
+              const json = await res.json();
+              const parts = json?.candidates?.[0]?.content?.parts || [];
+              for (const part of parts) {
+                if (part.inlineData?.data) {
+                  imageBuffer = Buffer.from(part.inlineData.data, 'base64');
+                  break;
+                }
+              }
+              if (imageBuffer) break;
+            }
+          } else {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${apiKey}`;
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                instances: [{ prompt }],
+                parameters: { sampleCount: 1, aspectRatio: '1:1', outputOptions: { mimeType: 'image/jpeg' } }
+              })
+            });
+            if (res.ok) {
+              const json = await res.json();
+              const base64Data = json?.predictions?.[0]?.bytesBase64Encoded;
+              if (base64Data) {
+                imageBuffer = Buffer.from(base64Data, 'base64');
+                break;
+              }
+            }
           }
+        } catch (e1) {
+          console.warn(`[photoCommand] ${model} API failed:`, e1.message);
         }
-      } catch (e1) {
-        console.warn('[photoCommand] Imagen REST API failed:', e1.message);
       }
     }
 

@@ -11,7 +11,7 @@ import { readJson, writeJsonAtomic } from '../core/state-io.js';
 import { inState } from '../core/paths.js';
 import { vaultPath, dropFromVault } from '../core/vault.js';
 import { CONFIG } from '../config.js';
-import { sendInteractive, createCtaUrl, createCtaCopy } from '../lib/buttons.js';
+import { sendInteractive, createCtaUrl, createCtaCopy, sendWithCta } from '../lib/buttons.js';
 import { chunkText, withTempFile } from '../lib/net.js';
 import {
   fetchCurrency, defineWord, fetchWeather, checkPwned,
@@ -190,7 +190,7 @@ export async function qrCommand(sock, chat, msg, args) {
 export async function defineCommand(sock, chat, msg, args) {
   try {
     const word = (args || []).join(' ').trim();
-    if (!word) return sock.sendMessage(chat, { text: '📖 *define*\n\nUsage: `.define <word>`' }, { quoted: msg });
+    if (!word) return sendWithCta(sock, chat, '📖 *define*\n\nUsage: `.define <word>`', { quoted: msg });
 
     const r = await defineWord(word);
     if (!r.ok) return sock.sendMessage(chat, { text: `❌ No definition found for *${word}*.` }, { quoted: msg });
@@ -238,7 +238,7 @@ function codeLabel(c) {
 export async function weatherCommand(sock, chat, msg, args) {
   try {
     const city = (args || []).join(' ').trim();
-    if (!city) return sock.sendMessage(chat, { text: '🌦️ *weather*\n\nUsage: `.weather <city>`\nWarns if rain/storm probability > 50%.' }, { quoted: msg });
+    if (!city) return sendWithCta(sock, chat, '🌦️ *weather*\n\nUsage: `.weather <city>`\nWarns if rain/storm probability > 50%.', { quoted: msg });
 
     const r = await fetchWeather(city, CONFIG.weather?.stormThreshold || 50);
     if (!r.ok) return sock.sendMessage(chat, { text: `❌ Could not fetch weather for *${city}*.` }, { quoted: msg });
@@ -274,7 +274,7 @@ export async function weatherCommand(sock, chat, msg, args) {
 export async function pwnedCommand(sock, chat, msg, args) {
   try {
     const pwd = (args || []).join(' ').trim();
-    if (!pwd) return sock.sendMessage(chat, { text: '🔐 *pwned*\n\nUsage: `.pwned <password>`' }, { quoted: msg });
+    if (!pwd) return sendWithCta(sock, chat, '🔐 *pwned*\n\nUsage: `.pwned <password>`', { quoted: msg });
     const { count } = await checkPwned(pwd);
     if (count > 0) {
       await sock.sendMessage(chat, {
@@ -371,9 +371,7 @@ export async function shortenCommand(sock, chat, msg, args) {
   try {
     const url = (args || []).join(' ').trim();
     if (!url || !url.startsWith('http')) {
-      return sock.sendMessage(chat, {
-        text: '🔗 *shorten*\n\nUsage: `.shorten <http(s)://long-url>`'
-      }, { quoted: msg });
+      return sendWithCta(sock, chat, '🔗 *shorten*\n\nUsage: `.shorten <http(s)://long-url>`', { quoted: msg });
     }
 
     const r = await shortenUrl(url);
@@ -441,7 +439,7 @@ export async function wikiCommand(sock, chat, msg, args) {
   try {
     const query = (args || []).join(' ').trim();
     if (!query) {
-      return sock.sendMessage(chat, { text: '🌐 *wikipedia*\n\nUsage: `.wiki <search topic>`' }, { quoted: msg });
+      return sendWithCta(sock, chat, '🌐 *wikipedia*\n\nUsage: `.wiki <search topic>`', { quoted: msg });
     }
 
     const r = await searchWikipedia(query);
