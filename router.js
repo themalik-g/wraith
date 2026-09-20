@@ -15,7 +15,7 @@ import { updateCommand } from './modules/update.js';
 import { prefixCommand } from './modules/prefix.js';
 import { songCommand } from './modules/song.js';
 import {
-  ytdlCommand, mp3Command, pdlCommand, pdlzipCommand,
+  ytdlCommand as dlCommand, mp3Command, pdlCommand, pdlzipCommand,
   twitterCommand, pinterestCommand, threadsCommand, redditCommand,
   soundcloudCommand, spotifyCommand, youtubeCommand,
 } from './modules/download.js';
@@ -54,9 +54,11 @@ import { textmakerCommand, handleTextmakerCommand } from './modules/textmaker.js
 import { EPHOTO_EFFECTS } from './lib/ephoto360.js';
 import { geminiCommand, photoCommand } from './modules/gemini.js';
 import { pinchatCommand, unpinchatCommand } from './modules/pin.js';
+import { disappearingCommand } from './modules/disappearing.js';
+import { playCommand, ytvCommand, ytdlCommand } from './modules/ytdlp-commands.js';
 
 const CRITICAL_COMMANDS = new Set([
-  'ghost', 'peek', 'lurk', 'schedule',
+  'ghost', 'peek', 'lurk', 'schedule', 'disappearing',
   'kick', 'add', 'promote', 'demote',
   'antilink', 'antispam', 'antisticker',
   'getjid', 'presence', 'activity',
@@ -293,7 +295,7 @@ export async function dispatch(sock, update, sessionId = 'main') {
         'igpost', 'tiktokpost', 'fbpost', 'pdl', 'pdlzip', 'postdl',
         'alive', 'uptime', 'restart', 'replymode', 'reqlocation',
         'twitter', 'tw', 'pinterest', 'pin', 'threads', 'reddit', 'soundcloud', 'sc', 'spotify', 'spot', 'youtube', 'yt',
-        'gemini', 'photo', 'pinchat', 'unpinchat', 'pdd', 'tag',
+        'gemini', 'photo', 'pinchat', 'unpinchat', 'pdd', 'tag', 'disappearing', 'play', 'ytv', 'ytdl',
         'shorten', 'tinyurl', 'shorturl', 'news', 'hackernews', 'hn', 'wiki', 'wikipedia', 'joke', 'advice', 'fact'
       ]);
 
@@ -318,8 +320,12 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'uptime': await uptimeCommand(csock, chat, msg); break;
           case 'restart': await restartCommand(csock, chat, msg); break;
           case 'song': await songCommand(csock, chat, msg, rest); break;
+          case 'play': await playCommand(csock, chat, msg, rest); break;
+          case 'ytv': await ytvCommand(csock, chat, msg, rest); break;
+          case 'ytdl': await ytdlCommand(csock, chat, msg, rest); break;
+          case 'disappearing': await disappearingCommand(csock, chat, msg, rest); break;
           case 'dl':
-          case 'download': await ytdlCommand(csock, chat, msg, rest); break;
+          case 'download': await dlCommand(csock, chat, msg, rest); break;
           case 'mp3': await mp3Command(csock, chat, msg, rest); break;
           case 'pdl':
           case 'postdl': await pdlCommand(csock, chat, msg, rest); break;

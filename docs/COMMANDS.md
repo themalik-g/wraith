@@ -73,6 +73,9 @@ All commands use the configurable prefix (default: `.`). In **private mode**, co
 
 | Command | Description |
 |---|---|
+| `.play <query>` | Search YouTube and download audio in MP3 format using `ytdlp-nodejs` |
+| `.ytv <query\|url>` | Search or download video from YouTube (up to 400 MB cap) using `ytdlp-nodejs` |
+| `.ytdl <url>` | Direct YouTube video/audio downloader using `ytdlp-nodejs` |
 | `.dl <url>` | Download video, audio, or post carousel (`@postfetch/core` + `yt-dlp`) |
 | `.pdl <post-url>` | Download post/carousel media items directly via `@postfetch/core` |
 | `.pdlzip <post-url>` | Download post/carousel items as a single ZIP archive |
@@ -124,6 +127,7 @@ URLs containing picture posts or carousels (e.g. Instagram `/p/`, TikTok `/photo
 | `.declineall` | Decline all pending group join requests |
 | `.kickall` | Remove all non-admin members |
 | `.kickcc <country_code>` | Remove all members from specific country code |
+| `.disappearing off\|24h\|7d\|24d\|90d` | Apply disappearing messages duration in any chat |
 | `.mute` / `.unmute` | Mute/unmute group notifications |
 | `.archive` / `.unarchive` | Archive/unarchive chat |
 | `.clearchat` | Clear chat history |
