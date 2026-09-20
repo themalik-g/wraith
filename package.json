@@ -29,6 +29,7 @@
     "gerdur-core": "^2.11.2",
     "gifted-btns": "^1.0.2",
     "jimp": "^1.6.0",
+    "mumaker": "^2.0.0",
     "p-queue": "^9.0.0",
     "pdfkit": "^0.20.2",
     "pino": "^9.0.0",
