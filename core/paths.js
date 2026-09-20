@@ -22,3 +22,4 @@ export const logsPath      = () => sub('logs');
 
 export const inState = (...n) => path.join(statePath(), ...n);
 export const inStore = (...n) => path.join(storePath(), ...n);
+export const inData  = (...n) => path.join(storePath(), ...n);
