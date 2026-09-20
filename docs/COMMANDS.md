@@ -95,11 +95,14 @@ URLs containing picture posts or carousels (e.g. Instagram `/p/`, TikTok `/photo
 |---|---|
 | `.book <query>` | Search and download verified free books (Project Gutenberg / Archive.org) |
 | `.img <query>` | Search stock images (Wikimedia Commons / Openverse / LoremFlickr) |
+| `.gemini <prompt>` | Ask Gemini AI for simple text answers & explanations (or reply to text) |
+| `.photo <prompt>` | Generate AI photo from image prompt (Imagen 3 / Pollinations) |
 | `.movie <title>` | Search movie/show details (iTunes / TVmaze) |
 | `.songinfo <query>` | Lookup song details & artwork (Deezer / MusicBrainz) |
 | `.lyrics <artist> <title>` | Fetch plain lyrics (LRCLIB / lyrics.ovh) |
 | `.ppt <topic>;<subtopics>;<theme>;<slides>` | AI-powered PowerPoint presentation generator (Gemini) |
 | `.couplepp` | Get matching couple profile pictures |
+| `.textmaker <effect> <text>` | Generate 54 Ephoto360 text effects (`.dragon`, `.space`, `.cyberpunk`, etc.) |
 
 ---
 
@@ -214,6 +217,13 @@ URLs containing picture posts or carousels (e.g. Instagram `/p/`, TikTok `/photo
 | `.qr <text>` | Generate QR code image |
 | `.readqr` (reply image) | Read and decode QR code from image |
 | `.url` (reply media) | Upload media to temp URL host |
+| `.shorten <url>` | Shorten long URL using TinyURL / is.gd (`.tinyurl` / `.shorturl`) |
+| `.news [topic]` | Top news headlines by topic or global top news |
+| `.hackernews` | Top technology stories & discussions from Hacker News (`.hn`) |
+| `.wiki <query>` | Search Wikipedia summaries and articles (`.wikipedia`) |
+| `.joke` | Fetch a random clean joke |
+| `.advice` | Fetch a random piece of life advice |
+| `.fact` | Fetch a random trivia fact |
 | `.reqlocation` | Request user location with interactive share location button |
 | `.owner` | Show owner info |
 | `.script` / `.repo` | View bot repository info |

@@ -1,62 +1,172 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/gemini.js
-// .gemini <prompt> — Gemini AI image generation command
+// .gemini <prompt> — Gemini AI simple text response
+// .photo <prompt> — AI image generator (moved from .gemini)
 // ─────────────────────────────────────────────
 import { getKey } from '../core/keys.js';
-import { fetchBuffer } from '../lib/net.js';
+import { fetchBuffer, httpGetText } from '../lib/net.js';
 
+function getQuotedText(msg) {
+  const ctx = msg.message?.extendedTextMessage?.contextInfo;
+  if (!ctx?.quotedMessage) return '';
+  const qm = ctx.quotedMessage;
+  return (
+    qm.conversation ||
+    qm.extendedTextMessage?.text ||
+    qm.interactiveMessage?.body?.text ||
+    qm.imageMessage?.caption ||
+    qm.videoMessage?.caption ||
+    ''
+  ).trim();
+}
+
+/**
+ * .gemini <prompt> — Generates simple AI text response
+ */
 export async function geminiCommand(sock, chat, msg, args) {
+  let userText = (args || []).join(' ').trim();
+  const quoted = getQuotedText(msg);
+
+  if (!userText && !quoted) {
+    return sock.sendMessage(chat, {
+      text: `🤖 *Gemini AI Assistant*\n\nUsage: \`.gemini <question or prompt>\`\nOr reply to a message with \`.gemini <question>\`\n\nExample: \`.gemini Explain quantum physics in simple terms\``
+    }, { quoted: msg });
+  }
+
+  let fullPrompt = userText;
+  if (quoted) {
+    fullPrompt = userText
+      ? `Reference Message:\n"${quoted}"\n\nUser Request: ${userText}`
+      : `Reference Message:\n"${quoted}"\n\nPlease summarize or analyze this text.`;
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY || getKey('GEMINI_API_KEY');
+
+  const statusMsg = await sock.sendMessage(chat, {
+    text: `🤖 *Thinking with Gemini AI…*`
+  }, { quoted: msg });
+
+  try {
+    let aiResponse = '';
+
+    // 1. Try Gemini API if API key is configured
+    if (apiKey) {
+      const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+      for (const model of models) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: fullPrompt }] }]
+            })
+          });
+
+          if (res.ok) {
+            const json = await res.json();
+            const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) {
+              aiResponse = text.trim();
+              break;
+            }
+          }
+        } catch (e) {
+          console.warn(`[geminiCommand] ${model} API error:`, e.message);
+        }
+      }
+    }
+
+    // 2. Keyless AI Fallback if no API key or API call failed
+    if (!aiResponse) {
+      try {
+        const fallbackUrl = `https://text.pollinations.ai/${encodeURIComponent(fullPrompt)}`;
+        const text = await httpGetText(fallbackUrl, { timeout: 20000 });
+        if (text && text.trim().length > 0) {
+          aiResponse = text.trim();
+        }
+      } catch (e) {
+        console.warn('[geminiCommand] Keyless AI fallback failed:', e.message);
+      }
+    }
+
+    if (!aiResponse) {
+      throw new Error('Unable to generate AI text response at this time.');
+    }
+
+    const replyText = `🤖 *Gemini AI*\n\n${aiResponse}\n\nProvided by 𝕎ℝI𝕋ℍ`;
+
+    await sock.sendMessage(chat, {
+      text: replyText,
+      edit: statusMsg.key
+    }).catch(() => {
+      sock.sendMessage(chat, { text: replyText }, { quoted: msg }).catch(() => {});
+    });
+
+  } catch (err) {
+    console.error('[geminiCommand]', err.message);
+    const errText = `❌ *Gemini AI Failed:* ${err.message}`;
+    await sock.sendMessage(chat, {
+      text: errText,
+      edit: statusMsg.key
+    }).catch(() => {
+      sock.sendMessage(chat, { text: errText }, { quoted: msg }).catch(() => {});
+    });
+  }
+}
+
+/**
+ * .photo <prompt> — Generates AI photo/image from prompt
+ */
+export async function photoCommand(sock, chat, msg, args) {
   const prompt = (args || []).join(' ').trim();
 
   if (!prompt) {
     return sock.sendMessage(chat, {
-      text: `🎨 *Gemini AI Image Generator*\n\nUsage: \`.gemini <image prompt>\`\n\nExample: \`.gemini hyperrealistic futuristic cyberpunk city at night with neon rain\``
+      text: `📸 *AI Photo Generator*\n\nUsage: \`.photo <image prompt>\`\n\nExample: \`.photo futuristic city with glowing neon skyscrapers at night\``
     }, { quoted: msg });
   }
 
   const apiKey = process.env.GEMINI_API_KEY || getKey('GEMINI_API_KEY');
-  if (!apiKey) {
-    return sock.sendMessage(chat, {
-      text: '⚠️ *GEMINI_API_KEY is not configured in environment variables or session vars.*'
-    }, { quoted: msg });
-  }
 
   const statusMsg = await sock.sendMessage(chat, {
-    text: `🎨 *Generating image with Gemini AI…*`
+    text: `📸 *Generating AI photo…*`
   }, { quoted: msg });
 
   try {
     let imageBuffer = null;
 
-    // 1. Try Imagen 3 API via Gemini Google REST endpoint
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          instances: [{ prompt }],
-          parameters: { sampleCount: 1, aspectRatio: '1:1', outputOptions: { mimeType: 'image/jpeg' } }
-        })
-      });
+    // 1. Try Imagen 3 API via Gemini Google REST endpoint if API key present
+    if (apiKey) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            instances: [{ prompt }],
+            parameters: { sampleCount: 1, aspectRatio: '1:1', outputOptions: { mimeType: 'image/jpeg' } }
+          })
+        });
 
-      if (res.ok) {
-        const json = await res.json();
-        const base64Data = json?.predictions?.[0]?.bytesBase64Encoded;
-        if (base64Data) {
-          imageBuffer = Buffer.from(base64Data, 'base64');
+        if (res.ok) {
+          const json = await res.json();
+          const base64Data = json?.predictions?.[0]?.bytesBase64Encoded;
+          if (base64Data) {
+            imageBuffer = Buffer.from(base64Data, 'base64');
+          }
         }
+      } catch (e1) {
+        console.warn('[photoCommand] Imagen REST API failed:', e1.message);
       }
-    } catch (e1) {
-      console.warn('[geminiCommand] Imagen REST API failed:', e1.message);
     }
 
-    // 2. Fallback to Gemini 2.0 Flash / Imagen API generation endpoints
+    // 2. Keyless Fallback Image APIs
     if (!imageBuffer) {
       const fallbackApis = [
-        `https://api.lolhuman.xyz/api/imagen?apikey=GataDios&text=${encodeURIComponent(prompt)}`,
         `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}?model=flux`,
-        `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`
+        `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`,
+        `https://api.lolhuman.xyz/api/imagen?apikey=GataDios&text=${encodeURIComponent(prompt)}`
       ];
 
       for (const apiUrl of fallbackApis) {
@@ -71,22 +181,22 @@ export async function geminiCommand(sock, chat, msg, args) {
     }
 
     if (!imageBuffer || imageBuffer.length < 1024) {
-      throw new Error('Could not generate image from Gemini API for this prompt.');
+      throw new Error('Could not generate AI photo for this prompt.');
     }
 
     await sock.sendMessage(chat, {
       image: imageBuffer,
-      caption: `🤖 *Gemini Image Generator*\n💬 _${prompt}_\n\nProvided by 𝕎ℝI𝕋ℍ`
+      caption: `📸 *AI Photo Generator*\n💬 _${prompt}_\n\nProvided by 𝕎ℝI𝕋ℍ`
     }, { quoted: msg });
 
     await sock.sendMessage(chat, {
-      text: '✅ *Image generated successfully!*',
+      text: '✅ *Photo generated successfully!*',
       edit: statusMsg.key
     }).catch(() => {});
 
   } catch (err) {
-    console.error('[geminiCommand]', err.message);
-    const errText = `❌ *Gemini Image Generation Failed:* ${err.message}`;
+    console.error('[photoCommand]', err.message);
+    const errText = `❌ *AI Photo Generation Failed:* ${err.message}`;
     await sock.sendMessage(chat, {
       text: errText,
       edit: statusMsg.key
