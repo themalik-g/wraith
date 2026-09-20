@@ -13,6 +13,7 @@ import { chunkText } from '../lib/net.js';
 
 const WELCOME_FILE = () => inState('welcome.json');
 const CALLS_FILE = () => inState('calls.json');
+const PDD_FILE = () => inState('pdd.json');
 
 function ownerOnly(sock, chat, msg) {
   const from = msg.key.participant || msg.key.remoteJid;
@@ -26,8 +27,6 @@ function isGroup(chat) {
   return chat.endsWith('@g.us');
 }
 
-// ★ FIX: welcome/goodbye toggling is now restricted to the bot owner,
-//        fromMe, or an actual group admin (was: literally anyone).
 async function canManageGroup(sock, chat, msg) {
   if (msg.key.fromMe) return true;
   const from = msg.key.participant || msg.key.remoteJid;
@@ -55,6 +54,38 @@ export function setWelcomeConfig(chat, patch) {
   writeJsonAtomic(WELCOME_FILE(), cfg);
 }
 
+// ── Promote / Demote Detection (PDD) Config ────────────────────────────────
+export function getPddConfig() {
+  return readJson(PDD_FILE(), {});
+}
+export function setPddConfig(chat, patch) {
+  const cfg = getPddConfig();
+  cfg[chat] = { ...(cfg[chat] || {}), ...patch };
+  writeJsonAtomic(PDD_FILE(), cfg);
+}
+
+export async function pddCommand(sock, chat, msg, args) {
+  if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
+  if (!(await canManageGroup(sock, chat, msg))) {
+    return sock.sendMessage(chat, { text: '⛔ Group admins or owner only.' }, { quoted: msg });
+  }
+
+  const arg = (args?.[0] || '').toLowerCase();
+  if (arg === 'on') {
+    setPddConfig(chat, { enabled: true });
+    return sock.sendMessage(chat, { text: '✅ Promote/Demote Detection (*PDD*) *enabled* for this group.' }, { quoted: msg });
+  }
+  if (arg === 'off') {
+    setPddConfig(chat, { enabled: false });
+    return sock.sendMessage(chat, { text: '✅ Promote/Demote Detection (*PDD*) *disabled* for this group.' }, { quoted: msg });
+  }
+
+  const cfg = getPddConfig()[chat] || {};
+  return sock.sendMessage(chat, {
+    text: `🛡️ *Promote/Demote Detection (PDD)*\n\nStatus: *${cfg.enabled ? 'ON' : 'OFF'}*\n\nUsage:\n• \`.pdd on\`\n• \`.pdd off\``
+  }, { quoted: msg });
+}
+
 export async function welcomeCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (!(await canManageGroup(sock, chat, msg))) {
@@ -68,7 +99,7 @@ export async function welcomeCommand(sock, chat, msg, args) {
   }
   if (a0 === 'off') {
     setWelcomeConfig(chat, { welcome: false });
-    return sock.sendMessage(chat, { text: '✅ Welcome messages *disabled* for this group.' }, { quoted: msg });
+    return sock.sendMessage(chat, { text: '✅ Goodbye messages *disabled* for this group.' }, { quoted: msg });
   }
   await sock.sendMessage(chat, { text: `👋 *welcome*\n\nstatus · *${cfg.welcome ? 'ON' : 'OFF'}*\n\n\`.welcome on\` / \`.welcome off\`` }, { quoted: msg });
 }
@@ -91,7 +122,6 @@ export async function goodbyeCommand(sock, chat, msg, args) {
   await sock.sendMessage(chat, { text: `👋 *goodbye*\n\nstatus · *${cfg.goodbye ? 'ON' : 'OFF'}*\n\n\`.goodbye on\` / \`.goodbye off\`` }, { quoted: msg });
 }
 
-// ── Pending join-request resolver ───────────────────────────────────────────
 async function listPending(sock, chat) {
   if (typeof sock.groupRequestParticipantsList === 'function') {
     try {
@@ -115,14 +145,12 @@ async function listPending(sock, chat) {
   return null;
 }
 
-// ── .kickall ────────────────────────────────────────────────────────────────
 export async function kickallCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (ownerOnly(sock, chat, msg)) return;
   try {
     const meta = await sock.groupMetadata(chat);
     const botJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-    // ★ FIX: the configured owner is now protected too, not just meta.owner
     const protectedJids = new Set([botJid, meta.owner, ownerJid()].filter(Boolean));
     const targets = meta.participants
       .filter((p) => !protectedJids.has(p.id) && p.admin == null)
@@ -143,7 +171,6 @@ export async function kickallCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .kickcc ─────────────────────────────────────────────────────────────────
 export async function kickccCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (ownerOnly(sock, chat, msg)) return;
@@ -176,7 +203,6 @@ export async function kickccCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .setdesc ────────────────────────────────────────────────────────────────
 export async function setdescCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (ownerOnly(sock, chat, msg)) return;
@@ -190,7 +216,6 @@ export async function setdescCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .setgpp ─────────────────────────────────────────────────────────────────
 export async function setgppCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (ownerOnly(sock, chat, msg)) return;
@@ -211,7 +236,6 @@ export async function setgppCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .approveall / .declineall ──────────────────────────────────────────────
 export async function approveallCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (ownerOnly(sock, chat, msg)) return;
@@ -244,7 +268,6 @@ export async function declineallCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .leave ──────────────────────────────────────────────────────────────────
 export async function leaveCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (ownerOnly(sock, chat, msg)) return;
@@ -256,7 +279,6 @@ export async function leaveCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .join ───────────────────────────────────────────────────────────────────
 export async function joinCommand(sock, chat, msg, args) {
   if (ownerOnly(sock, chat, msg)) return;
   try {
@@ -271,7 +293,6 @@ export async function joinCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .open / .close ──────────────────────────────────────────────────────────
 export async function openCommand(sock, chat, msg) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (ownerOnly(sock, chat, msg)) return;
@@ -294,22 +315,30 @@ export async function closeCommand(sock, chat, msg) {
   }
 }
 
-// ── .tagall / .hidetag ──────────────────────────────────────────────────────
+// ── .tagall / .hidetag / .tag admin / .hidetag admin ────────────────────────
 export async function tagallCommand(sock, chat, msg, args) {
   if (!isGroup(chat)) return sock.sendMessage(chat, { text: '❌ Group only.' }, { quoted: msg });
   if (ownerOnly(sock, chat, msg)) return;
   try {
     const meta = await sock.groupMetadata(chat);
-    const participants = meta.participants || [];
+    let participants = meta.participants || [];
     if (!participants.length) return sock.sendMessage(chat, { text: '❌ No members found.' }, { quoted: msg });
 
-    const textArg = (args || []).join(' ').trim();
+    const isOnlyAdmin = (args?.[0] || '').toLowerCase() === 'admin' || (args?.[0] || '').toLowerCase() === 'admins';
+    const textArgs = isOnlyAdmin ? args.slice(1) : args;
+
+    if (isOnlyAdmin) {
+      participants = participants.filter((p) => p.admin != null);
+      if (!participants.length) return sock.sendMessage(chat, { text: '❌ No admins found in this group.' }, { quoted: msg });
+    }
+
+    const textArg = (textArgs || []).join(' ').trim();
     const mentions = participants.map((p) => p.id);
 
-    let body = `📢 *Attention Everyone!*${textArg ? `\n\n💬 _${textArg}_` : ''}\n\n`;
+    let body = `📢 *Attention ${isOnlyAdmin ? 'Admins' : 'Everyone'}!*${textArg ? `\n\n💬 _${textArg}_` : ''}\n\n`;
     participants.forEach((p, idx) => {
       const num = p.id.split('@')[0];
-      body += `${idx + 1}. @${num}\n`;
+      body += `${idx + 1}. @${num}${p.admin ? ' 👑' : ''}\n`;
     });
 
     await sock.sendMessage(chat, { text: body, mentions }, { quoted: msg });
@@ -323,18 +352,26 @@ export async function hidetagCommand(sock, chat, msg, args) {
   if (ownerOnly(sock, chat, msg)) return;
   try {
     const meta = await sock.groupMetadata(chat);
-    const participants = meta.participants || [];
+    let participants = meta.participants || [];
     if (!participants.length) return sock.sendMessage(chat, { text: '❌ No members found.' }, { quoted: msg });
 
-    let messageText = (args || []).join(' ').trim();
+    const isOnlyAdmin = (args?.[0] || '').toLowerCase() === 'admin' || (args?.[0] || '').toLowerCase() === 'admins';
+    const textArgs = isOnlyAdmin ? args.slice(1) : args;
+
+    if (isOnlyAdmin) {
+      participants = participants.filter((p) => p.admin != null);
+      if (!participants.length) return sock.sendMessage(chat, { text: '❌ No admins found in this group.' }, { quoted: msg });
+    }
+
+    let messageText = (textArgs || []).join(' ').trim();
     const ctx = msg.message?.extendedTextMessage?.contextInfo;
     const quoted = ctx?.quotedMessage;
 
     if (!messageText && quoted) {
-      messageText = quoted.conversation || quoted.extendedTextMessage?.text || 'Attention group members!';
+      messageText = quoted.conversation || quoted.extendedTextMessage?.text || `Attention group ${isOnlyAdmin ? 'admins' : 'members'}!`;
     }
 
-    if (!messageText) messageText = '📢 Notification';
+    if (!messageText) messageText = `📢 Notification for ${isOnlyAdmin ? 'Admins' : 'Members'}`;
 
     const mentions = participants.map((p) => p.id);
     await sock.sendMessage(chat, { text: messageText, mentions }, { quoted: msg });
@@ -343,11 +380,10 @@ export async function hidetagCommand(sock, chat, msg, args) {
   }
 }
 
-// ── .mute / .unmute ─────────────────────────────────────────────────────────
 export async function muteCommand(sock, chat, msg, args) {
   try {
     const duration = (args?.[0] || '').toLowerCase();
-    let ms = 8 * 60 * 60 * 1000; // default 8 hours
+    let ms = 8 * 60 * 60 * 1000;
     if (duration.endsWith('h')) ms = parseInt(duration) * 3600_000;
     else if (duration.endsWith('d')) ms = parseInt(duration) * 86400_000;
     else if (duration === 'forever') ms = 100 * 365 * 86400_000;
@@ -367,7 +403,6 @@ export async function unmuteCommand(sock, chat, msg) {
   }
 }
 
-// ── .archive / .unarchive ───────────────────────────────────────────────────
 export async function archiveCommand(sock, chat, msg) {
   try {
     await sock.chatModify({ archive: true, lastMessages: [] }, chat);
@@ -386,7 +421,6 @@ export async function unarchiveCommand(sock, chat, msg) {
   }
 }
 
-// ── .clearchat ──────────────────────────────────────────────────────────────
 export async function clearchatCommand(sock, chat, msg) {
   try {
     await sock.chatModify({ clear: { messages: [{ id: msg.key.id, fromMe: msg.key.fromMe, timestamp: msg.messageTimestamp }] } }, chat);
@@ -396,7 +430,6 @@ export async function clearchatCommand(sock, chat, msg) {
   }
 }
 
-// ── .rejectcalls ────────────────────────────────────────────────────────────
 export function getCallsConfig() { return readJson(CALLS_FILE(), { reject: false }); }
 export function setCallsConfig(patch) { writeJsonAtomic(CALLS_FILE(), { ...getCallsConfig(), ...patch }); }
 

@@ -1,10 +1,10 @@
 // ─────────────────────────────────────────────
 // WRAITH · core/groupEvents.js
-// Welcome / goodbye messages on membership changes.
+// Welcome / goodbye messages + PDD on membership changes.
 // Wired in start.js → 'group-participants.update'
 // ─────────────────────────────────────────────
 import { getPrefix } from '../core/settings.js';
-import { getWelcomeConfig } from '../modules/group.js';
+import { getWelcomeConfig, getPddConfig } from '../modules/group.js';
 
 function mentionText(participants) {
   return participants
@@ -20,10 +20,24 @@ export function handleGroupParticipantUpdate(sock, update) {
     if (!chat || !action || !participants.length) return;
     if (!String(chat).endsWith('@g.us')) return;
 
-    const cfg = getWelcomeConfig()[chat];
-    if (!cfg) return;
+    const welcomeCfg = getWelcomeConfig()[chat];
+    const pddCfg = getPddConfig()[chat];
 
-    if (action === 'add' && cfg.welcome) {
+    // Handle PDD (Promote/Demote Detection)
+    if (pddCfg?.enabled) {
+      if (action === 'promote') {
+        const text = `👑 *Admin Promotion Detected (PDD)*\n\nThe following member(s) have been promoted to Admin:\n${mentionText(participants)}`;
+        sock.sendMessage(chat, { text, mentions: participants }).catch(() => {});
+      } else if (action === 'demote') {
+        const text = `⚠️ *Admin Demotion Detected (PDD)*\n\nThe following member(s) have been demoted from Admin:\n${mentionText(participants)}`;
+        sock.sendMessage(chat, { text, mentions: participants }).catch(() => {});
+      }
+    }
+
+    // Handle Welcome / Goodbye
+    if (!welcomeCfg) return;
+
+    if (action === 'add' && welcomeCfg.welcome) {
       const text =
         `👋 Welcome ${mentionText(participants)}!\n` +
         `Enjoy your stay. Type \`${getPrefix()}help\` to see what the bot can do.`;
@@ -31,7 +45,7 @@ export function handleGroupParticipantUpdate(sock, update) {
       return;
     }
 
-    if ((action === 'remove' || action === 'leave') && cfg.goodbye) {
+    if ((action === 'remove' || action === 'leave') && welcomeCfg.goodbye) {
       const text = `👋 Goodbye ${mentionText(participants)}.`;
       sock.sendMessage(chat, { text, mentions: participants }).catch(() => {});
       return;

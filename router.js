@@ -14,7 +14,11 @@ import { activityCommand, trackActivity } from './modules/activity.js';
 import { updateCommand } from './modules/update.js';
 import { prefixCommand } from './modules/prefix.js';
 import { songCommand } from './modules/song.js';
-import { ytdlCommand, mp3Command, pdlCommand, pdlzipCommand } from './modules/download.js';
+import {
+  ytdlCommand, mp3Command, pdlCommand, pdlzipCommand,
+  twitterCommand, pinterestCommand, threadsCommand, redditCommand,
+  soundcloudCommand, spotifyCommand, youtubeCommand,
+} from './modules/download.js';
 import { urlCommand } from './modules/url.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 import { getPrefix, getReplyMode, setReplyMode } from './core/settings.js';
@@ -37,13 +41,16 @@ import {
   setdescCommand as setgdescCommand, setgppCommand, approveallCommand, declineallCommand,
   leaveCommand, joinCommand, openCommand, closeCommand, tagallCommand, hidetagCommand, muteCommand, unmuteCommand,
   archiveCommand, unarchiveCommand, clearchatCommand,
-  rejectcallsCommand, attachCallRejector,
+  rejectcallsCommand, attachCallRejector, pddCommand
 } from './modules/group.js';
 import { setppCommand, setaboutCommand, chatstatsCommand, blockCommand, unblockCommand, blocklistCommand, unblockallCommand, setstatusCommand, getstatusCommand, getpairCommand, setsessionCommand, addsessionCommand, delsessionCommand, setvarCommand, getvarCommand, delvarCommand, addownerCommand, delownerCommand, ownerlistCommand } from './modules/owner.js';
 import { gitdlCommand, mfdlCommand } from './modules/downloader.js';
 import { igCommand, tiktokCommand, fbCommand } from './modules/social.js';
 import { attachPresenceTracker, stalkCommand } from './modules/presence-track.js';
 import { extractInteractiveResponse, matchChoice } from './lib/buttons.js';
+import { textmakerCommand, handleTextmakerCommand } from './modules/textmaker.js';
+import { geminiCommand } from './modules/gemini.js';
+import { pinchatCommand, unpinchatCommand } from './modules/pin.js';
 
 const CRITICAL_COMMANDS = new Set([
   'ghost', 'peek', 'lurk', 'schedule',
@@ -58,7 +65,7 @@ const CRITICAL_COMMANDS = new Set([
   'addsession', 'delsession', 'replymode',
   'setvar', 'getvar', 'delvar',
   'addowner', 'delowner', 'ownerlist',
-  'gitdl', 'mfdl', 'url', 'pdl', 'pdlzip', 'restart',
+  'gitdl', 'mfdl', 'url', 'pdl', 'pdlzip', 'restart', 'pinchat', 'unpinchat', 'pdd', 'tag',
 ]);
 
 const attachedSockets = new WeakSet();
@@ -168,7 +175,6 @@ function markCommandProcessed(msgId) {
   return false;
 }
 
-
 export async function dispatch(sock, update, sessionId = 'main') {
   attachBackground(sock);
   if (update.type && update.type !== 'notify' && update.type !== 'append') return;
@@ -247,7 +253,6 @@ export async function dispatch(sock, update, sessionId = 'main') {
       const msgSender = msg.key.participant || msg.key.remoteJid;
       const senderIsOwner = msg.key.fromMe || isOwner(msgSender);
 
-      // ★ SHORT-REPLY MODE: bare "1", "2", "3", "on", "off"… answers the last menu
       if (text && !text.startsWith(prefix)) {
         const chosenId = matchChoice(chat, msgSender, text);
         if (chosenId) {
@@ -275,13 +280,23 @@ export async function dispatch(sock, update, sessionId = 'main') {
         }
       }
 
-      const KNOWN = new Set([...CRITICAL_COMMANDS,
+      const EPHOTO_LIST = [
+        'neon', 'glitch', '3dgold', 'marvel', 'pornhub', 'cyberpunk', 'graffiti',
+        'blackpink', 'naruto', 'galaxy', 'blood', 'hologram', 'matrix', 'slice',
+        'luxury', 'vintage', 'lightglow', 'sand', 'water', 'fire', 'metallic',
+        'space', 'neonlight', 'glowing', 'captainamerica', 'wall', 'paper',
+        'circuit', 'neondevil', 'dragon', 'textmaker'
+      ];
+
+      const KNOWN = new Set([...CRITICAL_COMMANDS, ...EPHOTO_LIST,
         'dl', 'download', 'mp3', 'song', 'songinfo', 'help', 'menu', 'ping', 'usermanual',
         'currency', 'qr', 'define', 'weather', 'pwned', 'owner', 'script', 'repo',
         'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
         'welcome', 'goodbye', 'getpp', 'ig', 'tiktok', 'fb',
         'igpost', 'tiktokpost', 'fbpost', 'pdl', 'pdlzip', 'postdl',
         'alive', 'uptime', 'restart', 'replymode', 'reqlocation',
+        'twitter', 'tw', 'pinterest', 'pin', 'threads', 'reddit', 'soundcloud', 'sc', 'spotify', 'spot', 'youtube', 'yt',
+        'gemini', 'pinchat', 'unpinchat', 'pdd', 'tag'
       ]);
 
       if (KNOWN.has(verb)) {
@@ -289,6 +304,11 @@ export async function dispatch(sock, update, sessionId = 'main') {
       }
 
       const csock = sock;
+
+      if (EPHOTO_LIST.includes(verb) && verb !== 'textmaker') {
+        await handleTextmakerCommand(csock, chat, msg, verb, rest);
+        continue;
+      }
 
       try {
         switch (verb) {
@@ -306,6 +326,23 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'pdl':
           case 'postdl': await pdlCommand(csock, chat, msg, rest); break;
           case 'pdlzip': await pdlzipCommand(csock, chat, msg, rest); break;
+          case 'twitter':
+          case 'tw': await twitterCommand(csock, chat, msg, rest); break;
+          case 'pinterest':
+          case 'pin': await pinterestCommand(csock, chat, msg, rest); break;
+          case 'threads': await threadsCommand(csock, chat, msg, rest); break;
+          case 'reddit': await redditCommand(csock, chat, msg, rest); break;
+          case 'soundcloud':
+          case 'sc': await soundcloudCommand(csock, chat, msg, rest); break;
+          case 'spotify':
+          case 'spot': await spotifyCommand(csock, chat, msg, rest); break;
+          case 'youtube':
+          case 'yt': await youtubeCommand(csock, chat, msg, rest); break;
+          case 'textmaker': await textmakerCommand(csock, chat, msg, rest); break;
+          case 'gemini': await geminiCommand(csock, chat, msg, rest); break;
+          case 'pinchat': await pinchatCommand(csock, chat, msg); break;
+          case 'unpinchat': await unpinchatCommand(csock, chat, msg); break;
+          case 'pdd': await pddCommand(csock, chat, msg, rest); break;
           case 'songinfo': await songInfoCommand(csock, chat, msg, rest); break;
           case 'prefix': await prefixCommand(csock, chat, msg, rest); break;
           case 'help':
@@ -319,7 +356,8 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'antilink': await toggleProtection(csock, chat, msg, rest, 'antilink'); break;
           case 'antispam': await toggleProtection(csock, chat, msg, rest, 'antispam'); break;
           case 'antisticker': await toggleProtection(csock, chat, msg, rest, 'antisticker'); break;
-          case 'getpp': await getppCommand(csock, chat, msg, rest); break;          case 'getjid': await getjidCommand(csock, chat, msg, rest); break;
+          case 'getpp': await getppCommand(csock, chat, msg, rest); break;
+          case 'getjid': await getjidCommand(csock, chat, msg, rest); break;
           case 'presence': await presenceCommand(csock, chat, msg, rest); break;
           case 'activity': await activityCommand(csock, chat, msg, rest); break;
           case 'update': await updateCommand(csock, chat, msg, rest); break;
@@ -368,6 +406,7 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'setgpp': await setgppCommand(csock, chat, msg, rest); break;
           case 'open': await openCommand(csock, chat, msg); break;
           case 'close': await closeCommand(csock, chat, msg); break;
+          case 'tag':
           case 'tagall': await tagallCommand(csock, chat, msg, rest); break;
           case 'hidetag': await hidetagCommand(csock, chat, msg, rest); break;
           case 'approveall': await approveallCommand(csock, chat, msg, rest); break;
