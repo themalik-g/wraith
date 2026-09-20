@@ -1,25 +1,38 @@
 #!/usr/bin/env node
 // ─────────────────────────────────────────────
-// WRAITH · multi-session launcher (ESM) — hardened
+// WRAITH · session worker / launcher (ESM)
+// Runs inside the cloned repo — node_modules exists here.
 // ─────────────────────────────────────────────
 
-// 1. Load dotenv as early as possible. If the module is not yet installed
-//    (first bootstrap), we catch the error and continue.
+// ─────────────────────────────────────────────
+// 1. LOAD .env FIRST — before ANY other import.
+//    index.js (bootstrap) already cloned the repo and ran
+//    `npm install`, and spawns us with cwd = <repo>, so
+//    `dotenv` resolves correctly from ./node_modules/dotenv.
+// ─────────────────────────────────────────────
 try {
   await import('dotenv/config');
 } catch (err) {
   if (process.env.WRAITH_DEBUG) {
-    console.warn('[wraith] dotenv not loaded:', err?.code || err?.message);
+    console.warn(
+      '[wraith] dotenv not loaded:',
+      err?.code || err?.message || err
+    );
   }
 }
 
+// ─────────────────────────────────────────────
+// 2. Now safe to import everything else.
+// ─────────────────────────────────────────────
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
-// 2. Guard for low-NPROC containers.
+// ─────────────────────────────────────────────
+// 3. Container-safe defaults (Pterodactyl / low-NPROC)
+// ─────────────────────────────────────────────
 if (!process.env.UV_THREADPOOL_SIZE) {
   process.env.UV_THREADPOOL_SIZE = '2';
 }
@@ -34,8 +47,31 @@ const MAX_RESTARTS = 10;
 const ADD_MODE =
   process.argv.includes('--add') || process.argv.includes('--setup');
 
-// ── configured phone number resolution ──
-// Priority: CLI arg > env > null
+// ─────────────────────────────────────────────
+// 4. Styling helpers (defined before use)
+// ─────────────────────────────────────────────
+const dye = (c, s) => `\x1b[${c}m${s}\x1b[0m`;
+const grey = s => dye(90, s);
+const cyan = s => dye(36, s);
+const violet = s => dye(35, s);
+const green = s => dye(32, s);
+const yellow = s => dye(33, s);
+const red = s => dye(31, s);
+const clock = () => grey(new Date().toTimeString().slice(0, 8));
+const say = (...p) => console.log(clock(), violet('❯'), ...p);
+
+const veil = () => {
+  console.log();
+  console.log(violet(' · · · · · · · · · · ·'));
+  console.log(violet(' w r a i t h'));
+  console.log(violet(' · · · · · · · · · · ·'));
+  console.log();
+};
+
+// ─────────────────────────────────────────────
+// 5. Configured phone number resolution
+//    Priority: CLI arg  >  env  >  null
+// ─────────────────────────────────────────────
 const PHONE_RE = /^\d{10,15}$/;
 
 function resolveConfiguredPhone(argv = process.argv, env = process.env) {
@@ -60,27 +96,11 @@ function resolveConfiguredPhone(argv = process.argv, env = process.env) {
 
 const CONFIGURED_PHONE = resolveConfiguredPhone();
 
-// ── styling helpers ──
-const dye = (c, s) => `\x1b[${c}m${s}\x1b[0m`;
-const grey = s => dye(90, s);
-const cyan = s => dye(36, s);
-const violet = s => dye(35, s);
-const green = s => dye(32, s);
-const yellow = s => dye(33, s);
-const red = s => dye(31, s);
-const clock = () => grey(new Date().toTimeString().slice(0, 8));
-const say = (...p) => console.log(clock(), violet('❯'), ...p);
-
-const veil = () => {
-  console.log();
-  console.log(violet(' · · · · · · · · · · ·'));
-  console.log(violet(' w r a i t h'));
-  console.log(violet(' · · · · · · · · · · ·'));
-  console.log();
-};
-
-// ── repo / instance helpers ──
+// ─────────────────────────────────────────────
+// 6. Repo / instance helpers
+// ─────────────────────────────────────────────
 function repoRoot() {
+  // If start.js sits next to us, we ARE the repo.
   if (fs.existsSync(path.join(__dirname, 'start.js'))) return __dirname;
 
   const dir = path.join(__dirname, 'wraith');
@@ -177,7 +197,9 @@ function nextSessionId(root) {
   return `sess${maxN + 1}`;
 }
 
-// ── session spawning ──
+// ─────────────────────────────────────────────
+// 7. Session spawning
+// ─────────────────────────────────────────────
 const children = new Map();
 const restartingSessions = new Set();
 let shuttingDown = false;
@@ -214,7 +236,8 @@ function spawnSession(root, id, number) {
   if (process.env.WRAITH_V8_POOL_SIZE) {
     args.push(`--v8-pool-size=${process.env.WRAITH_V8_POOL_SIZE}`);
   }
-  args.push('start.js', '--session', id);
+  // Spawn the real worker from inside the repo so node_modules resolves.
+  args.push(path.join(root, 'start.js'), '--session', id);
   if (number) args.push('--number', number);
 
   const env = {
@@ -353,9 +376,15 @@ function spawnSession(root, id, number) {
 
     const wait = Math.min(1500 * Math.pow(2, rec.restarts - 1), 30_000);
     const exitDetail =
-      code !== null ? `code ${code}` : signal ? `signal ${signal}` : 'code null';
+      code !== null
+        ? `code ${code}`
+        : signal
+        ? `signal ${signal}`
+        : 'code null';
     const why =
-      code === 0 ? 'restarting for update/clean exit' : `crashed (${exitDetail})`;
+      code === 0
+        ? 'restarting for update/clean exit'
+        : `crashed (${exitDetail})`;
     say(
       yellow(
         `${id}: ${why} · retry ${rec.restarts} in ${(wait / 1000).toFixed(1)}s`
@@ -403,7 +432,9 @@ function unmuteAll() {
   for (const rec of children.values()) rec.unmute?.();
 }
 
-// ── link one session (with preset-number support) ──
+// ─────────────────────────────────────────────
+// 8. Link one session (supports preset number)
+// ─────────────────────────────────────────────
 async function linkOne(root, label, presetNumber = null) {
   let number = presetNumber;
 
@@ -439,7 +470,6 @@ async function wizard(root) {
 
   const firstLabel = ADD_MODE ? 'new number' : 'first number';
 
-  // First number: use preset if available, otherwise prompt.
   const ok1 = await linkOne(root, firstLabel, CONFIGURED_PHONE);
   if (!ok1) {
     say(red('first number failed — aborting wizard'));
@@ -447,7 +477,6 @@ async function wizard(root) {
   }
 
   while (true) {
-    // In non-interactive mode with only a preset number, stop here.
     if (!process.stdin.isTTY) {
       console.log(grey(' non-interactive — running linked session(s).\n'));
       break;
@@ -471,6 +500,9 @@ async function wizard(root) {
   }
 }
 
+// ─────────────────────────────────────────────
+// 9. Graceful shutdown
+// ─────────────────────────────────────────────
 function quiet(sig) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -486,7 +518,9 @@ function quiet(sig) {
 process.on('SIGINT', () => quiet('SIGINT'));
 process.on('SIGTERM', () => quiet('SIGTERM'));
 
-// ── main entry ──
+// ─────────────────────────────────────────────
+// 10. Main entry
+// ─────────────────────────────────────────────
 (async () => {
   try {
     veil();
