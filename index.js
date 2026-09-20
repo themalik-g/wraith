@@ -14,7 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ─────────────────────────────────────────────
 // 1. INLINE .env LOADER  (NO dotenv dependency)
 //    Runs before anything else touches process.env.
-//    If the same var is already set (panel/PM2/docker), we don't override.
+//    Existing env vars (panel/PM2/docker) are NOT overridden.
 // ─────────────────────────────────────────────
 function loadEnvFile(file) {
   try {
@@ -51,7 +51,7 @@ if (!process.env.UV_THREADPOOL_SIZE) {
 }
 
 // ─────────────────────────────────────────────
-// 3. Constants & styling (defined before use)
+// 3. Constants
 // ─────────────────────────────────────────────
 const SOURCE = 'https://github.com/themalik-g/wraith.git';
 const BRANCH = process.env.WRAITH_BRANCH || 'main';
@@ -61,7 +61,13 @@ const LINK_WAIT_MS = 300_000;
 const MAX_RESTARTS = 10;
 const ADD_MODE =
   process.argv.includes('--add') || process.argv.includes('--setup');
+const PROMPT_TIMEOUT_MS = Number(
+  process.env.WRAITH_PROMPT_TIMEOUT_MS || 20_000
+);
 
+// ─────────────────────────────────────────────
+// 4. Styling helpers
+// ─────────────────────────────────────────────
 const dye = (c, s) => `\x1b[${c}m${s}\x1b[0m`;
 const grey = s => dye(90, s);
 const cyan = s => dye(36, s);
@@ -81,7 +87,7 @@ const veil = () => {
 };
 
 // ─────────────────────────────────────────────
-// 4. Configured phone number resolution
+// 5. Configured phone number resolution
 //    Priority: CLI arg  >  env  >  null
 // ─────────────────────────────────────────────
 const PHONE_RE = /^\d{10,15}$/;
@@ -109,10 +115,9 @@ function resolveConfiguredPhone(argv = process.argv, env = process.env) {
 const CONFIGURED_PHONE = resolveConfiguredPhone();
 
 // ─────────────────────────────────────────────
-// 5. Repo / instance helpers
+// 6. Repo / instance helpers
 // ─────────────────────────────────────────────
 function repoRoot() {
-  // If start.js sits next to us, we ARE the repo.
   if (fs.existsSync(path.join(__dirname, 'start.js'))) return __dirname;
 
   const dir = path.join(__dirname, 'wraith');
@@ -210,7 +215,7 @@ function nextSessionId(root) {
 }
 
 // ─────────────────────────────────────────────
-// 6. Session spawning
+// 7. Session spawning
 // ─────────────────────────────────────────────
 const children = new Map();
 const restartingSessions = new Set();
@@ -219,6 +224,11 @@ let rl = null;
 
 const ask = q => new Promise(res => rl.question(q, a => res(a.trim())));
 
+// ─────────────────────────────────────────────
+// Prompt for a WhatsApp number.
+// If CONFIGURED_PHONE is set, auto-fallback to it
+// after PROMPT_TIMEOUT_MS of no input.
+// ─────────────────────────────────────────────
 async function promptNumber(label = 'number') {
   console.log();
   console.log(violet(` ╭─ link a ${label} ─────────────────────╮`));
@@ -228,17 +238,62 @@ async function promptNumber(label = 'number') {
       grey(' country code + number · 923001234567 ') +
       violet('│')
   );
+  if (CONFIGURED_PHONE) {
+    console.log(
+      violet(' │') +
+        yellow(
+          ` ⏱ no input in ${PROMPT_TIMEOUT_MS / 1000}s → +${CONFIGURED_PHONE} `
+        ) +
+        violet('│')
+    );
+  }
   console.log(violet(' ╰────────────────────────────────────────╯'));
 
-  while (true) {
-    const raw = await ask(violet(' ❯ ') + cyan(`${label}: `));
-    const digits = raw.replace(/\D/g, '');
-    if (!/^\d{10,15}$/.test(digits)) {
-      console.log(red(' ✖ must be 10–15 digits'));
-      continue;
+  return new Promise(resolve => {
+    let settled = false;
+    let timer = null;
+
+    const finish = num => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(num);
+    };
+
+    if (CONFIGURED_PHONE) {
+      timer = setTimeout(() => {
+        if (settled) return;
+        process.stdout.write('\n');
+        say(
+          yellow(
+            `⏱ no input in ${PROMPT_TIMEOUT_MS / 1000}s — auto-pairing +${CONFIGURED_PHONE}`
+          )
+        );
+        finish(CONFIGURED_PHONE);
+      }, PROMPT_TIMEOUT_MS);
     }
-    return digits;
-  }
+
+    (async () => {
+      while (!settled) {
+        let raw;
+        try {
+          raw = await ask(violet(' ❯ ') + cyan(`${label}: `));
+        } catch {
+          if (CONFIGURED_PHONE) finish(CONFIGURED_PHONE);
+          return;
+        }
+        if (settled) return;
+
+        const digits = raw.replace(/\D/g, '');
+        if (!/^\d{10,15}$/.test(digits)) {
+          console.log(red(' ✖ must be 10–15 digits'));
+          continue;
+        }
+        finish(digits);
+        return;
+      }
+    })();
+  });
 }
 
 function spawnSession(root, id, number) {
@@ -248,12 +303,11 @@ function spawnSession(root, id, number) {
   if (process.env.WRAITH_V8_POOL_SIZE) {
     args.push(`--v8-pool-size=${process.env.WRAITH_V8_POOL_SIZE}`);
   }
-  // IMPORTANT: run start.js FROM THE REPO so its node_modules resolve.
   args.push(path.join(root, 'start.js'), '--session', id);
   if (number) args.push('--number', number);
 
   const env = {
-    ...process.env, // <-- .env already merged in via loadEnvFile()
+    ...process.env,
     UV_THREADPOOL_SIZE: process.env.UV_THREADPOOL_SIZE || '2',
     WRAITH_REPO_ROOT: root,
     WRAITH_SESSION_ID: id,
@@ -262,7 +316,7 @@ function spawnSession(root, id, number) {
 
   say(cyan(`starting session ${id}${number ? ' · +' + number : ''}`));
   const proc = spawn('node', args, {
-    cwd: root,                       // <-- critical for dotenv resolution
+    cwd: root,
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     env,
   });
@@ -525,7 +579,7 @@ process.on('SIGINT', () => quiet('SIGINT'));
 process.on('SIGTERM', () => quiet('SIGTERM'));
 
 // ─────────────────────────────────────────────
-// 7. Main entry
+// 8. Main entry
 // ─────────────────────────────────────────────
 (async () => {
   try {
