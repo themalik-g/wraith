@@ -1,11 +1,9 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/help.js
-// Styled boxed menu — command list ONLY.
+// Clean single-message plain text list menu
 // ─────────────────────────────────────────────
-import { CONFIG } from '../config.js';
 import { isOwner } from '../core/identity.js';
 import { getPrefix } from '../core/settings.js';
-import { getMode } from './utility.js';
 import { NEWSLETTER_CONTEXT } from '../lib/buttons.js';
 
 const c = (cmd, ownerOnly = false) => ({ cmd, ownerOnly });
@@ -14,7 +12,7 @@ const REGISTRY = [
   {
     id: 'core',
     icon: '🛡️',
-    title: 'ᴄᴏʀᴇ',
+    title: 'CORE',
     commands: [
       c('.alive'),
       c('.ping'),
@@ -34,7 +32,7 @@ const REGISTRY = [
   {
     id: 'ghost',
     icon: '👻',
-    title: 'ɢʜᴏꜱᴛ',
+    title: 'GHOST',
     commands: [
       c('.ghost', true),
       c('.ghost on', true),
@@ -46,7 +44,7 @@ const REGISTRY = [
   {
     id: 'peek',
     icon: '👀',
-    title: 'ᴘᴇᴇᴋ',
+    title: 'PEEK',
     commands: [
       c('.peek', true),
       c('.peek auto on', true),
@@ -61,7 +59,7 @@ const REGISTRY = [
   {
     id: 'lurk',
     icon: '🕵️',
-    title: 'ʟᴜʀᴋ',
+    title: 'LURK',
     commands: [
       c('.lurk', true),
       c('.lurk on', true),
@@ -78,7 +76,7 @@ const REGISTRY = [
   {
     id: 'schedule',
     icon: '⏰',
-    title: 'ꜱᴄʜᴇᴅᴜʟᴇ',
+    title: 'SCHEDULE',
     commands: [
       c('.schedule', true),
       c('.schedule txt date am/pm', true),
@@ -93,7 +91,7 @@ const REGISTRY = [
     id: 'utility',
     aliases: ['tools'],
     icon: '🔧',
-    title: 'ᴜᴛɪʟɪᴛʏ',
+    title: 'UTILITY',
     commands: [
       c('.currency <from> <to> [amount]'),
       c('.qr <text>'),
@@ -108,7 +106,7 @@ const REGISTRY = [
   {
     id: 'media',
     icon: '📚',
-    title: 'ᴍᴇᴅɪᴀ & ᴀɪ',
+    title: 'MEDIA & AI',
     commands: [
       c('.book <query>'),
       c('.book dl <number>'),
@@ -125,7 +123,7 @@ const REGISTRY = [
     id: 'download',
     aliases: ['dl'],
     icon: '⬇️',
-    title: 'ᴅᴏᴡɴʟᴏᴀᴅ',
+    title: 'DOWNLOAD',
     commands: [
       c('.dl <url>'),
       c('.dl audio <url>'),
@@ -149,46 +147,46 @@ const REGISTRY = [
     id: 'textmaker',
     aliases: ['ephoto'],
     icon: '🎨',
-    title: 'ᴛᴇxᴛᴍᴀᴋᴇʀ / ᴇᴘʜᴏᴛᴏ',
+    title: 'TEXTMAKER / EPHOTO',
     commands: [
       c('.textmaker <effect> <text>'),
+      c('.metallic <text>'),
+      c('.ice <text>'),
+      c('.snow <text>'),
+      c('.impressive <text>'),
+      c('.matrix <text>'),
+      c('.light <text>'),
       c('.neon <text>'),
+      c('.devil <text>'),
+      c('.purple <text>'),
+      c('.thunder <text>'),
+      c('.leaves <text>'),
+      c('.1917 <text>'),
+      c('.arena <text>'),
+      c('.hacker <text>'),
+      c('.sand <text>'),
+      c('.blackpink <text>'),
       c('.glitch <text>'),
+      c('.fire <text>'),
       c('.3dgold <text>'),
       c('.marvel <text1 ; text2>'),
       c('.pornhub <text1 ; text2>'),
-      c('.cyberpunk <text>'),
       c('.graffiti <text>'),
-      c('.blackpink <text>'),
       c('.naruto <text>'),
-      c('.galaxy <text>'),
       c('.blood <text>'),
       c('.hologram <text>'),
-      c('.matrix <text>'),
-      c('.slice <text>'),
       c('.luxury <text>'),
-      c('.vintage <text>'),
-      c('.lightglow <text>'),
-      c('.sand <text>'),
-      c('.water <text>'),
-      c('.fire <text>'),
-      c('.metallic <text>'),
-      c('.space <text>'),
-      c('.neonlight <text>'),
       c('.glowing <text>'),
-      c('.captainamerica <text1 ; text2>'),
       c('.wall <text>'),
-      c('.paper <text>'),
       c('.circuit <text>'),
       c('.neondevil <text>'),
-      c('.dragon <text>'),
     ],
   },
   {
     id: 'social',
     aliases: ['socialsearch'],
     icon: '🔍',
-    title: 'ꜱᴏᴄɪᴀʟ ꜱᴇᴀʀᴄʜ / ᴅᴏᴡɴʟᴏᴀᴅ',
+    title: 'SOCIAL SEARCH & DL',
     commands: [
       c('.ig <username/url>'),
       c('.tiktok <username/url>'),
@@ -199,7 +197,7 @@ const REGISTRY = [
     id: 'group',
     aliases: ['admin', 'groupadmin'],
     icon: '👥',
-    title: 'ɢʀᴏᴜᴘ ᴀᴅᴍɪɴ',
+    title: 'GROUP ADMIN',
     commands: [
       c('.open', true),
       c('.close', true),
@@ -235,7 +233,7 @@ const REGISTRY = [
     id: 'owner',
     aliases: ['profile', 'ownerprofile'],
     icon: '👤',
-    title: 'ᴏᴡɴᴇʀ ᴘʀᴏꜰɪʟᴇ',
+    title: 'OWNER PROFILE',
     commands: [
       c('.setpp', true),
       c('.setabout <text>', true),
@@ -268,7 +266,7 @@ const REGISTRY = [
     id: 'chat',
     aliases: ['chatcontrols'],
     icon: '💬',
-    title: 'ᴄʜᴀᴛ ᴄᴏɴᴛʀᴏʟꜱ',
+    title: 'CHAT CONTROLS',
     commands: [
       c('.mute [8h|1d|forever]', true),
       c('.unmute', true),
@@ -283,7 +281,7 @@ const REGISTRY = [
     id: 'jid',
     aliases: ['jidprofile'],
     icon: '🧭',
-    title: 'ᴊɪᴅ / ᴘʀᴏꜰɪʟᴇ',
+    title: 'JID / PROFILE',
     commands: [
       c('.getjid', true),
       c('.getpp'),
@@ -297,21 +295,9 @@ const REGISTRY = [
   },
 ];
 
-const TAIL = '└─────────────┈⚝';
-
 function applyPrefix(cmd, prefix) {
   if (prefix === '.') return cmd;
   return cmd.startsWith('.') ? prefix + cmd.slice(1) : cmd;
-}
-
-function renderBox(icon, title, rows, prefix) {
-  const lines = [];
-  lines.push(`┌──❮ ${icon} ${title} ❯`);
-  lines.push('│');
-  for (const r of rows) lines.push(`│ ◈ ${applyPrefix(r, prefix)}`);
-  lines.push('│');
-  lines.push(TAIL);
-  return lines.join('\n');
 }
 
 function visibleRegistry(isOwnerUser) {
@@ -324,32 +310,24 @@ function visibleRegistry(isOwnerUser) {
     .filter((g) => g.commands.length > 0);
 }
 
-function renderAll(prefix, isOwnerUser, mode) {
+function renderAllPlainText(prefix, isOwnerUser) {
   const groups = visibleRegistry(isOwnerUser);
+  const lines = [];
 
-  const headerLines = [
-    '┌──❮ ⓌⓇⒶⒾⓉⒽ ❯',
-    '│',
-  ];
+  lines.push('🤖 *𝕎ℝ𝔸𝕀𝕋ℍ COMMAND MENU*');
+  lines.push(`• *Prefix:* ${prefix}`);
+  lines.push('');
 
-  if (isOwnerUser || mode !== 'public') {
-    headerLines.push('│ ᴄᴏᴍᴍᴀɴᴅꜱ ᴀʀᴇ ᴏᴡɴᴇʀ-ᴏɴʟʏ');
-  } else {
-    headerLines.push('│ ᴘᴜʙʟɪᴄ ᴍᴏᴅᴇ · ꜱᴏᴍᴇ ᴄᴏᴍᴍᴀɴᴅꜱ ʜɪᴅᴅᴇɴ');
+  for (const group of groups) {
+    lines.push(`${group.icon} *${group.title}*`);
+    for (const item of group.commands) {
+      lines.push(`  • ${applyPrefix(item.cmd, prefix)}`);
+    }
+    lines.push('');
   }
 
-  headerLines.push(`│ ᴘʀᴇꜰɪx · ${prefix}`);
-  headerLines.push(`│ ℹ️ ${prefix}ᴄᴏᴍᴍᴀɴᴅ ꜰᴏʀ ɢᴜɪᴅᴇ`);
-  headerLines.push('│');
-  headerLines.push(TAIL);
-
-  const header = headerLines.join('\n');
-
-  const sections = groups.map((g) =>
-    renderBox(g.icon, g.title, g.commands.map((x) => x.cmd), prefix)
-  );
-
-  return [header, ...sections, '', 'ⓌⓇⒶⒾⓉ⓽'].join('\n');
+  lines.push('Provided by 𝕎ℝ𝔸𝕀𝕋ℍ');
+  return lines.join('\n');
 }
 
 function findGroup(name) {
@@ -365,41 +343,17 @@ function findGroup(name) {
   );
 }
 
-async function sendSafe(sock, chat, msg, text) {
-  const MAX = 3500;
-  if (text.length <= MAX) {
-    return sock.sendMessage(chat, { text, contextInfo: NEWSLETTER_CONTEXT }, { quoted: msg });
-  }
-  const parts = [];
-  let buf = '';
-  for (const line of text.split('\n')) {
-    if ((buf + '\n' + line).length > MAX) {
-      if (buf) parts.push(buf);
-      buf = line;
-    } else {
-      buf = buf ? buf + '\n' + line : line;
-    }
-  }
-  if (buf) parts.push(buf);
-  for (const p of parts) {
-    await sock.sendMessage(chat, { text: p, contextInfo: NEWSLETTER_CONTEXT }, { quoted: msg });
-  }
-}
-
 export async function helpCommand(sock, chat, msg, args) {
   try {
     const from = msg.key.participant || msg.key.remoteJid;
     const isOwnerUser = msg.key.fromMe || isOwner(from);
     const prefix = getPrefix();
 
-    let mode = 'private';
-    try { mode = getMode(); } catch {}
-
     const target = (args?.[0] || '').toLowerCase().trim();
 
     if (!target) {
-      const text = renderAll(prefix, isOwnerUser, mode);
-      return sendSafe(sock, chat, msg, text);
+      const text = renderAllPlainText(prefix, isOwnerUser);
+      return await sock.sendMessage(chat, { text, contextInfo: NEWSLETTER_CONTEXT }, { quoted: msg });
     }
 
     const group = findGroup(target);
@@ -408,27 +362,36 @@ export async function helpCommand(sock, chat, msg, args) {
       const avail = visibleRegistry(isOwnerUser)
         .map((g) => `• ${g.id}`)
         .join(' · ');
-      return sock.sendMessage(
+      return await sock.sendMessage(
         chat,
-        { text: `❓ no menu page called _${target}_.\n\n${avail}`, contextInfo: NEWSLETTER_CONTEXT },
+        { text: `❓ Unknown menu category: *${target}*\n\nAvailable categories:\n${avail}`, contextInfo: NEWSLETTER_CONTEXT },
         { quoted: msg }
       );
     }
 
     const visible = isOwnerUser
-      ? group.commands.map((x) => x.cmd)
-      : group.commands.filter((x) => !x.ownerOnly).map((x) => x.cmd);
+      ? group.commands
+      : group.commands.filter((x) => !x.ownerOnly);
 
     if (!visible.length) {
-      return sock.sendMessage(
+      return await sock.sendMessage(
         chat,
-        { text: `🔒 _${group.title}_ is owner-only.`, contextInfo: NEWSLETTER_CONTEXT },
+        { text: `🔒 Category *${group.title}* is owner-only.`, contextInfo: NEWSLETTER_CONTEXT },
         { quoted: msg }
       );
     }
 
-    const box = renderBox(group.icon, group.title, visible, prefix);
-    return sendSafe(sock, chat, msg, box);
+    const lines = [`${group.icon} *${group.title}*`, ''];
+    for (const item of visible) {
+      lines.push(`  • ${applyPrefix(item.cmd, prefix)}`);
+    }
+    lines.push('\nProvided by 𝕎ℝ𝔸𝕀𝕋ℍ');
+
+    return await sock.sendMessage(
+      chat,
+      { text: lines.join('\n'), contextInfo: NEWSLETTER_CONTEXT },
+      { quoted: msg }
+    );
   } catch (e) {
     try {
       await sock.sendMessage(
