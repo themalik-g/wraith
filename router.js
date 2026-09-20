@@ -30,6 +30,8 @@ import { usermanualCommand } from './modules/usermanual.js';
 import {
   currencyCommand, qrCommand, defineCommand, weatherCommand, pwnedCommand,
   ownerCommand, scriptCommand, modeCommand, getMode,
+  shortenCommand, newsCommand, hackernewsCommand, wikiCommand,
+  jokeCommand, adviceCommand, factCommand,
 } from './modules/utility.js';
 import {
   bookCommand, imageCommand, movieCommand, songCommand as songInfoCommand, lyricsCommand,
@@ -49,7 +51,8 @@ import { igCommand, tiktokCommand, fbCommand } from './modules/social.js';
 import { attachPresenceTracker, stalkCommand } from './modules/presence-track.js';
 import { extractInteractiveResponse, matchChoice } from './lib/buttons.js';
 import { textmakerCommand, handleTextmakerCommand } from './modules/textmaker.js';
-import { geminiCommand } from './modules/gemini.js';
+import { EPHOTO_EFFECTS } from './lib/ephoto360.js';
+import { geminiCommand, photoCommand } from './modules/gemini.js';
 import { pinchatCommand, unpinchatCommand } from './modules/pin.js';
 
 const CRITICAL_COMMANDS = new Set([
@@ -280,13 +283,7 @@ export async function dispatch(sock, update, sessionId = 'main') {
         }
       }
 
-      const EPHOTO_LIST = [
-        'neon', 'glitch', '3dgold', 'marvel', 'pornhub', 'cyberpunk', 'graffiti',
-        'blackpink', 'naruto', 'galaxy', 'blood', 'hologram', 'matrix', 'slice',
-        'luxury', 'vintage', 'lightglow', 'sand', 'water', 'fire', 'metallic',
-        'space', 'neonlight', 'glowing', 'captainamerica', 'wall', 'paper',
-        'circuit', 'neondevil', 'dragon', 'textmaker'
-      ];
+      const EPHOTO_LIST = [...Object.keys(EPHOTO_EFFECTS), 'textmaker'];
 
       const KNOWN = new Set([...CRITICAL_COMMANDS, ...EPHOTO_LIST,
         'dl', 'download', 'mp3', 'song', 'songinfo', 'help', 'menu', 'ping', 'usermanual',
@@ -296,7 +293,8 @@ export async function dispatch(sock, update, sessionId = 'main') {
         'igpost', 'tiktokpost', 'fbpost', 'pdl', 'pdlzip', 'postdl',
         'alive', 'uptime', 'restart', 'replymode', 'reqlocation',
         'twitter', 'tw', 'pinterest', 'pin', 'threads', 'reddit', 'soundcloud', 'sc', 'spotify', 'spot', 'youtube', 'yt',
-        'gemini', 'pinchat', 'unpinchat', 'pdd', 'tag'
+        'gemini', 'photo', 'pinchat', 'unpinchat', 'pdd', 'tag',
+        'shorten', 'tinyurl', 'shorturl', 'news', 'hackernews', 'hn', 'wiki', 'wikipedia', 'joke', 'advice', 'fact'
       ]);
 
       if (KNOWN.has(verb)) {
@@ -340,6 +338,7 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'yt': await youtubeCommand(csock, chat, msg, rest); break;
           case 'textmaker': await textmakerCommand(csock, chat, msg, rest); break;
           case 'gemini': await geminiCommand(csock, chat, msg, rest); break;
+          case 'photo': await photoCommand(csock, chat, msg, rest); break;
           case 'pinchat': await pinchatCommand(csock, chat, msg); break;
           case 'unpinchat': await unpinchatCommand(csock, chat, msg); break;
           case 'pdd': await pddCommand(csock, chat, msg, rest); break;
@@ -365,6 +364,17 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'qr': await qrCommand(csock, chat, msg, rest); break;
           case 'define': await defineCommand(csock, chat, msg, rest); break;
           case 'weather': await weatherCommand(csock, chat, msg, rest); break;
+          case 'shorten':
+          case 'tinyurl':
+          case 'shorturl': await shortenCommand(csock, chat, msg, rest); break;
+          case 'news': await newsCommand(csock, chat, msg, rest); break;
+          case 'hackernews':
+          case 'hn': await hackernewsCommand(csock, chat, msg); break;
+          case 'wiki':
+          case 'wikipedia': await wikiCommand(csock, chat, msg, rest); break;
+          case 'joke': await jokeCommand(csock, chat, msg); break;
+          case 'advice': await adviceCommand(csock, chat, msg); break;
+          case 'fact': await factCommand(csock, chat, msg); break;
           case 'pwned': await pwnedCommand(csock, chat, msg, rest); break;
           case 'owner': await ownerCommand(csock, chat, msg, rest); break;
           case 'addowner': await addownerCommand(csock, chat, msg, rest); break;

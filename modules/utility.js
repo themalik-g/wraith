@@ -15,7 +15,8 @@ import { sendInteractive, createCtaUrl, createCtaCopy } from '../lib/buttons.js'
 import { chunkText, withTempFile } from '../lib/net.js';
 import {
   fetchCurrency, defineWord, fetchWeather, checkPwned,
-  generateQr, decodeQr,
+  generateQr, decodeQr, shortenUrl, fetchNews, fetchHackerNews,
+  searchWikipedia, fetchJoke, fetchAdvice, fetchFact,
 } from '../lib/apis.js';
 
 const MODE_FILE = () => inState('mode.json');
@@ -362,5 +363,134 @@ export async function modeCommand(sock, chat, msg, args) {
     }, { quoted: msg });
   } catch (e) {
     await sock.sendMessage(chat, { text: `⚠️ mode failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+// ── .shorten / .tinyurl / .shorturl ───────────────────────────────────────
+export async function shortenCommand(sock, chat, msg, args) {
+  try {
+    const url = (args || []).join(' ').trim();
+    if (!url || !url.startsWith('http')) {
+      return sock.sendMessage(chat, {
+        text: '🔗 *shorten*\n\nUsage: `.shorten <http(s)://long-url>`'
+      }, { quoted: msg });
+    }
+
+    const r = await shortenUrl(url);
+    if (!r.ok) {
+      return sock.sendMessage(chat, { text: '❌ Could not shorten URL. Please check the URL and try again.' }, { quoted: msg });
+    }
+
+    await sock.sendMessage(chat, {
+      text: `🔗 *Shortened URL*\n\n*Original:* ${url}\n*Short:* ${r.shortUrl}\n\nProvided by 𝕎ℝI𝕋ℍ`
+    }, { quoted: msg });
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ shorten failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+// ── .news ───────────────────────────────────────────────────────────────────
+export async function newsCommand(sock, chat, msg, args) {
+  try {
+    const topic = (args || []).join(' ').trim();
+    const r = await fetchNews(topic);
+    if (!r.ok || !r.articles.length) {
+      return sock.sendMessage(chat, { text: `❌ Could not fetch news${topic ? ` for *${topic}*` : ''}.` }, { quoted: msg });
+    }
+
+    const lines = [`📰 *News Headlines (${r.topic})*`, ''];
+    r.articles.forEach((a, i) => {
+      lines.push(`${i + 1}. *${a.title}*`);
+      if (a.pubDate) lines.push(`   _${a.pubDate} · ${a.source}_`);
+      lines.push(`   🔗 ${a.link}`);
+      lines.push('');
+    });
+    lines.push('Provided by 𝕎ℝI𝕋ℍ');
+
+    await sendChunked(sock, chat, msg, lines.join('\n'));
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ news failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+// ── .hackernews / .hn ───────────────────────────────────────────────────────
+export async function hackernewsCommand(sock, chat, msg) {
+  try {
+    const r = await fetchHackerNews(8);
+    if (!r.ok || !r.stories.length) {
+      return sock.sendMessage(chat, { text: '❌ Could not fetch Hacker News top stories.' }, { quoted: msg });
+    }
+
+    const lines = ['🟧 *Hacker News — Top Stories*', ''];
+    r.stories.forEach((s, i) => {
+      lines.push(`${i + 1}. *${s.title}*`);
+      lines.push(`   ▲ ${s.points} pts · by ${s.author} · 💬 ${s.comments} comments`);
+      lines.push(`   🔗 ${s.url}`);
+      lines.push('');
+    });
+    lines.push('Provided by 𝕎ℝI𝕋ℍ');
+
+    await sendChunked(sock, chat, msg, lines.join('\n'));
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ hackernews failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+// ── .wiki / .wikipedia ──────────────────────────────────────────────────────
+export async function wikiCommand(sock, chat, msg, args) {
+  try {
+    const query = (args || []).join(' ').trim();
+    if (!query) {
+      return sock.sendMessage(chat, { text: '🌐 *wikipedia*\n\nUsage: `.wiki <search topic>`' }, { quoted: msg });
+    }
+
+    const r = await searchWikipedia(query);
+    if (!r.ok) {
+      return sock.sendMessage(chat, { text: `❌ No Wikipedia article found for *${query}*.` }, { quoted: msg });
+    }
+
+    const text = `🌐 *Wikipedia: ${r.title}*\n_${r.description}_\n\n${r.extract}\n\n🔗 ${r.url}\n\nProvided by 𝕎ℝI𝕋ℍ`;
+    await sendChunked(sock, chat, msg, text);
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ wikipedia failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+// ── .joke ───────────────────────────────────────────────────────────────────
+export async function jokeCommand(sock, chat, msg) {
+  try {
+    const r = await fetchJoke();
+    if (!r.ok) return sock.sendMessage(chat, { text: '❌ Could not fetch a joke right now.' }, { quoted: msg });
+    await sock.sendMessage(chat, {
+      text: `😂 *Joke*\n\n${r.joke}\n\nProvided by 𝕎ℝI𝕋ℍ`
+    }, { quoted: msg });
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ joke failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+// ── .advice ─────────────────────────────────────────────────────────────────
+export async function adviceCommand(sock, chat, msg) {
+  try {
+    const r = await fetchAdvice();
+    if (!r.ok) return sock.sendMessage(chat, { text: '❌ Could not fetch advice right now.' }, { quoted: msg });
+    await sock.sendMessage(chat, {
+      text: `💡 *Advice*\n\n_"${r.advice}"_\n\nProvided by 𝕎ℝI𝕋ℍ`
+    }, { quoted: msg });
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ advice failed: ${e.message}` }, { quoted: msg }).catch(() => {});
+  }
+}
+
+// ── .fact ───────────────────────────────────────────────────────────────────
+export async function factCommand(sock, chat, msg) {
+  try {
+    const r = await fetchFact();
+    if (!r.ok) return sock.sendMessage(chat, { text: '❌ Could not fetch a fact right now.' }, { quoted: msg });
+    await sock.sendMessage(chat, {
+      text: `🧠 *Random Fact*\n\n_${r.fact}_\n\nProvided by 𝕎ℝI𝕋ℍ`
+    }, { quoted: msg });
+  } catch (e) {
+    await sock.sendMessage(chat, { text: `⚠️ fact failed: ${e.message}` }, { quoted: msg }).catch(() => {});
   }
 }
