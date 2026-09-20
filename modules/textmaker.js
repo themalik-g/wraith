@@ -51,7 +51,7 @@ export async function handleTextmakerCommand(sock, chat, msg, effectKey, args) {
     const buffer = await createEphotoImage(effectKey, text1, text2);
     await sock.sendMessage(chat, {
       image: buffer,
-      caption: `🎨 *Ephoto360:* ${effectKey}\n💬 _${text1}${text2 ? ' | ' + text2 : ''}_\n\nProvided by 𝕎ℝI𝕋ℍ`
+      caption: `🎨 *Ephoto360:* ${effectKey}\n💬 _${text1}${text2 ? ' | ' + text2 : ''}_\n\nProvided by 𝗪𝗥𝗜𝗧🇭`
     }, { quoted: msg });
 
     await sock.sendMessage(chat, { text: '✅ *Done!*', edit: statusMsg.key }).catch(() => {});

@@ -244,3 +244,16 @@ URLs containing picture posts or carousels (e.g. Instagram `/p/`, TikTok `/photo
 | `.uptime` | Check current bot uptime |
 | `.restart` | Restart WRAITH server process (owner only) |
 | `.help` / `.menu` | Render command help menu |
+
+## 🎨 Themes, Wallpapers & Chat Bubbles
+
+| Command | Description |
+|---|---|
+| `.theme1` ... `.theme10` | Set chat theme preset (1-10) |
+| `.reset theme` / `.resettheme` | Reset chat theme to default |
+| `.wp1` ... `.wp10` | Set/preview chat wallpaper preset (1-10) |
+| `.wp` (reply image) | Set replied photo as custom chat wallpaper |
+| `.dp` (reply image) | Set replied photo as profile photo (DP) |
+| `.reset wp` / `.resetwp` | Reset chat wallpaper to default |
+| `.chatbubble1` ... `.chatbubble10` | Set chat bubble color style preset (1-10) |
+| `.reset bubble` / `.resetbubble` | Reset chat bubble style to default |

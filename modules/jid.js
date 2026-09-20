@@ -46,7 +46,7 @@ function formatResult(res, inputLabel) {
         if (res.subscribers) lines.push(`👥 *Subscribers:* ${res.subscribers}`);
     }
     lines.push('');
-    lines.push('Provided by 𝙒𝙍𝘼𝙄𝙏🇭');
+    lines.push('Provided by 𝗪𝗥𝗜𝗧🇭');
     return lines.join('\n');
 }
 
@@ -60,7 +60,7 @@ function formatChannels(channels, note) {
     }
     if (note) lines.push(`_${note}_`);
     lines.push('');
-    lines.push('Provided by 𝙒𝙍𝘼𝙄𝙏🇭');
+    lines.push('Provided by 𝗪𝗥𝗜𝗧🇭');
     return lines.join('\n');
 }
 
@@ -76,7 +76,7 @@ function formatGroupMembers(members, subject) {
         if (m.lid) lines.push(`  LID: *${m.lid}*`);
     }
     lines.push('');
-    lines.push('Provided by 𝙒𝙍𝘼𝙄𝙏🇭');
+    lines.push('Provided by 𝗪𝗥𝗜𝗧🇭');
     return lines.join('\n');
 }
 

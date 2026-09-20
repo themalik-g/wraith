@@ -158,6 +158,22 @@ const REGISTRY = [
     ],
   },
   {
+    id: 'theme',
+    aliases: ['themes', 'wallpaper', 'bubbles'],
+    icon: '🎨',
+    title: 'THEME & DISPLAY',
+    commands: [
+      c('.theme1 ... .theme10'),
+      c('.reset theme'),
+      c('.wp1 ... .wp10'),
+      c('.wp (reply photo)'),
+      c('.dp (reply photo)'),
+      c('.reset wp'),
+      c('.chatbubble1 ... .chatbubble10'),
+      c('.reset bubble'),
+    ],
+  },
+  {
     id: 'textmaker',
     aliases: ['ephoto'],
     icon: '🎨',

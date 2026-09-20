@@ -43,4 +43,4 @@ Generates a 6-slide dark neon styled technical deck focusing on key microservice
 ## Features & System Rules
 - **Non-overridable Gemini System Prompt**: Always returns structured JSON (`responseSchema`) adhering strictly to presentation rules.
 - **In-Memory Rendering**: `.pptx` presentations are built entirely in Node memory (`Buffer`) with no temporary files written to disk.
-- **Attribution**: Every presentation includes clean headers/footers and `Provided by 𝕎ℝ𝔸I𝕋ℍ` attribution.
+- **Attribution**: Every presentation includes clean headers/footers and `Provided by 𝗪𝗥𝗜𝗧🇭` attribution.
