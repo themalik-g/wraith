@@ -65,6 +65,21 @@ If the code still fails:
 
 ---
 
+## `Assertion failed: thread_create` / Node Platform Crash
+
+**Symptom:** Bot crashes with `node_platform.cc:68 Assertion failed: thread_create(t.get(), start_thread, this))` on Pterodactyl panels, Docker, or limited VPS containers.
+
+**Cause:** The host or container limits the maximum number of processes/threads (`NPROC` or CGroup `pids.max`). When running multiple sessions, V8 and libuv background thread allocation exceeds the container thread ceiling.
+
+**Fix:**
+WRAITH defaults `--v8-pool-size=2` and `UV_THREADPOOL_SIZE=2` for spawned session processes. If running many concurrent sessions on tight host limits, set `UV_THREADPOOL_SIZE` and `WRAITH_V8_POOL_SIZE` in your environment or `.env`:
+```bash
+UV_THREADPOOL_SIZE=2
+WRAITH_V8_POOL_SIZE=2
+```
+
+---
+
 ## Schedule says "not enough arguments"
 
 **Check:**
