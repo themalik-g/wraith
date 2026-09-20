@@ -6,9 +6,9 @@
 
 // ─────────────────────────────────────────────
 // 1. LOAD .env FIRST — before ANY other import.
-//    index.js (bootstrap) already cloned the repo and ran
-//    `npm install`, and spawns us with cwd = <repo>, so
-//    `dotenv` resolves correctly from ./node_modules/dotenv.
+//    index.js already cloned the repo and ran `npm install`,
+//    and spawns us with cwd = <repo>, so `dotenv` resolves
+//    from ./node_modules/dotenv.
 // ─────────────────────────────────────────────
 try {
   await import('dotenv/config');
@@ -22,7 +22,7 @@ try {
 }
 
 // ─────────────────────────────────────────────
-// 2. Now safe to import everything else.
+// 2. Everything else
 // ─────────────────────────────────────────────
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -31,7 +31,7 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 // ─────────────────────────────────────────────
-// 3. Container-safe defaults (Pterodactyl / low-NPROC)
+// 3. Container-safe defaults
 // ─────────────────────────────────────────────
 if (!process.env.UV_THREADPOOL_SIZE) {
   process.env.UV_THREADPOOL_SIZE = '2';
@@ -46,9 +46,12 @@ const LINK_WAIT_MS = 300_000;
 const MAX_RESTARTS = 10;
 const ADD_MODE =
   process.argv.includes('--add') || process.argv.includes('--setup');
+const PROMPT_TIMEOUT_MS = Number(
+  process.env.WRAITH_PROMPT_TIMEOUT_MS || 20_000
+);
 
 // ─────────────────────────────────────────────
-// 4. Styling helpers (defined before use)
+// 4. Styling helpers
 // ─────────────────────────────────────────────
 const dye = (c, s) => `\x1b[${c}m${s}\x1b[0m`;
 const grey = s => dye(90, s);
@@ -70,7 +73,6 @@ const veil = () => {
 
 // ─────────────────────────────────────────────
 // 5. Configured phone number resolution
-//    Priority: CLI arg  >  env  >  null
 // ─────────────────────────────────────────────
 const PHONE_RE = /^\d{10,15}$/;
 
@@ -100,7 +102,6 @@ const CONFIGURED_PHONE = resolveConfiguredPhone();
 // 6. Repo / instance helpers
 // ─────────────────────────────────────────────
 function repoRoot() {
-  // If start.js sits next to us, we ARE the repo.
   if (fs.existsSync(path.join(__dirname, 'start.js'))) return __dirname;
 
   const dir = path.join(__dirname, 'wraith');
@@ -207,6 +208,11 @@ let rl = null;
 
 const ask = q => new Promise(res => rl.question(q, a => res(a.trim())));
 
+// ─────────────────────────────────────────────
+// Prompt for a WhatsApp number.
+// If CONFIGURED_PHONE is set, auto-fallback to it
+// after PROMPT_TIMEOUT_MS of no input.
+// ─────────────────────────────────────────────
 async function promptNumber(label = 'number') {
   console.log();
   console.log(violet(` ╭─ link a ${label} ─────────────────────╮`));
@@ -216,17 +222,62 @@ async function promptNumber(label = 'number') {
       grey(' country code + number · 923001234567 ') +
       violet('│')
   );
+  if (CONFIGURED_PHONE) {
+    console.log(
+      violet(' │') +
+        yellow(
+          ` ⏱ no input in ${PROMPT_TIMEOUT_MS / 1000}s → +${CONFIGURED_PHONE} `
+        ) +
+        violet('│')
+    );
+  }
   console.log(violet(' ╰────────────────────────────────────────╯'));
 
-  while (true) {
-    const raw = await ask(violet(' ❯ ') + cyan(`${label}: `));
-    const digits = raw.replace(/\D/g, '');
-    if (!/^\d{10,15}$/.test(digits)) {
-      console.log(red(' ✖ must be 10–15 digits'));
-      continue;
+  return new Promise(resolve => {
+    let settled = false;
+    let timer = null;
+
+    const finish = num => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(num);
+    };
+
+    if (CONFIGURED_PHONE) {
+      timer = setTimeout(() => {
+        if (settled) return;
+        process.stdout.write('\n');
+        say(
+          yellow(
+            `⏱ no input in ${PROMPT_TIMEOUT_MS / 1000}s — auto-pairing +${CONFIGURED_PHONE}`
+          )
+        );
+        finish(CONFIGURED_PHONE);
+      }, PROMPT_TIMEOUT_MS);
     }
-    return digits;
-  }
+
+    (async () => {
+      while (!settled) {
+        let raw;
+        try {
+          raw = await ask(violet(' ❯ ') + cyan(`${label}: `));
+        } catch {
+          if (CONFIGURED_PHONE) finish(CONFIGURED_PHONE);
+          return;
+        }
+        if (settled) return;
+
+        const digits = raw.replace(/\D/g, '');
+        if (!/^\d{10,15}$/.test(digits)) {
+          console.log(red(' ✖ must be 10–15 digits'));
+          continue;
+        }
+        finish(digits);
+        return;
+      }
+    })();
+  });
 }
 
 function spawnSession(root, id, number) {
@@ -236,7 +287,6 @@ function spawnSession(root, id, number) {
   if (process.env.WRAITH_V8_POOL_SIZE) {
     args.push(`--v8-pool-size=${process.env.WRAITH_V8_POOL_SIZE}`);
   }
-  // Spawn the real worker from inside the repo so node_modules resolves.
   args.push(path.join(root, 'start.js'), '--session', id);
   if (number) args.push('--number', number);
 
@@ -432,9 +482,6 @@ function unmuteAll() {
   for (const rec of children.values()) rec.unmute?.();
 }
 
-// ─────────────────────────────────────────────
-// 8. Link one session (supports preset number)
-// ─────────────────────────────────────────────
 async function linkOne(root, label, presetNumber = null) {
   let number = presetNumber;
 
@@ -500,9 +547,6 @@ async function wizard(root) {
   }
 }
 
-// ─────────────────────────────────────────────
-// 9. Graceful shutdown
-// ─────────────────────────────────────────────
 function quiet(sig) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -519,7 +563,7 @@ process.on('SIGINT', () => quiet('SIGINT'));
 process.on('SIGTERM', () => quiet('SIGTERM'));
 
 // ─────────────────────────────────────────────
-// 10. Main entry
+// 8. Main entry
 // ─────────────────────────────────────────────
 (async () => {
   try {
