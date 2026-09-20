@@ -12,6 +12,11 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
+// Prevent thread creation assertions in low-NPROC/PID container environments (e.g. Pterodactyl panels)
+if (!process.env.UV_THREADPOOL_SIZE) {
+  process.env.UV_THREADPOOL_SIZE = '2';
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const SOURCE          = 'https://github.com/themalik-g/wraith.git';
@@ -139,11 +144,20 @@ async function promptNumber(label = 'number') {
 function spawnSession(root, id, number) {
   const dir = makeInstance(root, id);
   // ★ no --preserve-symlinks needed anymore; --expose-gc enables the RAM sweeper in start.js
-  const args = ['--max-old-space-size=256', '--expose-gc', 'start.js', '--session', id];
+  const v8PoolSize = process.env.WRAITH_V8_POOL_SIZE || '2';
+  const args = [
+    `--v8-pool-size=${v8PoolSize}`,
+    '--max-old-space-size=256',
+    '--expose-gc',
+    'start.js',
+    '--session',
+    id
+  ];
   if (number) args.push('--number', number);
 
   const env = {
     ...process.env,
+    UV_THREADPOOL_SIZE: process.env.UV_THREADPOOL_SIZE || '2',
     WRAITH_REPO_ROOT: root,
     WRAITH_SESSION_ID: id,
     WRAITH_DATA_DIR: dir

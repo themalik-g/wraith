@@ -90,6 +90,22 @@ Enter your phone number when prompted, then open WhatsApp on your phone:
 
 ---
 
+## Pterodactyl & Container Hosting Notes
+
+When running WRAITH on containerized game/bot panels like Pterodactyl, the container may enforce strict thread or process limits (`pids.max` or `NPROC`).
+
+To prevent Node `thread_create` assertion crashes when running multiple sessions simultaneously, WRAITH configures lightweight background thread defaults for spawned session processes:
+- `UV_THREADPOOL_SIZE=2`
+- `--v8-pool-size=2`
+
+You can customize these variables in your panel environment settings or `.env` if needed:
+```env
+UV_THREADPOOL_SIZE=2
+WRAITH_V8_POOL_SIZE=2
+```
+
+---
+
 ## Backup & Restoration
 
 To create a backup:
