@@ -139,6 +139,9 @@ const REGISTRY = [
       c('.dl <url>'),
       c('.dl audio <url>'),
       c('.dl mp3 <url>'),
+      c('.play <query>'),
+      c('.ytv <query/url>'),
+      c('.ytdl <url>'),
       c('.pdl <post-url>'),
       c('.pdlzip <post-url>'),
       c('.download <url>'),
@@ -297,6 +300,7 @@ const REGISTRY = [
     icon: '💬',
     title: 'CHAT CONTROLS',
     commands: [
+      c('.disappearing off|24h|7d|24d|90d'),
       c('.mute 8h|1d|forever', true),
       c('.unmute', true),
       c('.archive', true),
