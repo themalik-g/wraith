@@ -1,12 +1,22 @@
 // ─────────────────────────────────────────────
 // WRAITH · modules/help.js
-// Clean single-message plain text list menu
+// Clean single-message plain text list menu with box layout
 // ─────────────────────────────────────────────
 import { isOwner } from '../core/identity.js';
 import { getPrefix } from '../core/settings.js';
 import { NEWSLETTER_CONTEXT } from '../lib/buttons.js';
 
 const c = (cmd, ownerOnly = false) => ({ cmd, ownerOnly });
+
+const SMALL_CAPS = {
+  a: 'ᴀ', b: 'ʙ', c: 'ᴄ', d: 'ᴅ', e: 'ᴇ', f: 'ꜰ', g: 'ɢ', h: 'ʜ', i: 'ɪ',
+  j: 'ᴊ', k: 'ᴋ', l: 'ʟ', m: 'ᴍ', n: 'ɴ', o: 'ᴏ', p: 'ᴘ', q: 'ꞯ', r: 'ʀ',
+  s: 'ꜱ', t: 'ᴛ', u: 'ᴜ', v: 'ᴠ', w: 'ᴡ', x: 'x', y: 'ʏ', z: 'ᴢ'
+};
+
+function toSmallCaps(str) {
+  return str.toLowerCase().split('').map((ch) => SMALL_CAPS[ch] || ch).join('');
+}
 
 const REGISTRY = [
   {
@@ -150,43 +160,43 @@ const REGISTRY = [
     title: 'TEXTMAKER / EPHOTO',
     commands: [
       c('.textmaker <effect> <text>'),
-      c('.metallic <text>'),
-      c('.ice <text>'),
-      c('.snow <text>'),
-      c('.impressive <text>'),
-      c('.matrix <text>'),
-      c('.light <text>'),
       c('.neon <text>'),
-      c('.devil <text>'),
-      c('.purple <text>'),
-      c('.thunder <text>'),
-      c('.leaves <text>'),
-      c('.1917 <text>'),
-      c('.arena <text>'),
-      c('.hacker <text>'),
-      c('.sand <text>'),
-      c('.blackpink <text>'),
       c('.glitch <text>'),
-      c('.fire <text>'),
       c('.3dgold <text>'),
       c('.marvel <text1 ; text2>'),
       c('.pornhub <text1 ; text2>'),
+      c('.cyberpunk <text>'),
       c('.graffiti <text>'),
+      c('.blackpink <text>'),
       c('.naruto <text>'),
+      c('.galaxy <text>'),
       c('.blood <text>'),
       c('.hologram <text>'),
+      c('.matrix <text>'),
+      c('.slice <text>'),
       c('.luxury <text>'),
+      c('.vintage <text>'),
+      c('.lightglow <text>'),
+      c('.sand <text>'),
+      c('.water <text>'),
+      c('.fire <text>'),
+      c('.metallic <text>'),
+      c('.space <text>'),
+      c('.neonlight <text>'),
       c('.glowing <text>'),
+      c('.captainamerica <text1 ; text2>'),
       c('.wall <text>'),
+      c('.paper <text>'),
       c('.circuit <text>'),
       c('.neondevil <text>'),
+      c('.dragon <text>'),
     ],
   },
   {
     id: 'social',
     aliases: ['socialsearch'],
     icon: '🔍',
-    title: 'SOCIAL SEARCH & DL',
+    title: 'SOCIAL SEARCH / DOWNLOAD',
     commands: [
       c('.ig <username/url>'),
       c('.tiktok <username/url>'),
@@ -310,24 +320,53 @@ function visibleRegistry(isOwnerUser) {
     .filter((g) => g.commands.length > 0);
 }
 
-function renderAllPlainText(prefix, isOwnerUser) {
-  const groups = visibleRegistry(isOwnerUser);
-  const lines = [];
+function renderHeaderBox(prefix, isOwnerUser) {
+  const ownerText = isOwnerUser ? toSmallCaps('COMMANDS ARE OWNER-ONLY') : toSmallCaps('COMMANDS ARE PUBLIC');
+  const guideCmd = applyPrefix('.ᴄᴏᴍᴍᴀɴᴅ ꜰᴏʀ ɢᴜɪᴅᴇ', prefix);
+  return [
+    '┌──❮ ⓌⓇⒶⒾⓉⒽ ❯',
+    '│',
+    `│ ${ownerText}`,
+    `│ ${toSmallCaps('PREFIX')} · ${prefix}`,
+    `│ ℹ️ ${guideCmd}`,
+    '│',
+    '└─────────────┈⚝',
+  ].join('\n');
+}
 
-  lines.push('🤖 *𝕎ℝ𝔸𝕀𝕋ℍ COMMAND MENU*');
-  lines.push(`• *Prefix:* ${prefix}`);
-  lines.push('');
+function renderCategoryBox(group, prefix, isOwnerUser) {
+  const visible = isOwnerUser
+    ? group.commands
+    : group.commands.filter((x) => !x.ownerOnly);
 
-  for (const group of groups) {
-    lines.push(`${group.icon} *${group.title}*`);
-    for (const item of group.commands) {
-      lines.push(`  • ${applyPrefix(item.cmd, prefix)}`);
-    }
-    lines.push('');
+  if (!visible.length) return null;
+
+  const lines = [
+    `┌──❮ ${group.icon} ${toSmallCaps(group.title)} ❯`,
+    '│',
+  ];
+
+  for (const item of visible) {
+    lines.push(`│ ◈ ${applyPrefix(item.cmd, prefix)}`);
   }
 
-  lines.push('Provided by 𝕎ℝ𝔸𝕀𝕋ℍ');
+  lines.push('│');
+  lines.push('└─────────────┈⚝');
+
   return lines.join('\n');
+}
+
+function renderAllPlainText(prefix, isOwnerUser) {
+  const header = renderHeaderBox(prefix, isOwnerUser);
+  const groups = visibleRegistry(isOwnerUser);
+  const categoryBoxes = [];
+
+  for (const group of groups) {
+    const box = renderCategoryBox(group, prefix, isOwnerUser);
+    if (box) categoryBoxes.push(box);
+  }
+
+  return [header, ...categoryBoxes].join('\n');
 }
 
 function findGroup(name) {
@@ -369,11 +408,9 @@ export async function helpCommand(sock, chat, msg, args) {
       );
     }
 
-    const visible = isOwnerUser
-      ? group.commands
-      : group.commands.filter((x) => !x.ownerOnly);
+    const box = renderCategoryBox(group, prefix, isOwnerUser);
 
-    if (!visible.length) {
+    if (!box) {
       return await sock.sendMessage(
         chat,
         { text: `🔒 Category *${group.title}* is owner-only.`, contextInfo: NEWSLETTER_CONTEXT },
@@ -381,15 +418,11 @@ export async function helpCommand(sock, chat, msg, args) {
       );
     }
 
-    const lines = [`${group.icon} *${group.title}*`, ''];
-    for (const item of visible) {
-      lines.push(`  • ${applyPrefix(item.cmd, prefix)}`);
-    }
-    lines.push('\nProvided by 𝕎ℝ𝔸𝕀𝕋ℍ');
+    const text = [renderHeaderBox(prefix, isOwnerUser), box].join('\n');
 
     return await sock.sendMessage(
       chat,
-      { text: lines.join('\n'), contextInfo: NEWSLETTER_CONTEXT },
+      { text, contextInfo: NEWSLETTER_CONTEXT },
       { quoted: msg }
     );
   } catch (e) {
