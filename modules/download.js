@@ -10,7 +10,7 @@ import PQueue from 'p-queue';
 import ffmpegPath from 'ffmpeg-static';
 import { fileTypeFromBuffer } from 'file-type';
 import { postfetch, download as pfDownload, archive as pfArchive, detect as pfDetect } from '@postfetch/core';
-import { sendInteractive, createQuickReply } from '../lib/buttons.js';
+import { sendInteractive, createQuickReply, sendWithCta } from '../lib/buttons.js';
 import { getPrefix } from '../core/settings.js';
 
 const TMP = path.join(os.tmpdir(), 'wraith-dl');
@@ -426,7 +426,7 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
 
 export async function ytdlCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
-  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.dl <url or query>`' }, { quoted: msg });
+  if (!query) return sendWithCta(sock, chat, '❌ Usage: `.dl <url or query>`', { quoted: msg });
 
   const isUrl = /^https?:\/\//i.test(query);
   const isDirectMode = /\b(audio|mp3|video|zip|hd|sd)\b/i.test(query);
@@ -455,16 +455,14 @@ export async function ytdlCommand(sock, chat, msg, args) {
 
 export async function mp3Command(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
-  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.mp3 <url or query>`' }, { quoted: msg });
+  if (!query) return sendWithCta(sock, chat, '❌ Usage: `.mp3 <url or query>`', { quoted: msg });
   return queue.add(() => downloadMedia(sock, chat, msg, query, true));
 }
 
 export async function pdlCommand(sock, chat, msg, args) {
   const input = (args || []).join(' ').trim();
   if (!input) {
-    return sock.sendMessage(chat, {
-      text: '📦 *pdl* — Download Post/Carousel Media\n\nUsage:\n• `.pdl <post-url>` (Download images/videos directly)\n• `.pdl <post-url> zip` or `.pdlzip <post-url>` (Download as ZIP archive)'
-    }, { quoted: msg });
+    return sendWithCta(sock, chat, '📦 *pdl* — Download Post/Carousel Media\n\nUsage:\n• `.pdl <post-url>` (Download images/videos directly)\n• `.pdl <post-url> zip` or `.pdlzip <post-url>` (Download as ZIP archive)', { quoted: msg });
   }
 
   let asZip = false;
@@ -480,9 +478,7 @@ export async function pdlCommand(sock, chat, msg, args) {
 export async function pdlzipCommand(sock, chat, msg, args) {
   const url = (args || []).join(' ').trim();
   if (!url) {
-    return sock.sendMessage(chat, {
-      text: '📦 *pdlzip* — Download Post/Carousel Media as ZIP\n\nUsage: `.pdlzip <post-url>`'
-    }, { quoted: msg });
+    return sendWithCta(sock, chat, '📦 *pdlzip* — Download Post/Carousel Media as ZIP\n\nUsage: `.pdlzip <post-url>`', { quoted: msg });
   }
   return queue.add(() => downloadPostMediaDirect(sock, chat, msg, url, true));
 }
@@ -490,46 +486,46 @@ export async function pdlzipCommand(sock, chat, msg, args) {
 // ── Specific Platform Shortcut Downloader Commands ──────────────────────────
 export async function twitterCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
-  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.twitter <tweet-url>` or `.tw <tweet-url>`' }, { quoted: msg });
+  if (!query) return sendWithCta(sock, chat, '❌ Usage: `.twitter <tweet-url>` or `.tw <tweet-url>`', { quoted: msg });
   if (isPostUrl(query)) return pdlCommand(sock, chat, msg, args);
   return ytdlCommand(sock, chat, msg, args);
 }
 
 export async function pinterestCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
-  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.pinterest <pin-url>` or `.pin <pin-url>`' }, { quoted: msg });
+  if (!query) return sendWithCta(sock, chat, '❌ Usage: `.pinterest <pin-url>` or `.pin <pin-url>`', { quoted: msg });
   if (isPostUrl(query)) return pdlCommand(sock, chat, msg, args);
   return ytdlCommand(sock, chat, msg, args);
 }
 
 export async function threadsCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
-  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.threads <threads-url>`' }, { quoted: msg });
+  if (!query) return sendWithCta(sock, chat, '❌ Usage: `.threads <threads-url>`', { quoted: msg });
   if (isPostUrl(query)) return pdlCommand(sock, chat, msg, args);
   return ytdlCommand(sock, chat, msg, args);
 }
 
 export async function redditCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
-  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.reddit <reddit-post-url>`' }, { quoted: msg });
+  if (!query) return sendWithCta(sock, chat, '❌ Usage: `.reddit <reddit-post-url>`', { quoted: msg });
   if (isPostUrl(query)) return pdlCommand(sock, chat, msg, args);
   return ytdlCommand(sock, chat, msg, args);
 }
 
 export async function soundcloudCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
-  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.soundcloud <url or query>` or `.sc <url or query>`' }, { quoted: msg });
+  if (!query) return sendWithCta(sock, chat, '❌ Usage: `.soundcloud <url or query>` or `.sc <url or query>`', { quoted: msg });
   return mp3Command(sock, chat, msg, args);
 }
 
 export async function spotifyCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
-  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.spotify <url or track name>` or `.spot <url or track name>`' }, { quoted: msg });
+  if (!query) return sendWithCta(sock, chat, '❌ Usage: `.spotify <url or track name>` or `.spot <url or track name>`', { quoted: msg });
   return mp3Command(sock, chat, msg, args);
 }
 
 export async function youtubeCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
-  if (!query) return sock.sendMessage(chat, { text: '❌ Usage: `.youtube <url or query>` or `.yt <url or query>`' }, { quoted: msg });
+  if (!query) return sendWithCta(sock, chat, '❌ Usage: `.youtube <url or query>` or `.yt <url or query>`', { quoted: msg });
   return ytdlCommand(sock, chat, msg, args);
 }

@@ -8,6 +8,7 @@ import { isOwner } from '../core/identity.js';
 import { withTempFile, downloadToFile, BROWSER_USER_AGENT } from '../lib/net.js';
 import { getKey } from '../core/keys.js';
 import { ytdlCommand, isPostUrl, downloadPostMediaDirect } from './download.js';
+import { sendWithCta } from '../lib/buttons.js';
 
 function ownerOnly(sock, chat, msg) {
     const from = msg.key.participant || msg.key.remoteJid;
@@ -118,7 +119,7 @@ async function socialSearch(sock, chat, msg, args, fn, label) {
         }
         if (ownerOnly(sock, chat, msg)) return;
         const username = input.replace(/^@/, '').trim();
-        if (!username) return sock.sendMessage(chat, { text: `❌ Usage: \`.${label} <username or url>\`` }, { quoted: msg });
+        if (!username) return sendWithCta(sock, chat, `❌ Usage: \`.${label} <username or url>\``, { quoted: msg });
         const r = await fn(username);
         r.ok = r.ok || false;
         if (!r.ok) {

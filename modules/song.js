@@ -5,6 +5,7 @@
 // ─────────────────────────────────────────────
 import PQueue from 'p-queue';
 import { fetchAudioFromAnySource } from '../lib/music-sources.js';
+import { sendWithCta } from '../lib/buttons.js';
 
 const MAX_BYTES = 15 * 1024 * 1024;
 const queue = new PQueue({ concurrency: 1 });
@@ -19,7 +20,7 @@ async function edit(sock, chat, key, text) {
 export async function songCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
   if (!query) {
-    return sock.sendMessage(chat, { text: '❌ Usage: `.song <song name>`' }, { quoted: msg });
+    return sendWithCta(sock, chat, '❌ Usage: `.song <song name>`', { quoted: msg });
   }
 
   return queue.add(async () => {
