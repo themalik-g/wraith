@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import PQueue from 'p-queue';
-import { ytdlp, getTmpDir, configureDownload, cleanFile, cleanOldTmpFiles } from '../lib/ytdlp.js';
+import { ytdlp, getTmpDir, configureDownload, cleanFile, cleanPrefix, cleanOldTmpFiles } from '../lib/ytdlp.js';
 import { sendWithCta } from '../lib/buttons.js';
 
 const queue = new PQueue({ concurrency: 1 });
@@ -60,7 +60,6 @@ export async function playCommand(sock, chat, msg, args) {
 
       const stat = fs.statSync(downloadedPath);
       if (stat.size > MAX_AUDIO_BYTES) {
-        cleanFile(downloadedPath);
         throw new Error(`Audio file size (${(stat.size / (1024 * 1024)).toFixed(1)} MB) exceeds WhatsApp limit (50 MB)`);
       }
 
@@ -74,13 +73,14 @@ export async function playCommand(sock, chat, msg, args) {
         ptt: false,
       }, { quoted: msg });
 
-      cleanFile(downloadedPath);
       await edit(sock, chat, status, `✅ *Audio downloaded successfully*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
     } catch (e) {
       console.error('[playCommand]', e);
       await edit(sock, chat, status, `❌ *Play failed:* ${e.message}`);
       await react(sock, chat, msg, '❌');
+    } finally {
+      cleanPrefix(filePrefix, outputDir);
     }
   });
 }
@@ -88,7 +88,7 @@ export async function playCommand(sock, chat, msg, args) {
 export async function ytvCommand(sock, chat, msg, args) {
   const query = (args || []).join(' ').trim();
   if (!query) {
-    return sendWithCta(sock, chat, '🎬 *Usage:* `.ytv <video title or url>`', { quoted: msg });
+    return sendWithCta(sock, chat, '🎬 *Usage:* `.ytv <video title or url>` or `.video <video title or url>`', { quoted: msg });
   }
 
   return queue.add(async () => {
@@ -103,14 +103,26 @@ export async function ytvCommand(sock, chat, msg, args) {
       const target = resolveTarget(query);
       await edit(sock, chat, status, `🎬 *Downloading video with ytdlp-nodejs…*`);
 
-      const dl = ytdlp.download(target);
-      configureDownload(dl, outputDir);
-
-      const res = await dl
-        .filter('mergevideo')
-        .type('mp4')
-        .output(outputTemplate)
-        .run();
+      let res;
+      try {
+        const dl = ytdlp.download(target);
+        configureDownload(dl, outputDir);
+        res = await dl
+          .filter('mergevideo')
+          .type('mp4')
+          .format('bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best')
+          .output(outputTemplate)
+          .run();
+      } catch (err1) {
+        // Fallback to default mergevideo if resolution filter fails on specific streams
+        const dlFallback = ytdlp.download(target);
+        configureDownload(dlFallback, outputDir);
+        res = await dlFallback
+          .filter('mergevideo')
+          .type('mp4')
+          .output(outputTemplate)
+          .run();
+      }
 
       const downloadedPath = res?.filePaths?.[0] || (res?.filePath) || null;
       if (!downloadedPath || !fs.existsSync(downloadedPath)) {
@@ -119,7 +131,6 @@ export async function ytvCommand(sock, chat, msg, args) {
 
       const stat = fs.statSync(downloadedPath);
       if (stat.size > MAX_VIDEO_BYTES) {
-        cleanFile(downloadedPath);
         throw new Error(`Video file size (${(stat.size / (1024 * 1024)).toFixed(1)} MB) exceeds 400 MB cap limit`);
       }
 
@@ -133,16 +144,19 @@ export async function ytvCommand(sock, chat, msg, args) {
         caption: `🎬 *YouTube Video*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`,
       }, { quoted: msg });
 
-      cleanFile(downloadedPath);
       await edit(sock, chat, status, `✅ *Video downloaded successfully*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
     } catch (e) {
       console.error('[ytvCommand]', e);
       await edit(sock, chat, status, `❌ *YTV failed:* ${e.message}`);
       await react(sock, chat, msg, '❌');
+    } finally {
+      cleanPrefix(filePrefix, outputDir);
     }
   });
 }
+
+export const videoCommand = ytvCommand;
 
 export async function ytdlCommand(sock, chat, msg, args) {
   const url = (args || []).join(' ').trim();
@@ -161,14 +175,25 @@ export async function ytdlCommand(sock, chat, msg, args) {
     try {
       await edit(sock, chat, status, `📥 *Processing YouTube link…*`);
 
-      const dl = ytdlp.download(url);
-      configureDownload(dl, outputDir);
-
-      const res = await dl
-        .filter('mergevideo')
-        .type('mp4')
-        .output(outputTemplate)
-        .run();
+      let res;
+      try {
+        const dl = ytdlp.download(url);
+        configureDownload(dl, outputDir);
+        res = await dl
+          .filter('mergevideo')
+          .type('mp4')
+          .format('bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best')
+          .output(outputTemplate)
+          .run();
+      } catch (err1) {
+        const dlFallback = ytdlp.download(url);
+        configureDownload(dlFallback, outputDir);
+        res = await dlFallback
+          .filter('mergevideo')
+          .type('mp4')
+          .output(outputTemplate)
+          .run();
+      }
 
       const downloadedPath = res?.filePaths?.[0] || (res?.filePath) || null;
       if (!downloadedPath || !fs.existsSync(downloadedPath)) {
@@ -177,7 +202,6 @@ export async function ytdlCommand(sock, chat, msg, args) {
 
       const stat = fs.statSync(downloadedPath);
       if (stat.size > MAX_VIDEO_BYTES) {
-        cleanFile(downloadedPath);
         throw new Error(`Downloaded file size (${(stat.size / (1024 * 1024)).toFixed(1)} MB) exceeds 400 MB cap limit`);
       }
 
@@ -191,13 +215,14 @@ export async function ytdlCommand(sock, chat, msg, args) {
         caption: `📥 *YouTube Download*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`,
       }, { quoted: msg });
 
-      cleanFile(downloadedPath);
       await edit(sock, chat, status, `✅ *Download complete*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
     } catch (e) {
       console.error('[ytdlCommand]', e);
       await edit(sock, chat, status, `❌ *YTDL failed:* ${e.message}`);
       await react(sock, chat, msg, '❌');
+    } finally {
+      cleanPrefix(filePrefix, outputDir);
     }
   });
 }

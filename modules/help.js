@@ -142,6 +142,7 @@ const REGISTRY = [
       c('.dl mp3 <url>'),
       c('.play <query>'),
       c('.ytv <query/url>'),
+      c('.video <query/url>'),
       c('.ytdl <url>'),
       c('.pdl <post-url>'),
       c('.pdlzip <post-url>'),

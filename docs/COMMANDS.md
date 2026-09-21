@@ -74,7 +74,8 @@ All commands use the configurable prefix (default: `.`). In **private mode**, co
 | Command | Description |
 |---|---|
 | `.play <query>` | Search YouTube and download audio in MP3 format using `ytdlp-nodejs` |
-| `.ytv <query\|url>` | Search or download video from YouTube (up to 400 MB cap) using `ytdlp-nodejs` |
+| `.ytv <query\|url>` | Search or download video from YouTube in 360p/480p SD format (up to 400 MB cap) using `ytdlp-nodejs` |
+| `.video <query\|url>` | Alias for `.ytv` — search or download video from YouTube in 360p/480p SD format |
 | `.ytdl <url>` | Direct YouTube video/audio downloader using `ytdlp-nodejs` |
 | `.dl <url>` | Download video, audio, or post carousel (`@postfetch/core` + `yt-dlp`) |
 | `.pdl <post-url>` | Download post/carousel media items directly via `@postfetch/core` |
