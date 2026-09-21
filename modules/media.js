@@ -158,7 +158,7 @@ export async function bookCommand(sock, chat, msg, args) {
         chat,
         {
           body: lines.join('\n'),
-          footer: `Source: ${r.source} · Provided by 𝗪𝗥𝗜𝗧🇭`,
+          footer: `Source: ${r.source} · Provided by 𝗪𝗥𝗔𝗜𝗧🇭`,
           buttons,
         },
         { quoted: msg }
@@ -374,12 +374,12 @@ export async function coupleppCommand(sock, chat, msg, args) {
       try {
         await sock.sendMessage(chat, {
           image: { url: p.male },
-          caption: `💞 *Couple PP (Pair ${i + 1} - #${p.num})* · Male\n\nProvided by 𝗪𝗥𝗜𝗧🇭`,
+          caption: `💞 *Couple PP (Pair ${i + 1} - #${p.num})* · Male\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`,
         }, i === 0 ? { quoted: msg } : undefined);
 
         await sock.sendMessage(chat, {
           image: { url: p.female },
-          caption: `💞 *Couple PP (Pair ${i + 1} - #${p.num})* · Female\n\nProvided by 𝗪𝗥𝗜𝗧🇭`,
+          caption: `💞 *Couple PP (Pair ${i + 1} - #${p.num})* · Female\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`,
         });
         sent++;
       } catch (err) {

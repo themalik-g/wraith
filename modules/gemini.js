@@ -93,7 +93,7 @@ export async function geminiCommand(sock, chat, msg, args) {
       throw new Error('Unable to generate AI text response at this time.');
     }
 
-    const replyText = `🤖 *Gemini AI*\n\n${aiResponse}\n\nProvided by 𝗪𝗥𝗜𝗧🇭`;
+    const replyText = `🤖 *Gemini AI*\n\n${aiResponse}\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`;
 
     await sock.sendMessage(chat, {
       text: replyText,
@@ -211,7 +211,7 @@ export async function photoCommand(sock, chat, msg, args) {
 
     await sock.sendMessage(chat, {
       image: imageBuffer,
-      caption: `📸 *AI Photo Generator*\n💬 _${prompt}_\n\nProvided by 𝗪𝗥𝗜𝗧🇭`
+      caption: `📸 *AI Photo Generator*\n💬 _${prompt}_\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`
     }, { quoted: msg });
 
     await sock.sendMessage(chat, {

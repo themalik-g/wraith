@@ -56,13 +56,13 @@ import { geminiCommand, photoCommand } from './modules/gemini.js';
 import { pinchatCommand, unpinchatCommand } from './modules/pin.js';
 import { disappearingCommand } from './modules/disappearing.js';
 import { playCommand, ytvCommand, ytdlCommand } from './modules/ytdlp-commands.js';
-import { themeCommand, wpCommand, dpCommand, chatbubbleCommand } from './modules/theme.js';
+import { wpCommand, dpCommand } from './modules/theme.js';
 
 const CRITICAL_COMMANDS = new Set([
   'ghost', 'peek', 'lurk', 'schedule', 'disappearing',
   'kick', 'add', 'promote', 'demote',
   'antilink', 'antispam', 'antisticker',
-  'getjid', 'presence', 'activity',
+  'presence', 'activity',
   'stalk', 'mode', 'prefix', 'update',
   'kickall', 'kickcc', 'setdesc', 'setgpp',
   'approveall', 'declineall', 'leave', 'join',
@@ -298,7 +298,7 @@ export async function dispatch(sock, update, sessionId = 'main') {
         'twitter', 'tw', 'pinterest', 'pin', 'threads', 'reddit', 'soundcloud', 'sc', 'spotify', 'spot', 'youtube', 'yt',
         'gemini', 'photo', 'pinchat', 'unpinchat', 'pdd', 'tag', 'disappearing', 'play', 'ytv', 'ytdl',
         'shorten', 'tinyurl', 'shorturl', 'news', 'hackernews', 'hn', 'wiki', 'wikipedia', 'joke', 'advice', 'fact',
-        'theme', 'themes', 'wp', 'dp', 'chatbubble', 'bubble', 'resettheme', 'resetwp', 'resetbubble'
+        'wp', 'dp', 'resetwp'
       ]);
 
       if (KNOWN.has(verb)) {
@@ -312,21 +312,9 @@ export async function dispatch(sock, update, sessionId = 'main') {
         continue;
       }
 
-      if (/^them(e|se)\d+$/i.test(verb)) {
-        const num = verb.replace(/\D/g, '');
-        await themeCommand(csock, chat, msg, rest, num);
-        continue;
-      }
-
       if (/^wp\d+$/i.test(verb)) {
         const num = verb.replace(/\D/g, '');
         await wpCommand(csock, chat, msg, rest, num);
-        continue;
-      }
-
-      if (/^(chatbubble|bubble)\d+$/i.test(verb)) {
-        const num = verb.replace(/\D/g, '');
-        await chatbubbleCommand(csock, chat, msg, rest, num);
         continue;
       }
 
@@ -341,28 +329,13 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'restart': await restartCommand(csock, chat, msg); break;
           case 'reset': {
             const target = (rest[0] || '').toLowerCase();
-            if (target === 'theme' || target === 'themes') {
-              await themeCommand(csock, chat, msg, rest, 'reset');
-            } else if (target === 'wp' || target === 'wallpaper') {
+            if (target === 'wp' || target === 'wallpaper') {
               await wpCommand(csock, chat, msg, rest, 'reset');
-            } else if (target === 'bubble' || target === 'chatbubble') {
-              await chatbubbleCommand(csock, chat, msg, rest, 'reset');
             } else {
               await restartCommand(csock, chat, msg);
             }
             break;
           }
-          case 'theme':
-          case 'themes':
-            if ((rest[0] || '').toLowerCase() === 'reset') {
-              await themeCommand(csock, chat, msg, rest, 'reset');
-            } else {
-              await themeCommand(csock, chat, msg, rest);
-            }
-            break;
-          case 'resettheme':
-            await themeCommand(csock, chat, msg, rest, 'reset');
-            break;
           case 'wp':
             if ((rest[0] || '').toLowerCase() === 'reset') {
               await wpCommand(csock, chat, msg, rest, 'reset');
@@ -375,17 +348,6 @@ export async function dispatch(sock, update, sessionId = 'main') {
             break;
           case 'resetwp':
             await wpCommand(csock, chat, msg, rest, 'reset');
-            break;
-          case 'chatbubble':
-          case 'bubble':
-            if ((rest[0] || '').toLowerCase() === 'reset') {
-              await chatbubbleCommand(csock, chat, msg, rest, 'reset');
-            } else {
-              await chatbubbleCommand(csock, chat, msg, rest);
-            }
-            break;
-          case 'resetbubble':
-            await chatbubbleCommand(csock, chat, msg, rest, 'reset');
             break;
           case 'song': await songCommand(csock, chat, msg, rest); break;
           case 'play': await playCommand(csock, chat, msg, rest); break;

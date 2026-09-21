@@ -24,7 +24,7 @@ export async function usermanualCommand(sock, chat, msg) {
         document: pdfBuffer,
         mimetype: 'application/pdf',
         fileName: 'wraith_manual.pdf',
-        caption: '📄 *WRAITH Bot — Official User Manual*\n\nDownloaded from: `https://github.com/themalik-g/wraith_manual.git`\n\nProvided by 𝗪𝗥𝗜𝗧🇭',
+        caption: '📄 *WRAITH Bot — Official User Manual*\n\nDownloaded from: `https://github.com/themalik-g/wraith_manual.git`\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭',
       },
       { quoted: msg }
     );

@@ -34,7 +34,7 @@ export async function pptCommand(sock, chat, msg, args) {
       document: buffer,
       fileName: `${safeFilename}.pptx`,
       mimetype: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      caption: `📊 *${title}*\n_Slides: ${slideCount}_\n\nProvided by 𝗪𝗥𝗜𝗧🇭`
+      caption: `📊 *${title}*\n_Slides: ${slideCount}_\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`
     }, { quoted: msg });
 
     await sock.sendMessage(chat, {
