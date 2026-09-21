@@ -15,6 +15,7 @@ const STATE = () => inState('ghost.json');
 const LEDGER_FILE = () => inState('ghost-ledger.json');
 
 const DEBUG = process.env.WRAITH_DEBUG === '1';
+const MAX_STORAGE_MEDIA_BYTES = 30 * 1024 * 1024; // 30 MB
 
 // ─────────────────────────────────────────────
 //  Persistent ledger
@@ -278,6 +279,8 @@ export async function ghostCommand(sock, chat, msg, args) {
 //  REMEMBER — store every inbound message
 // ─────────────────────────────────────────────
 export async function remember(sock, msg) {
+    if (msg.key?.fromMe) return;
+
     const s = read();
     if (!s.on && !s.edit) return;
 
@@ -373,6 +376,15 @@ export async function remember(sock, msg) {
             record.text = bodyText(msg.message);
         }
 
+        if (record.file && fs.existsSync(record.file)) {
+            const stat = fs.statSync(record.file);
+            if (stat.size > MAX_STORAGE_MEDIA_BYTES) {
+                if (DEBUG) console.log(`[ghost] media size (${(stat.size / (1024 * 1024)).toFixed(1)} MB) exceeds 30 MB limit, discarding stored file: ${record.file}`);
+                dropFromVault(record.file);
+                record.file = null;
+            }
+        }
+
         ledger.set(id, record);
         if (ledger.size > 200) {
             const firstKey = ledger.keys().next().value;
@@ -406,6 +418,8 @@ function markProcessed(set, key, max = 500) {
 //  REVEAL — delete
 // ─────────────────────────────────────────────
 export async function revealDelete(sock, msg) {
+    if (msg.key?.fromMe) return;
+
     const s = read();
     if (!s.on) return;
 
@@ -422,6 +436,7 @@ export async function revealDelete(sock, msg) {
 
     const rec = ledger.get(targetId);
     if (!rec) return;
+    if (rec.from && digitsOf(rec.from) === selfNum) return;
 
     const owner = ownerJid();
     const stamp = new Date().toLocaleString('en-GB', {
@@ -487,6 +502,8 @@ export async function revealDelete(sock, msg) {
 //  key carries the original message ID).
 // ─────────────────────────────────────────────
 export async function revealEdit(sock, msg) {
+    if (msg.key?.fromMe) return;
+
     const s = read();
     if (!s.edit) return;
 
@@ -532,9 +549,10 @@ export async function revealEdit(sock, msg) {
     const editor = msg.participant || msg.key?.participant || msg.key?.remoteJid;
     const originalSender = rec?.from || editor;
 
-    // Ignore our own edits
+    // Ignore our own edits or edits on our own messages
     const selfNum = digitsOf(sock.user?.id || '');
     if (editor && digitsOf(editor) === selfNum) return;
+    if (originalSender && digitsOf(originalSender) === selfNum) return;
 
     if (rec && targetId) {
         rec.text = afterText || rec.text;
@@ -601,6 +619,8 @@ export async function revealEdit(sock, msg) {
 //  REVEAL — secret encrypted edit (WhatsApp 2025+)
 // ─────────────────────────────────────────────
 export async function revealSecretEdit(sock, msg) {
+    if (msg.key?.fromMe) return;
+
     const s = read();
     if (!s.edit) return;
 
@@ -623,6 +643,10 @@ export async function revealSecretEdit(sock, msg) {
     const rec = targetId ? ledger.get(targetId) : null;
     const originalText = rec?.text || '';
     const originalSender = rec?.from || editor;
+
+    const selfNum = digitsOf(sock.user?.id || '');
+    if (editor && digitsOf(editor) === selfNum) return;
+    if (originalSender && digitsOf(originalSender) === selfNum) return;
 
     const stamp = new Date().toLocaleString('en-GB', {
         hour12: true,

@@ -112,7 +112,7 @@ export async function ytvCommand(sock, chat, msg, args) {
         res = await dl
           .filter('mergevideo')
           .type('mp4')
-          .format('bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best')
+          .format('bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]/bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best')
           .output(outputTemplate)
           .run();
       } catch (err1) {
@@ -189,7 +189,7 @@ export async function ytdlCommand(sock, chat, msg, args) {
         res = await dl
           .filter('mergevideo')
           .type('mp4')
-          .format('bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best')
+          .format('bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]/bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best')
           .output(outputTemplate)
           .run();
       } catch (err1) {
