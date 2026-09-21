@@ -42,7 +42,7 @@ const REGISTRY = [
   },
   {
     id: 'ghost',
-    icon: '👻',
+    icon: '🎭',
     title: 'GHOST',
     commands: [
       c('.ghost', true),
@@ -162,7 +162,7 @@ const REGISTRY = [
     id: 'display',
     aliases: ['wallpaper', 'wp', 'dp'],
     icon: '🖼️',
-    title: 'DISPLAY & WALLPAPER',
+    title: 'WALLPAPERS',
     commands: [
       c('.wp1 ... .wp10'),
       c('.wp (reply photo)'),
@@ -173,8 +173,8 @@ const REGISTRY = [
   {
     id: 'textmaker',
     aliases: ['ephoto'],
-    icon: '🎨',
-    title: 'TEXTMAKER|EPHOTO',
+    icon: '🪄',
+    title: 'TEXT→PHOTO',
     commands: [
       c('.textmaker <effect> <text>'),
       c('.neon <text>'),
@@ -229,7 +229,7 @@ const REGISTRY = [
     id: 'social',
     aliases: ['socialsearch'],
     icon: '🔍',
-    title: 'SOCIAL SEARCH|DOWNLOAD',
+    title: 'SEARCH|DOWNLOAD',
     commands: [
       c('.ig <username/url>'),
       c('.tiktok <username/url>'),
@@ -239,23 +239,23 @@ const REGISTRY = [
   {
     id: 'group',
     aliases: ['admin', 'groupadmin'],
-    icon: '👥',
+    icon: '👨‍👩‍👧‍👧',
     title: 'GROUP ADMIN',
     commands: [
       c('.open', true),
       c('.close', true),
-      c('.schedule open date am|pm', true),
-      c('.schedule close date am|pm', true),
-      c('.kick (reply/num)', true),
+      c('.schedule open date time', true),
+      c('.schedule close date time', true),
+      c('.kick (reply|num)', true),
       c('.add <number>', true),
-      c('.promote (reply/num)', true),
-      c('.demote (reply/num)', true),
+      c('.promote (reply|num)', true),
+      c('.demote (reply|num)', true),
       c('.tag [msg]', true),
       c('.tagall [msg]', true),
       c('.tag admin [msg]', true),
       c('.hidetag [msg]', true),
       c('.hidetag admin [msg]', true),
-      c('.pdd <on/off>'),
+      c('.pdd <on|off>'),
       c('.pinchat', true),
       c('.unpinchat', true),
       c('.setgdesc <text>', true),
@@ -266,7 +266,7 @@ const REGISTRY = [
       c('.goodbye off'),
       c('.antilink on|off', true),
       c('.antispam on|off', true),
-      c('.antisticker on/off', true),
+      c('.antisticker on|off', true),
       c('.kickall', true),
       c('.kickcc <code>', true),
       c('.approveall', true),
@@ -277,8 +277,8 @@ const REGISTRY = [
   },
   {
     id: 'owner',
-    aliases: ['profile', 'ownerprofile'],
-    icon: '👤',
+    aliases: ['profile', 'only-owner'],
+    icon: '⛔',
     title: 'OWNER PROFILE',
     commands: [
       c('.setpp', true),
@@ -314,7 +314,7 @@ const REGISTRY = [
     icon: '💬',
     title: 'CHAT CONTROLS',
     commands: [
-      c('.disappearing off|24h|7d|24d|90d'),
+      c('.disappearing 24h|7d|90d'),
       c('.mute 8h|1d|forever', true),
       c('.unmute', true),
       c('.archive', true),
@@ -361,13 +361,13 @@ function renderHeaderBox(prefix, isOwnerUser) {
   const ownerText = isOwnerUser ? toSmallCaps('COMMANDS ARE OWNER-ONLY') : toSmallCaps('COMMANDS ARE PUBLIC');
   const guideCmd = applyPrefix('.ᴄᴏᴍᴍᴀɴᴅ ꜰᴏʀ ɢᴜɪᴅᴇ', prefix);
   return [
-    '┌──❮ 𝗪𝗥𝗔𝗜𝗧🇭 ❯',
+    '┌────────────❮ 𝗪𝗥𝗔𝗜𝗧🇭 ❯',
     '│',
     `│ ${ownerText}`,
     `│ ${toSmallCaps('PREFIX')} · ${prefix}`,
     `│ ℹ️ ${guideCmd}`,
     '│',
-    '└─────────────┈⚝',
+    '└──────────────────┈⚝',
   ].join('\n');
 }
 
@@ -388,7 +388,7 @@ function renderCategoryBox(group, prefix, isOwnerUser) {
   }
 
   lines.push('│');
-  lines.push('└─────────────┈⚝');
+  lines.push('└──────────────────┈⚝');
 
   return lines.join('\n');
 }
