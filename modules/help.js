@@ -94,7 +94,7 @@ const REGISTRY = [
   {
     id: 'utility',
     aliases: ['tools'],
-    icon: '🔧',
+    icon: '🛠',
     title: 'UTILITY',
     commands: [
       c('.currency'),
@@ -172,7 +172,7 @@ const REGISTRY = [
   },
   {
     id: 'textmaker',
-    aliases: ['ephoto'],
+    aliases: ['ephoto', 'logo'],
     icon: '🪄',
     title: 'TEXT→PHOTO',
     commands: [
@@ -227,9 +227,9 @@ const REGISTRY = [
   },
   {
     id: 'social',
-    aliases: ['socialsearch'],
-    icon: '🔍',
-    title: 'SEARCH|DOWNLOAD',
+    aliases: ['social,search'],
+    icon: '📥',
+    title: 'SEARCH|DL',
     commands: [
       c('.ig <username/url>'),
       c('.tiktok <username/url>'),
