@@ -109,7 +109,7 @@ export async function presenceCommand(sock, chat, msg, args) {
                 `auto typing   · ${s.autoTyping ? 'ON' : 'OFF'}\n` +
                 `auto recording · ${s.autoRecording ? 'ON' : 'OFF'}\n` +
                 `read receipts · ${s.readReceipts ? 'ON' : 'OFF'}\n`,
-            footer: 'Provided by 𝗪𝗥𝗜𝗧🇭 · Select an option below',
+            footer: 'Provided by 𝗪𝗥𝗔𝗜𝗧🇭 · Select an option below',
             buttons: [
                 createQuickReply(s.alwaysOnline ? 'Online OFF' : 'Online ON', `${p}presence online ${s.alwaysOnline ? 'off' : 'on'}`),
                 createQuickReply(s.autoTyping ? 'Typing OFF' : 'Typing ON', `${p}presence typing ${s.autoTyping ? 'off' : 'on'}`),

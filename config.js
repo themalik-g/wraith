@@ -4,8 +4,8 @@ import { statePath, inState } from './core/paths.js';
 
 const BASE = {
   owner: "",
-  codename: "WRAITH",
-  botName: "WRAITH",
+  codename: "𝗪𝗥𝗔𝗜𝗧🇭",
+  botName: "𝗪𝗥𝗔𝗜𝗧🇭",
   version: "1.3.2",
   timezone: "Asia/Karachi",
   memoryTTL: 24 * 60 * 60 * 1000,

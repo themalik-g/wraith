@@ -158,9 +158,9 @@ export async function downloadPostMediaDirect(sock, chat, msg, url, asZip = fals
         document: zipBuffer,
         fileName: zip.filename || 'post.zip',
         mimetype: zip.mime || 'application/zip',
-        caption: `📦 *Downloaded Post Archive* (${result.items.length} items)\n\nProvided by 𝗪𝗥𝗜𝗧🇭`,
+        caption: `📦 *Downloaded Post Archive* (${result.items.length} items)\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`,
       }, { quoted: msg });
-      await edit(sock, chat, status, `✅ *ZIP Download complete*\n\nProvided by 𝗪𝗥𝗜𝗧🇭`);
+      await edit(sock, chat, status, `✅ *ZIP Download complete*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
       return;
     }
@@ -216,7 +216,7 @@ export async function downloadPostMediaDirect(sock, chat, msg, url, asZip = fals
 
     if (sentCount === 0) throw new Error('Post media files exceeded size limits or were empty');
 
-    await edit(sock, chat, status, `✅ *Download complete* (${sentCount} items)\n\nProvided by 𝗪𝗥𝗜𝗧🇭`);
+    await edit(sock, chat, status, `✅ *Download complete* (${sentCount} items)\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
     await react(sock, chat, msg, '☑');
   } catch (e) {
     try { console.error('[postfetch]', e.message); } catch {}
@@ -288,7 +288,7 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
             }
           }
           if (sentCount > 0) {
-            await edit(sock, chat, status, `✅ *Download complete*\n\nProvided by 𝗪𝗥𝗜𝗧🇭`);
+            await edit(sock, chat, status, `✅ *Download complete*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
             await react(sock, chat, msg, '☑');
             return;
           }
@@ -414,7 +414,7 @@ async function downloadMedia(sock, chat, msg, query, audioOnly) {
 
     if (sentCount === 0) throw new Error('Downloaded files were empty or exceeded size limits');
 
-    await edit(sock, chat, status, `✅ *Download complete*\n_${safeName}_\n\nProvided by 𝗪𝗥𝗜𝗧🇭`);
+    await edit(sock, chat, status, `✅ *Download complete*\n_${safeName}_\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
     await react(sock, chat, msg, '☑');
   } catch (e) {
     try { console.error('[download]', e.message); } catch {}
@@ -439,7 +439,7 @@ export async function ytdlCommand(sock, chat, msg, args) {
       chat,
       {
         body: `⬇️ *Download Media Options*\n\nURL: _${query.slice(0, 70)}${query.length > 70 ? '…' : ''}_\n\nSelect your desired format/quality:`,
-        footer: 'Provided by 𝗪𝗥𝗜𝗧🇭',
+        footer: 'Provided by 𝗪𝗥𝗔𝗜𝗧🇭',
         buttons: [
           createQuickReply('🎬 Video (Best)', `${p}dl ${query} --direct`),
           createQuickReply('🎵 Audio MP3', `${p}mp3 ${query}`),

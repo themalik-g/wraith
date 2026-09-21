@@ -428,7 +428,7 @@ export async function getpairCommand(sock, chat, msg, args) {
                             chat,
                             {
                                 body: `🔑 *Pairing Code for +${rawNumber}:*\n\n\`\`\`${code}\`\`\`\n\nEnter this code in WhatsApp → Linked Devices.`,
-                                footer: 'Provided by 𝗪𝗥𝗜𝗧🇭',
+                                footer: 'Provided by 𝗪𝗥𝗔𝗜𝗧🇭',
                                 buttons: [
                                     createCtaCopy('📋 Copy Code', code)
                                 ]

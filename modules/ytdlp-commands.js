@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import PQueue from 'p-queue';
-import { ytdlp, getTmpDir, cleanFile, cleanOldTmpFiles } from '../lib/ytdlp.js';
+import { ytdlp, getTmpDir, configureDownload, cleanFile, cleanOldTmpFiles } from '../lib/ytdlp.js';
 import { sendWithCta } from '../lib/buttons.js';
 
 const queue = new PQueue({ concurrency: 1 });
@@ -43,8 +43,10 @@ export async function playCommand(sock, chat, msg, args) {
       const target = resolveTarget(query);
       await edit(sock, chat, status, `🎵 *Extracting audio with ytdlp-nodejs…*`);
 
-      const res = await ytdlp
-        .download(target)
+      const dl = ytdlp.download(target);
+      configureDownload(dl, outputDir);
+
+      const res = await dl
         .extractAudio()
         .audioFormat('mp3')
         .audioQuality('0')
@@ -73,7 +75,7 @@ export async function playCommand(sock, chat, msg, args) {
       }, { quoted: msg });
 
       cleanFile(downloadedPath);
-      await edit(sock, chat, status, `✅ *Audio downloaded successfully*\n\nProvided by 𝗪𝗥𝗜𝗧🇭`);
+      await edit(sock, chat, status, `✅ *Audio downloaded successfully*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
     } catch (e) {
       console.error('[playCommand]', e);
@@ -101,8 +103,10 @@ export async function ytvCommand(sock, chat, msg, args) {
       const target = resolveTarget(query);
       await edit(sock, chat, status, `🎬 *Downloading video with ytdlp-nodejs…*`);
 
-      const res = await ytdlp
-        .download(target)
+      const dl = ytdlp.download(target);
+      configureDownload(dl, outputDir);
+
+      const res = await dl
         .filter('mergevideo')
         .type('mp4')
         .output(outputTemplate)
@@ -126,11 +130,11 @@ export async function ytvCommand(sock, chat, msg, args) {
         video: { url: downloadedPath },
         mimetype: 'video/mp4',
         fileName: fileName,
-        caption: `🎬 *YouTube Video*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝗪𝗥𝗜𝗧🇭`,
+        caption: `🎬 *YouTube Video*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`,
       }, { quoted: msg });
 
       cleanFile(downloadedPath);
-      await edit(sock, chat, status, `✅ *Video downloaded successfully*\n\nProvided by 𝗪𝗥𝗜𝗧🇭`);
+      await edit(sock, chat, status, `✅ *Video downloaded successfully*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
     } catch (e) {
       console.error('[ytvCommand]', e);
@@ -157,8 +161,10 @@ export async function ytdlCommand(sock, chat, msg, args) {
     try {
       await edit(sock, chat, status, `📥 *Processing YouTube link…*`);
 
-      const res = await ytdlp
-        .download(url)
+      const dl = ytdlp.download(url);
+      configureDownload(dl, outputDir);
+
+      const res = await dl
         .filter('mergevideo')
         .type('mp4')
         .output(outputTemplate)
@@ -182,11 +188,11 @@ export async function ytdlCommand(sock, chat, msg, args) {
         video: { url: downloadedPath },
         mimetype: 'video/mp4',
         fileName: fileName,
-        caption: `📥 *YouTube Download*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝗪𝗥𝗜𝗧🇭`,
+        caption: `📥 *YouTube Download*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`,
       }, { quoted: msg });
 
       cleanFile(downloadedPath);
-      await edit(sock, chat, status, `✅ *Download complete*\n\nProvided by 𝗪𝗥𝗜𝗧🇭`);
+      await edit(sock, chat, status, `✅ *Download complete*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
     } catch (e) {
       console.error('[ytdlCommand]', e);

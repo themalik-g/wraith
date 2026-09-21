@@ -33,6 +33,7 @@ const REGISTRY = [
       c('.usermanual'),
       c('.prefix', true),
       c('.mode', true),
+      c('.replymode <buttons|text>', true),
       c('.update', true),
       c('.script'),
       c('.repo'),
@@ -158,19 +159,15 @@ const REGISTRY = [
     ],
   },
   {
-    id: 'theme',
-    aliases: ['themes', 'wallpaper', 'bubbles'],
-    icon: '🎨',
-    title: 'THEME & DISPLAY',
+    id: 'display',
+    aliases: ['wallpaper', 'wp', 'dp'],
+    icon: '🖼️',
+    title: 'DISPLAY & WALLPAPER',
     commands: [
-      c('.theme1 ... .theme10'),
-      c('.reset theme'),
       c('.wp1 ... .wp10'),
       c('.wp (reply photo)'),
       c('.dp (reply photo)'),
       c('.reset wp'),
-      c('.chatbubble1 ... .chatbubble10'),
-      c('.reset bubble'),
     ],
   },
   {
@@ -253,6 +250,7 @@ const REGISTRY = [
       c('.add <number>', true),
       c('.promote (reply/num)', true),
       c('.demote (reply/num)', true),
+      c('.tag [msg]', true),
       c('.tagall [msg]', true),
       c('.tag admin [msg]', true),
       c('.hidetag [msg]', true),
@@ -292,7 +290,7 @@ const REGISTRY = [
       c('.setsession ownernumber', true),
       c('.addsession <number>', true),
       c('.delsession <id>', true),
-      c('.setvar <key  <value>', true),
+      c('.setvar <key> <value>', true),
       c('.getvar <key|all>', true),
       c('.delvar <key>', true),
       c('.block (reply|num)', true),
@@ -332,7 +330,7 @@ const REGISTRY = [
     icon: '🧭',
     title: 'JID|PROFILE',
     commands: [
-      c('.getjid', true),
+      c('.getjid'),
       c('.getpp'),
       c('.presence', true),
       c('.presence online on|off', true),
@@ -363,7 +361,7 @@ function renderHeaderBox(prefix, isOwnerUser) {
   const ownerText = isOwnerUser ? toSmallCaps('COMMANDS ARE OWNER-ONLY') : toSmallCaps('COMMANDS ARE PUBLIC');
   const guideCmd = applyPrefix('.ᴄᴏᴍᴍᴀɴᴅ ꜰᴏʀ ɢᴜɪᴅᴇ', prefix);
   return [
-    '┌──❮ ⓌⓇⒶⒾⓉⒽ ❯',
+    '┌──❮ 𝗪𝗥𝗔𝗜𝗧🇭 ❯',
     '│',
     `│ ${ownerText}`,
     `│ ${toSmallCaps('PREFIX')} · ${prefix}`,
