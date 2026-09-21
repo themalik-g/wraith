@@ -360,6 +360,24 @@ async function ignite() {
       console.error('[dispatchStatus:status.update]', e);
     }
   });
+
+  sock.ev.on('chats.update', (updates) => {
+    for (const update of updates) {
+      if (update.chatTheme?.colorSchemeId) {
+        console.log('[theme-discovery] Valid theme ID:', update.chatTheme.colorSchemeId);
+      }
+    }
+  });
+
+  sock.ev.on('messaging-history.set', (data) => {
+    if (data.chats) {
+      for (const chat of data.chats) {
+        if (chat.chatTheme?.colorSchemeId) {
+          console.log('[theme-discovery] History theme ID:', chat.chatTheme.colorSchemeId);
+        }
+      }
+    }
+  });
 }
 
 process.on('unhandledRejection', (reason) => {

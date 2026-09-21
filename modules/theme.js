@@ -12,18 +12,18 @@ const THEME_FILE = () => inState('chat_themes.json');
 const WP_FILE = () => inState('chat_wallpapers.json');
 const BUBBLE_FILE = () => inState('chat_bubbles.json');
 
-// Preset Theme configurations
+// Preset Theme configurations (Numeric IDs corresponding to WhatsApp colorSchemeId values)
 export const THEME_PRESETS = [
-  { id: 'emerald', name: 'Emerald Green', color: '#005C4B' },
-  { id: 'teal', name: 'Deep Teal', color: '#075E54' },
-  { id: 'navy', name: 'Navy Blue', color: '#1B263B' },
-  { id: 'midnight', name: 'Midnight Dark', color: '#0D1B2A' },
-  { id: 'crimson', name: 'Crimson Red', color: '#800020' },
-  { id: 'amethyst', name: 'Amethyst Purple', color: '#4A154B' },
-  { id: 'sunset', name: 'Sunset Orange', color: '#CC5500' },
-  { id: 'forest', name: 'Forest Green', color: '#1E3A2B' },
-  { id: 'sakura', name: 'Sakura Pink', color: '#85144B' },
-  { id: 'cyberpunk', name: 'Cyberpunk Neon', color: '#00F0FF' },
+  { id: '1', name: 'Emerald Green', color: '#005C4B' },
+  { id: '2', name: 'Deep Teal', color: '#075E54' },
+  { id: '3', name: 'Navy Blue', color: '#1B263B' },
+  { id: '4', name: 'Midnight Dark', color: '#0D1B2A' },
+  { id: '5', name: 'Crimson Red', color: '#800020' },
+  { id: '6', name: 'Amethyst Purple', color: '#4A154B' },
+  { id: '7', name: 'Sunset Orange', color: '#CC5500' },
+  { id: '8', name: 'Forest Green', color: '#1E3A2B' },
+  { id: '9', name: 'Sakura Pink', color: '#85144B' },
+  { id: '10', name: 'Cyberpunk Neon', color: '#00F0FF' },
 ];
 
 // Preset Wallpaper configurations (High Resolution Curated Wallpapers)
@@ -104,9 +104,12 @@ export async function themeCommand(sock, chat, msg, args = [], indexOverride = n
       try {
         if (typeof sock.updateChatTheme === 'function') {
           await sock.updateChatTheme(chat, 'default');
+        } else {
+          throw new Error('updateChatTheme method is unavailable on socket');
         }
       } catch (e) {
         console.error('[themeCommand] updateChatTheme reset failed:', e.message);
+        return sendWithCta(sock, chat, `❌ *Theme Reset Failed:* ${e.message}\n\nProvided by 𝗪𝗥𝗜𝗧🇭`, { quoted: msg });
       }
       const themes = loadJson(THEME_FILE());
       delete themes[chat];
@@ -129,9 +132,12 @@ export async function themeCommand(sock, chat, msg, args = [], indexOverride = n
     try {
       if (typeof sock.updateChatTheme === 'function') {
         await sock.updateChatTheme(chat, preset.id);
+      } else {
+        throw new Error('updateChatTheme method is unavailable on socket');
       }
     } catch (e) {
       console.error('[themeCommand] updateChatTheme failed:', e.message);
+      return sendWithCta(sock, chat, `❌ *Theme Update Failed:* ${e.message}\n\nProvided by 𝗪𝗥𝗜𝗧🇭`, { quoted: msg });
     }
 
     const themes = loadJson(THEME_FILE());
@@ -213,12 +219,30 @@ export async function wpCommand(sock, chat, msg, args = [], indexOverride = null
     }
 
     const preset = WALLPAPER_PRESETS[idx - 1];
+    let uploadedUrl = null;
+    let presetBuffer = null;
     try {
-      if (typeof sock.updateChatWallpaper === 'function') {
-        await sock.updateChatWallpaper(chat, { type: 'custom', media: preset.url, opacity: 1 });
+      const response = await fetch(preset.url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch wallpaper preset image (HTTP ${response.status})`);
+      }
+      presetBuffer = Buffer.from(await response.arrayBuffer());
+
+      if (typeof sock.waUploadToServer === 'function') {
+        const uploaded = await sock.waUploadToServer(presetBuffer, { mediaType: 'image' });
+        uploadedUrl = uploaded?.url || null;
+      } else {
+        throw new Error('waUploadToServer method is unavailable on socket');
+      }
+
+      if (uploadedUrl && typeof sock.updateChatWallpaper === 'function') {
+        await sock.updateChatWallpaper(chat, { type: 'custom', media: uploadedUrl, opacity: 1 });
+      } else {
+        throw new Error('updateChatWallpaper method is unavailable on socket');
       }
     } catch (e) {
       console.error('[wpCommand] updateChatWallpaper preset failed:', e.message);
+      return sendWithCta(sock, chat, `❌ *Wallpaper Update Failed:* ${e.message}\n\nProvided by 𝗪𝗥𝗜𝗧🇭`, { quoted: msg });
     }
 
     const wps = loadJson(WP_FILE());
@@ -226,7 +250,7 @@ export async function wpCommand(sock, chat, msg, args = [], indexOverride = null
     saveJson(WP_FILE(), wps);
 
     return sock.sendMessage(chat, {
-      image: { url: preset.url },
+      image: presetBuffer || { url: preset.url },
       caption: `🖼️ *Chat Wallpaper Preset #${preset.id}*\n\n• *Style:* ${preset.name}\n\nProvided by 𝗪𝗥𝗜𝗧🇭`
     }, { quoted: msg });
   } catch (e) {
@@ -259,59 +283,8 @@ export async function dpCommand(sock, chat, msg, args = []) {
 }
 
 // ─────────────────────────────────────────────
-// Chat Bubbles Handlers
+// Chat Bubbles Handlers (Redirected to Chat Themes)
 // ─────────────────────────────────────────────
 export async function chatbubbleCommand(sock, chat, msg, args = [], indexOverride = null) {
-  try {
-    const argStr = args.join(' ').toLowerCase().trim();
-    const isReset = argStr === 'reset' || indexOverride === 'reset';
-
-    if (isReset) {
-      try {
-        if (typeof sock.updateChatBubble === 'function') {
-          await sock.updateChatBubble(chat, 'default');
-        } else if (typeof sock.updateChatTheme === 'function') {
-          await sock.updateChatTheme(chat, 'default');
-        }
-      } catch (e) {
-        console.error('[chatbubbleCommand] reset failed:', e.message);
-      }
-      const bubbles = loadJson(BUBBLE_FILE());
-      delete bubbles[chat];
-      saveJson(BUBBLE_FILE(), bubbles);
-
-      return sendWithCta(sock, chat, `💬 *Chat Bubble Style Reset*\n\nRestored chat bubble style to default.\n\nProvided by 𝗪𝗥𝗜𝗧🇭`, { quoted: msg });
-    }
-
-    let idx = indexOverride ? parseInt(indexOverride, 10) : parseInt(args[0], 10);
-    if (!idx || isNaN(idx) || idx < 1 || idx > BUBBLE_PRESETS.length) {
-      let listText = `💬 *Available Chat Bubble Styles*\n\nUsage: \`.chatbubble1\` to \`.chatbubble10\` or \`.resetbubble\`\n\n`;
-      BUBBLE_PRESETS.forEach((b) => {
-        listText += `*${b.id}.* ${b.name} — Color: \`${b.hex}\`\n`;
-      });
-      listText += `\n*Reset Command:* \`.resetbubble\` or \`.reset bubble\`\n\nProvided by 𝗪𝗥𝗜𝗧🇭`;
-      return sendWithCta(sock, chat, listText, { quoted: msg });
-    }
-
-    const preset = BUBBLE_PRESETS[idx - 1];
-    try {
-      if (typeof sock.updateChatBubble === 'function') {
-        await sock.updateChatBubble(chat, preset.hex);
-      } else if (typeof sock.updateChatTheme === 'function') {
-        await sock.updateChatTheme(chat, preset.hex);
-      }
-    } catch (e) {
-      console.error('[chatbubbleCommand] update failed:', e.message);
-    }
-
-    const bubbles = loadJson(BUBBLE_FILE());
-    bubbles[chat] = preset;
-    saveJson(BUBBLE_FILE(), bubbles);
-
-    const reply = `💬 *Chat Bubble Style Updated*\n\n• *Style Preset:* #${idx} (${preset.name})\n• *Bubble Color:* \`${preset.hex}\`\n\nProvided by 𝗪𝗥𝗜𝗧🇭`;
-    return sendWithCta(sock, chat, reply, { quoted: msg });
-  } catch (e) {
-    console.error('[chatbubbleCommand] error:', e.message);
-    return sendWithCta(sock, chat, `❌ *Bubble Error:* ${e.message}\n\nProvided by 𝗪𝗥𝗜𝗧🇭`, { quoted: msg });
-  }
+  return themeCommand(sock, chat, msg, args, indexOverride);
 }
