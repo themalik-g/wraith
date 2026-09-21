@@ -361,8 +361,8 @@ function renderHeaderBox(prefix, isOwnerUser) {
   const ownerText = isOwnerUser ? toSmallCaps('COMMANDS ARE OWNER-ONLY') : toSmallCaps('COMMANDS ARE PUBLIC');
   const guideCmd = applyPrefix('.ᴄᴏᴍᴍᴀɴᴅ ꜰᴏʀ ɢᴜɪᴅᴇ', prefix);
   return [
-    '     【  𝗪𝗥𝗔𝗜𝗧🇭 】',
-    '│',
+    '      【 🤖 𝗪𝗥𝗔𝗜𝗧🇭 🤖 】',
+    '┌──────────────────┈⚝',
     `│ ${ownerText}`,
     `│ ${toSmallCaps('PREFIX')} · ${prefix}`,
     `│ ℹ️ ${guideCmd}`,
@@ -379,7 +379,7 @@ function renderCategoryBox(group, prefix, isOwnerUser) {
   if (!visible.length) return null;
 
   const lines = [
-    `     _*【 ${group.icon} ${toSmallCaps(group.title)} 】*_`,
+    `      _*【 ${group.icon} ${toSmallCaps(group.title)} 】*_`,
     '┌──────────────────┈⚝',
   ];
 
