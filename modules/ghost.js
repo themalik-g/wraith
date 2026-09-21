@@ -226,7 +226,7 @@ export async function ghostCommand(sock, chat, msg, args) {
                 `antidelete · ${s.on ? 'ON' : 'OFF'}\n` +
                 `antiedit   · ${s.edit ? 'ON' : 'OFF'}\n` +
                 `ledger     · ${ledger.size} entries\n`,
-            footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select an action below',
+            footer: 'Provided by 𝗪𝗥𝗜𝗧🇭 · Select an action below',
             buttons: [
                 createQuickReply(s.on ? 'Antidelete OFF' : 'Antidelete ON', `${p}ghost ${s.on ? 'off' : 'on'}`),
                 createQuickReply(s.edit ? 'Antiedit OFF' : 'Antiedit ON', `${p}ghost edit ${s.edit ? 'off' : 'on'}`),
@@ -242,7 +242,7 @@ export async function ghostCommand(sock, chat, msg, args) {
                   `antidelete · ${s.on ? 'ON' : 'OFF'}\n` +
                   `antiedit   · ${s.edit ? 'ON' : 'OFF'}\n` +
                   `ledger     · ${ledger.size} entries`,
-            footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select an action below',
+            footer: 'Provided by 𝗪𝗥𝗜𝗧🇭 · Select an action below',
             buttons: [
                 createQuickReply(s.on ? 'Antidelete OFF' : 'Antidelete ON', `${p}ghost ${s.on ? 'off' : 'on'}`),
                 createQuickReply(s.edit ? 'Antiedit OFF' : 'Antiedit ON', `${p}ghost edit ${s.edit ? 'off' : 'on'}`),
@@ -263,7 +263,7 @@ export async function ghostCommand(sock, chat, msg, args) {
                   `antidelete · ${s.on ? 'ON' : 'OFF'}\n` +
                   `antiedit   · ${s.edit ? 'ON' : 'OFF'}\n` +
                   `ledger     · ${ledger.size} entries`,
-            footer: 'Provided by 𝕎ℝⒶⒾⓉℍ · Select an action below',
+            footer: 'Provided by 𝗪𝗥𝗜𝗧🇭 · Select an action below',
             buttons: [
                 createQuickReply(s.on ? 'Antidelete OFF' : 'Antidelete ON', `${p}ghost ${s.on ? 'off' : 'on'}`),
                 createQuickReply(s.edit ? 'Antiedit OFF' : 'Antiedit ON', `${p}ghost edit ${s.edit ? 'off' : 'on'}`),

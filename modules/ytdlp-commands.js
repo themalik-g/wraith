@@ -73,7 +73,7 @@ export async function playCommand(sock, chat, msg, args) {
       }, { quoted: msg });
 
       cleanFile(downloadedPath);
-      await edit(sock, chat, status, `✅ *Audio downloaded successfully*\n\nProvided by 𝕎ℝI𝕋ℍ`);
+      await edit(sock, chat, status, `✅ *Audio downloaded successfully*\n\nProvided by 𝗪𝗥𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
     } catch (e) {
       console.error('[playCommand]', e);
@@ -126,11 +126,11 @@ export async function ytvCommand(sock, chat, msg, args) {
         video: { url: downloadedPath },
         mimetype: 'video/mp4',
         fileName: fileName,
-        caption: `🎬 *YouTube Video*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝕎ℝI𝕋ℍ`,
+        caption: `🎬 *YouTube Video*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝗪𝗥𝗜𝗧🇭`,
       }, { quoted: msg });
 
       cleanFile(downloadedPath);
-      await edit(sock, chat, status, `✅ *Video downloaded successfully*\n\nProvided by 𝕎ℝI𝕋ℍ`);
+      await edit(sock, chat, status, `✅ *Video downloaded successfully*\n\nProvided by 𝗪𝗥𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
     } catch (e) {
       console.error('[ytvCommand]', e);
@@ -182,11 +182,11 @@ export async function ytdlCommand(sock, chat, msg, args) {
         video: { url: downloadedPath },
         mimetype: 'video/mp4',
         fileName: fileName,
-        caption: `📥 *YouTube Download*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝕎ℝI𝕋ℍ`,
+        caption: `📥 *YouTube Download*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝗪𝗥𝗜𝗧🇭`,
       }, { quoted: msg });
 
       cleanFile(downloadedPath);
-      await edit(sock, chat, status, `✅ *Download complete*\n\nProvided by 𝕎ℝI𝕋ℍ`);
+      await edit(sock, chat, status, `✅ *Download complete*\n\nProvided by 𝗪𝗥𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
     } catch (e) {
       console.error('[ytdlCommand]', e);
