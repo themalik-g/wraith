@@ -379,7 +379,7 @@ function renderCategoryBox(group, prefix, isOwnerUser) {
   if (!visible.length) return null;
 
   const lines = [
-    `     【 ${group.icon} ${toSmallCaps(group.title)} 】`,
+    `     _*【 ${group.icon} ${toSmallCaps(group.title)} 】*_`,
     '┌──────────────────┈⚝',
   ];
 
@@ -387,7 +387,6 @@ function renderCategoryBox(group, prefix, isOwnerUser) {
     lines.push(`│ ◈ ${applyPrefix(item.cmd, prefix)}`);
   }
 
-  lines.push('│');
   lines.push('└──────────────────┈⚝');
 
   return lines.join('\n');
