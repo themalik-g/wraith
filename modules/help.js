@@ -380,7 +380,7 @@ function renderCategoryBox(group, prefix, isOwnerUser) {
 
   const lines = [
     `┌─────❮ ${group.icon} ${toSmallCaps(group.title)} ❯`,
-    '│',
+    '┌──────────────────┈⚝',
   ];
 
   for (const item of visible) {
