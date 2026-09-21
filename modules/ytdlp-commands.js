@@ -65,9 +65,10 @@ export async function playCommand(sock, chat, msg, args) {
 
       await edit(sock, chat, status, `🎵 *Sending audio…*`);
       const fileName = path.basename(downloadedPath);
+      const audioBuffer = fs.readFileSync(downloadedPath);
 
       await sock.sendMessage(chat, {
-        audio: { url: downloadedPath },
+        audio: audioBuffer,
         mimetype: 'audio/mpeg',
         fileName: fileName,
         ptt: false,
@@ -136,9 +137,10 @@ export async function ytvCommand(sock, chat, msg, args) {
 
       await edit(sock, chat, status, `🎬 *Sending video (${(stat.size / (1024 * 1024)).toFixed(1)} MB)…*`);
       const fileName = path.basename(downloadedPath);
+      const videoBuffer = fs.readFileSync(downloadedPath);
 
       await sock.sendMessage(chat, {
-        video: { url: downloadedPath },
+        video: videoBuffer,
         mimetype: 'video/mp4',
         fileName: fileName,
         caption: `🎬 *YouTube Video*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`,
@@ -207,9 +209,10 @@ export async function ytdlCommand(sock, chat, msg, args) {
 
       await edit(sock, chat, status, `📥 *Sending media (${(stat.size / (1024 * 1024)).toFixed(1)} MB)…*`);
       const fileName = path.basename(downloadedPath);
+      const videoBuffer = fs.readFileSync(downloadedPath);
 
       await sock.sendMessage(chat, {
-        video: { url: downloadedPath },
+        video: videoBuffer,
         mimetype: 'video/mp4',
         fileName: fileName,
         caption: `📥 *YouTube Download*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`,
