@@ -66,7 +66,7 @@ export async function playCommand(sock, chat, msg, args) {
 
       await edit(sock, chat, status, `🎵 *Sending audio…*`);
       const fileName = path.basename(downloadedPath);
-      const audioBuffer = fs.readFileSync(downloadedPath);
+      let audioBuffer = fs.readFileSync(downloadedPath);
 
       await sock.sendMessage(chat, {
         audio: audioBuffer,
@@ -74,6 +74,7 @@ export async function playCommand(sock, chat, msg, args) {
         fileName: fileName,
         ptt: false,
       }, { quoted: msg });
+      audioBuffer = null;
 
       await edit(sock, chat, status, `✅ *Audio downloaded successfully*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
@@ -83,6 +84,7 @@ export async function playCommand(sock, chat, msg, args) {
       await react(sock, chat, msg, '❌');
     } finally {
       cleanPrefix(filePrefix, outputDir);
+      if (global.gc) { try { global.gc(); } catch {} }
     }
   });
 }
@@ -142,7 +144,7 @@ export async function ytvCommand(sock, chat, msg, args) {
 
       await edit(sock, chat, status, `🎬 *Sending video (${(stat.size / (1024 * 1024)).toFixed(1)} MB)…*`);
       const fileName = path.basename(finalVideoPath);
-      const videoBuffer = fs.readFileSync(finalVideoPath);
+      let videoBuffer = fs.readFileSync(finalVideoPath);
 
       await sock.sendMessage(chat, {
         video: videoBuffer,
@@ -150,6 +152,7 @@ export async function ytvCommand(sock, chat, msg, args) {
         fileName: fileName,
         caption: `🎬 *YouTube Video*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`,
       }, { quoted: msg });
+      videoBuffer = null;
 
       await edit(sock, chat, status, `✅ *Video downloaded successfully*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
@@ -159,6 +162,7 @@ export async function ytvCommand(sock, chat, msg, args) {
       await react(sock, chat, msg, '❌');
     } finally {
       cleanPrefix(filePrefix, outputDir);
+      if (global.gc) { try { global.gc(); } catch {} }
     }
   });
 }
@@ -218,7 +222,7 @@ export async function ytdlCommand(sock, chat, msg, args) {
 
       await edit(sock, chat, status, `📥 *Sending media (${(stat.size / (1024 * 1024)).toFixed(1)} MB)…*`);
       const fileName = path.basename(finalVideoPath);
-      const videoBuffer = fs.readFileSync(finalVideoPath);
+      let videoBuffer = fs.readFileSync(finalVideoPath);
 
       await sock.sendMessage(chat, {
         video: videoBuffer,
@@ -226,6 +230,7 @@ export async function ytdlCommand(sock, chat, msg, args) {
         fileName: fileName,
         caption: `📥 *YouTube Download*\nSize: ${(stat.size / (1024 * 1024)).toFixed(1)} MB\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`,
       }, { quoted: msg });
+      videoBuffer = null;
 
       await edit(sock, chat, status, `✅ *Download complete*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`);
       await react(sock, chat, msg, '☑');
@@ -235,6 +240,7 @@ export async function ytdlCommand(sock, chat, msg, args) {
       await react(sock, chat, msg, '❌');
     } finally {
       cleanPrefix(filePrefix, outputDir);
+      if (global.gc) { try { global.gc(); } catch {} }
     }
   });
 }
