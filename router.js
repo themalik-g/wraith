@@ -55,7 +55,7 @@ import { EPHOTO_EFFECTS } from './lib/ephoto360.js';
 import { geminiCommand, photoCommand } from './modules/gemini.js';
 import { pinchatCommand, unpinchatCommand } from './modules/pin.js';
 import { disappearingCommand } from './modules/disappearing.js';
-import { playCommand, ytvCommand, ytdlCommand } from './modules/ytdlp-commands.js';
+import { playCommand, ytvCommand, videoCommand, ytdlCommand } from './modules/ytdlp-commands.js';
 import { wpCommand, dpCommand } from './modules/theme.js';
 
 const CRITICAL_COMMANDS = new Set([
@@ -296,7 +296,7 @@ export async function dispatch(sock, update, sessionId = 'main') {
         'igpost', 'tiktokpost', 'fbpost', 'pdl', 'pdlzip', 'postdl',
         'alive', 'uptime', 'restart', 'replymode', 'reqlocation',
         'twitter', 'tw', 'pinterest', 'pin', 'threads', 'reddit', 'soundcloud', 'sc', 'spotify', 'spot', 'youtube', 'yt',
-        'gemini', 'photo', 'pinchat', 'unpinchat', 'pdd', 'tag', 'disappearing', 'play', 'ytv', 'ytdl',
+        'gemini', 'photo', 'pinchat', 'unpinchat', 'pdd', 'tag', 'disappearing', 'play', 'ytv', 'video', 'ytdl',
         'shorten', 'tinyurl', 'shorturl', 'news', 'hackernews', 'hn', 'wiki', 'wikipedia', 'joke', 'advice', 'fact',
         'wp', 'dp', 'resetwp'
       ]);
@@ -351,7 +351,8 @@ export async function dispatch(sock, update, sessionId = 'main') {
             break;
           case 'song': await songCommand(csock, chat, msg, rest); break;
           case 'play': await playCommand(csock, chat, msg, rest); break;
-          case 'ytv': await ytvCommand(csock, chat, msg, rest); break;
+          case 'ytv':
+          case 'video': await ytvCommand(csock, chat, msg, rest); break;
           case 'ytdl': await ytdlCommand(csock, chat, msg, rest); break;
           case 'disappearing': await disappearingCommand(csock, chat, msg, rest); break;
           case 'dl':
