@@ -25,6 +25,7 @@
     "applemusic-core": "^1.1.0",
     "awesome-phonenumber": "^7.8.0",
     "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
     "file-type": "^19.6.0",
     "gerdur-core": "^2.11.2",
     "gifted-btns": "^1.0.2",

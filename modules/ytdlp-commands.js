@@ -7,6 +7,7 @@ import path from 'node:path';
 import PQueue from 'p-queue';
 import { ytdlp, getTmpDir, configureDownload, cleanFile, cleanPrefix, cleanOldTmpFiles } from '../lib/ytdlp.js';
 import { sendWithCta } from '../lib/buttons.js';
+import { ensurePlayable } from '../lib/video-converter.js';
 
 const queue = new PQueue({ concurrency: 1 });
 const MAX_VIDEO_BYTES = 400 * 1024 * 1024; // 400 MB cap
@@ -130,14 +131,18 @@ export async function ytvCommand(sock, chat, msg, args) {
         throw new Error('No video file created by ytdlp-nodejs');
       }
 
-      const stat = fs.statSync(downloadedPath);
+      await edit(sock, chat, status, `🎬 *Optimizing video for WhatsApp playability…*`);
+      const convertedPath = path.join(outputDir, `${filePrefix}_playable.mp4`);
+      const finalVideoPath = await ensurePlayable(downloadedPath, convertedPath);
+
+      const stat = fs.statSync(finalVideoPath);
       if (stat.size > MAX_VIDEO_BYTES) {
         throw new Error(`Video file size (${(stat.size / (1024 * 1024)).toFixed(1)} MB) exceeds 400 MB cap limit`);
       }
 
       await edit(sock, chat, status, `🎬 *Sending video (${(stat.size / (1024 * 1024)).toFixed(1)} MB)…*`);
-      const fileName = path.basename(downloadedPath);
-      const videoBuffer = fs.readFileSync(downloadedPath);
+      const fileName = path.basename(finalVideoPath);
+      const videoBuffer = fs.readFileSync(finalVideoPath);
 
       await sock.sendMessage(chat, {
         video: videoBuffer,
@@ -202,14 +207,18 @@ export async function ytdlCommand(sock, chat, msg, args) {
         throw new Error('No file downloaded from link');
       }
 
-      const stat = fs.statSync(downloadedPath);
+      await edit(sock, chat, status, `📥 *Optimizing video for WhatsApp playability…*`);
+      const convertedPath = path.join(outputDir, `${filePrefix}_playable.mp4`);
+      const finalVideoPath = await ensurePlayable(downloadedPath, convertedPath);
+
+      const stat = fs.statSync(finalVideoPath);
       if (stat.size > MAX_VIDEO_BYTES) {
         throw new Error(`Downloaded file size (${(stat.size / (1024 * 1024)).toFixed(1)} MB) exceeds 400 MB cap limit`);
       }
 
       await edit(sock, chat, status, `📥 *Sending media (${(stat.size / (1024 * 1024)).toFixed(1)} MB)…*`);
-      const fileName = path.basename(downloadedPath);
-      const videoBuffer = fs.readFileSync(downloadedPath);
+      const fileName = path.basename(finalVideoPath);
+      const videoBuffer = fs.readFileSync(finalVideoPath);
 
       await sock.sendMessage(chat, {
         video: videoBuffer,
