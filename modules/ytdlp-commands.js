@@ -41,22 +41,42 @@ export async function playCommand(sock, chat, msg, args) {
     const outputTemplate = path.join(outputDir, `${filePrefix}_%(title).50s.%(ext)s`);
 
     try {
-      const target = resolveTarget(query);
-      await edit(sock, chat, status, `🎵 *Extracting audio with ytdlp-nodejs…*`);
+      const isUrl = /^https?:\/\//i.test(query);
+      const targets = isUrl ? [query] : [`ytsearch1:${query}`, `scsearch1:${query}`];
 
-      const dl = ytdlp.download(target);
-      configureDownload(dl, outputDir);
+      let downloadedPath = null;
+      let lastErr = null;
 
-      const res = await dl
-        .extractAudio()
-        .audioFormat('mp3')
-        .audioQuality('0')
-        .output(outputTemplate)
-        .run();
+      for (const target of targets) {
+        try {
+          if (target.startsWith('scsearch1:')) {
+            await edit(sock, chat, status, `🎵 *YouTube extraction failed; falling back to SoundCloud…*`);
+          } else {
+            await edit(sock, chat, status, `🎵 *Extracting audio with ytdlp-nodejs…*`);
+          }
 
-      const downloadedPath = res?.filePaths?.[0] || (res?.filePath) || null;
+          const dl = ytdlp.download(target);
+          configureDownload(dl, outputDir);
+
+          const res = await dl
+            .extractAudio()
+            .audioFormat('mp3')
+            .audioQuality('0')
+            .output(outputTemplate)
+            .run();
+
+          const candidatePath = res?.filePaths?.[0] || (res?.filePath) || null;
+          if (candidatePath && fs.existsSync(candidatePath)) {
+            downloadedPath = candidatePath;
+            break;
+          }
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+
       if (!downloadedPath || !fs.existsSync(downloadedPath)) {
-        throw new Error('No audio file created by ytdlp-nodejs');
+        throw lastErr || new Error('No audio file created by ytdlp-nodejs');
       }
 
       const stat = fs.statSync(downloadedPath);
