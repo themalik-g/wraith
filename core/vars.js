@@ -1,23 +1,28 @@
 // ─────────────────────────────────────────────
 // WRAITH · core/vars.js
-// Persistent per-session variable store.
+// Persistent per-session variable store (cached).
 // ─────────────────────────────────────────────
 import fs from 'node:fs';
-import path from 'node:path';
 import { inState, statePath } from './paths.js';
 
 const VARS_FILE = () => inState('vars.json');
 
+let _cache = null;
+
 function loadVars() {
+    if (_cache) return _cache;
     try {
         const file = VARS_FILE();
         if (fs.existsSync(file)) {
-            return JSON.parse(fs.readFileSync(file, 'utf-8')) || {};
+            _cache = JSON.parse(fs.readFileSync(file, 'utf-8')) || {};
+        } else {
+            _cache = {};
         }
     } catch (e) {
         try { console.error('[vars] loadVars error:', e.message); } catch {}
+        _cache = {};
     }
-    return {};
+    return _cache;
 }
 
 function saveVars(data) {
@@ -25,6 +30,7 @@ function saveVars(data) {
         const file = VARS_FILE();
         statePath();
         fs.writeFileSync(file, JSON.stringify(data, null, 2));
+        _cache = data;
     } catch (e) {
         try { console.error('[vars] saveVars error:', e.message); } catch {}
     }
@@ -33,9 +39,7 @@ function saveVars(data) {
 export function getVar(key) {
     if (!key) return null;
     const store = loadVars();
-    if (Object.prototype.hasOwnProperty.call(store, key)) {
-        return store[key];
-    }
+    if (Object.prototype.hasOwnProperty.call(store, key)) return store[key];
     return process.env[key] || null;
 }
 

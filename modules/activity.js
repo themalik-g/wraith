@@ -1,24 +1,47 @@
 // ─────────────────────────────────────────────
 //  WRAITH · modules/activity.js
-//  Contact & chat activity dashboard.
-//  FIX #11: `.activity <jid>` per-chat detail is now
-//  real, and all state writes are atomic.
+//  In-memory cache + debounced atomic flush.
 // ─────────────────────────────────────────────
-import path from 'path';
 import { isOwner } from '../core/identity.js';
 import { readJson, writeJsonAtomic } from '../core/state-io.js';
 import { inState } from '../core/paths.js';
 
 const STATE = () => inState('activity.json');
 const DEBUG = process.env.WRAITH_DEBUG === '1';
+const FLUSH_MS = 5000;
+
+let _cache = null;
+let _dirty = false;
+let _flushTimer = null;
 
 function read() {
-    return readJson(STATE(), {});
+    if (_cache) return _cache;
+    _cache = readJson(STATE(), {});
+    return _cache;
 }
 
 function write(o) {
-    writeJsonAtomic(STATE(), o);
+    _cache = o;
+    _dirty = true;
+    scheduleFlush();
 }
+
+function scheduleFlush() {
+    if (_flushTimer) return;
+    _flushTimer = setTimeout(() => {
+        _flushTimer = null;
+        if (!_dirty) return;
+        try { writeJsonAtomic(STATE(), _cache); _dirty = false; } catch {}
+    }, FLUSH_MS);
+    if (typeof _flushTimer.unref === 'function') _flushTimer.unref();
+}
+
+function flushNow() {
+    if (!_dirty) return;
+    try { writeJsonAtomic(STATE(), _cache); _dirty = false; } catch {}
+}
+process.on('SIGINT', flushNow);
+process.on('SIGTERM', flushNow);
 
 export function trackActivity(chat, msg, text) {
     try {
@@ -48,9 +71,6 @@ export function trackActivity(chat, msg, text) {
     }
 }
 
-// ─────────────────────────────────────────────
-//  FIX #11 — per-chat detail view
-// ─────────────────────────────────────────────
 function renderChatDetail(jid, rec) {
     const lines = [];
     lines.push(`📊 *chat detail*`);
@@ -59,85 +79,61 @@ function renderChatDetail(jid, rec) {
     lines.push(`*messages* · ${rec.total}  (text ${rec.texts} · media ${rec.media})`);
     lines.push(`*first seen* · ${timeAgo(rec.firstSeen)}`);
     lines.push(`*last active* · ${timeAgo(rec.lastActive)}`);
-
-    const contacts = Object.entries(rec.contacts || {})
-        .sort((a, b) => b[1].count - a[1].count);
-
+    const contacts = Object.entries(rec.contacts || {}).sort((a, b) => b[1].count - a[1].count);
     if (contacts.length > 0) {
         lines.push('');
         lines.push(`*top senders* · ${contacts.length}`);
         for (const [sender, c] of contacts.slice(0, 15)) {
-            const label = sender.split('@')[0];
-            lines.push(`  \`${label}\` — ${c.count} msgs, ${timeAgo(c.last)}`);
+            lines.push(`  \`${sender.split('@')[0]}\` — ${c.count} msgs, ${timeAgo(c.last)}`);
         }
     }
-
     return lines.join('\n');
 }
 
 export async function activityCommand(sock, chat, msg, args) {
     const from = msg.key.participant || msg.key.remoteJid;
-
     if (!msg.key.fromMe && !isOwner(from)) {
         return sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
     }
 
     const s = read();
     const entries = Object.entries(s);
-
     if (entries.length === 0) {
         return sock.sendMessage(chat, { text: '📊 No activity recorded yet.' }, { quoted: msg });
     }
 
-    // ── FIX #11: .activity <jid> — per-chat detail ──
     const query = (args?.[0] || '').trim();
     if (query) {
         const needle = query.replace(/[@\s]/g, '');
         const hit = entries.find(([jid]) =>
-            jid === query ||
-            jid.split('@')[0] === needle ||
-            jid.split('@')[0].includes(needle)
+            jid === query || jid.split('@')[0] === needle || jid.split('@')[0].includes(needle)
         );
         if (!hit) {
-            return sock.sendMessage(chat, {
-                text: `❌ No tracked chat matches \`${query}\`.`
-            }, { quoted: msg });
+            return sock.sendMessage(chat, { text: `❌ No tracked chat matches \`${query}\`.` }, { quoted: msg });
         }
-        return sock.sendMessage(chat, {
-            text: renderChatDetail(hit[0], hit[1])
-        }, { quoted: msg });
+        return sock.sendMessage(chat, { text: renderChatDetail(hit[0], hit[1]) }, { quoted: msg });
     }
 
     entries.sort((a, b) => b[1].total - a[1].total);
-
     let totalMsgs = 0, totalMedia = 0, totalTexts = 0;
     for (const [, rec] of entries) {
-        totalMsgs += rec.total;
-        totalMedia += rec.media;
-        totalTexts += rec.texts;
+        totalMsgs += rec.total; totalMedia += rec.media; totalTexts += rec.texts;
     }
 
-    const lines = [];
-    lines.push(`📊 *activity dashboard*`);
-    lines.push('');
-    lines.push(`*Global*`);
-    lines.push(`• chats tracked · ${entries.length}`);
-    lines.push(`• total messages · ${totalMsgs}`);
-    lines.push(`• text · ${totalTexts}`);
-    lines.push(`• media · ${totalMedia}`);
-    lines.push('');
-
-    lines.push(`*Top chats*`);
-    const top = entries.slice(0, 10);
-    for (const [jid, rec] of top) {
-        const name = jid.split('@')[0];
-        const ago = timeAgo(rec.lastActive);
-        lines.push(`  \`${name}\` — ${rec.total} msgs, ${rec.media} media, ${ago}`);
+    const lines = [
+        `📊 *activity dashboard*`, ``,
+        `*Global*`,
+        `• chats tracked · ${entries.length}`,
+        `• total messages · ${totalMsgs}`,
+        `• text · ${totalTexts}`,
+        `• media · ${totalMedia}`,
+        ``,
+        `*Top chats*`,
+    ];
+    for (const [jid, rec] of entries.slice(0, 10)) {
+        lines.push(`  \`${jid.split('@')[0]}\` — ${rec.total} msgs, ${rec.media} media, ${timeAgo(rec.lastActive)}`);
     }
-
-    lines.push('');
-    lines.push(`_Use \`.activity <jid>\` for per-chat detail._`);
-
+    lines.push('', `_Use \`.activity <jid>\` for per-chat detail._`);
     return sock.sendMessage(chat, { text: lines.join('\n') }, { quoted: msg });
 }
 
@@ -148,6 +144,5 @@ function timeAgo(ts) {
     if (mins < 60) return `${mins}m ago`;
     const hours = Math.floor(mins / 60);
     if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
+    return `${Math.floor(hours / 24)}d ago`;
 }

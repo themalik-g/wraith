@@ -87,24 +87,37 @@ const tag = grey(`[${sessionId}]`);
 
 // ── Outgoing & Incoming Message Cache (Retry receipts) ──
 const MESSAGE_STORE = new Map();
-const MESSAGE_STORE_MAX = 500;
+const MESSAGE_STORE_MAX = 100;
+const MESSAGE_STORE_TTL_MS = 5 * 60 * 1000;
 
 function rememberMessage(msg) {
   if (!msg?.key?.id || !msg?.message) return;
-  MESSAGE_STORE.set(msg.key.id, msg.message);
-  if (MESSAGE_STORE.size > MESSAGE_STORE_MAX) {
+  MESSAGE_STORE.set(msg.key.id, { msg: msg.message, at: Date.now() });
+  while (MESSAGE_STORE.size > MESSAGE_STORE_MAX) {
     MESSAGE_STORE.delete(MESSAGE_STORE.keys().next().value);
   }
 }
 
-const msgRetryCounterCache = new NodeCache({ stdTTL: 60, checkperiod: 60, maxKeys: 100 });
-
-// Periodic Garbage Collection if enabled
-setInterval(() => {
-  if (typeof global.gc === 'function') {
-    try { global.gc(); } catch {}
+function getRememberedMessage(id) {
+  const rec = MESSAGE_STORE.get(id);
+  if (!rec) return undefined;
+  if (Date.now() - rec.at > MESSAGE_STORE_TTL_MS) {
+    MESSAGE_STORE.delete(id);
+    return undefined;
   }
-}, 5 * 60 * 1000);
+  return rec.msg;
+}
+
+setInterval(() => {
+  try {
+    const cutoff = Date.now() - MESSAGE_STORE_TTL_MS;
+    for (const [id, rec] of MESSAGE_STORE) {
+      if (rec.at < cutoff) MESSAGE_STORE.delete(id);
+    }
+  } catch {}
+}, 60 * 1000).unref?.();
+
+const msgRetryCounterCache = new NodeCache({ stdTTL: 60, checkperiod: 60, maxKeys: 100 });
 
 function printPairBanner(code, number) {
   console.log();
@@ -214,16 +227,15 @@ async function ignite() {
       keys: makeCacheableSignalKeyStore(state.keys, log)
     },
     getMessage: async (key) => {
-      const msg = MESSAGE_STORE.get(key.id);
-      return msg || undefined;
+      return getRememberedMessage(key.id);
     },
-    markOnlineOnConnect: true,
+    markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
     syncFullHistory: false,
     msgRetryCounterCache,
     defaultQueryTimeoutMs: 60000,
     connectTimeoutMs: 60000,
-    keepAliveIntervalMs: 30000
+    keepAliveIntervalMs: 60000
   });
 
   currentSock = sock;
