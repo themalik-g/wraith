@@ -28,7 +28,7 @@ function scheduleFlush() {
   if (typeof flushTimer.unref === 'function') flushTimer.unref();
 }
 
-function flushNow() {
+export function flushNow() {
   flushTimer = null;
   for (const [filePath, lines] of buffers) {
     if (!lines.length) continue;
@@ -44,7 +44,7 @@ function flushNow() {
   }
 }
 
-function flushSync() {
+export function flushSync() {
   for (const [filePath, lines] of buffers) {
     if (!lines.length) continue;
     try { fs.appendFileSync(filePath, lines.join('')); lines.length = 0; } catch {}

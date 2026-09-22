@@ -140,6 +140,9 @@ const videoCommand  = lazy('./modules/ytdlp-commands.js', 'videoCommand');
 const ytdlCommand   = lazy('./modules/ytdlp-commands.js', 'ytdlCommand');
 const wpCommand     = lazy('./modules/theme.js', 'wpCommand');
 const dpCommand     = lazy('./modules/theme.js', 'dpCommand');
+const webopenCommand = lazy('./modules/webopen.js', 'webopenCommand');
+const webstopCommand = lazy('./modules/webopen.js', 'webstopCommand');
+const weblistCommand = lazy('./modules/webopen.js', 'weblistCommand');
 
 // getMode + EPHOTO list, resolved lazily via cached promises
 let _getModePromise = null;
@@ -380,7 +383,7 @@ export async function dispatch(sock, update, sessionId = 'main') {
         'twitter', 'tw', 'pinterest', 'pin', 'threads', 'reddit', 'youtube', 'yt',
         'gemini', 'photo', 'pinchat', 'unpinchat', 'disappearing', 'play', 'ytv', 'video', 'ytdl',
         'shorten', 'tinyurl', 'shorturl', 'news', 'hackernews', 'hn', 'wiki', 'wikipedia', 'joke', 'advice', 'fact',
-        'wp', 'dp', 'resetwp',
+        'wp', 'dp', 'resetwp', 'webopen', 'webstop', 'webclose', 'weblist', 'webstatus',
       ]);
 
       if (KNOWN.has(verb)) {
@@ -468,6 +471,11 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'qr': await qrCommand(csock, chat, msg, rest); break;
           case 'define': await defineCommand(csock, chat, msg, rest); break;
           case 'weather': await weatherCommand(csock, chat, msg, rest); break;
+          case 'webopen': await webopenCommand(csock, chat, msg, rest); break;
+          case 'webstop':
+          case 'webclose': await webstopCommand(csock, chat, msg, rest); break;
+          case 'weblist':
+          case 'webstatus': await weblistCommand(csock, chat, msg); break;
           case 'shorten':
           case 'tinyurl':
           case 'shorturl': await shortenCommand(csock, chat, msg, rest); break;
