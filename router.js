@@ -1,63 +1,164 @@
-// router.js — WRAITH full router
+// router.js — WRAITH full router (lazy cold commands)
 import { remember, revealDelete, revealEdit, revealSecretEdit, ghostCommand, classifyMessage, getLedgerEntry } from './modules/ghost.js';
 import { logMessageHistory } from './modules/logger.js';
 import { peekCommand, autoPeek, watchQuotedViewOnce } from './modules/peek.js';
 import { lurkCommand, lurkTick } from './modules/lurk.js';
-import { pingCommand, aliveCommand, uptimeCommand, restartCommand } from './modules/ping.js';
-import { helpCommand } from './modules/help.js';
-import { scheduleCommand } from './modules/schedule.js';
 import { adminAction, toggleProtection, handleProtection } from './modules/admin.js';
-import { getppCommand } from './modules/profile.js';
-import { getjidCommand } from './modules/jid.js';
 import { presenceCommand, shouldReadReceipts, applyAutoPresence } from './modules/presence.js';
 import { activityCommand, trackActivity } from './modules/activity.js';
-import { updateCommand } from './modules/update.js';
-import { prefixCommand } from './modules/prefix.js';
-import { songCommand } from './modules/song.js';
-import {
-  ytdlCommand as dlCommand, mp3Command, pdlCommand, pdlzipCommand,
-  twitterCommand, pinterestCommand, threadsCommand, redditCommand,
-  soundcloudCommand, spotifyCommand, youtubeCommand,
-} from './modules/download.js';
-import { urlCommand } from './modules/url.js';
+import { scheduleCommand } from './modules/schedule.js';
 import { cacheChannelFromMessage } from './core/jid-resolver.js';
 import { getPrefix, getReplyMode, setReplyMode } from './core/settings.js';
 import { isOwner } from './core/identity.js';
-import { CONFIG, saveSessionConfig } from './config.js';
+import { CONFIG } from './config.js';
 import { reqlocationCommand, handleIncomingLocation } from './modules/location.js';
 import { WAMessageStubType } from '@whiskeysockets/baileys';
-import { usermanualCommand } from './modules/usermanual.js';
-import {
-  currencyCommand, qrCommand, defineCommand, weatherCommand, pwnedCommand,
-  ownerCommand, scriptCommand, modeCommand, getMode,
-  shortenCommand, newsCommand, hackernewsCommand, wikiCommand,
-  jokeCommand, adviceCommand, factCommand,
-} from './modules/utility.js';
-import {
-  bookCommand, imageCommand, movieCommand, songCommand as songInfoCommand, lyricsCommand,
-  coupleppCommand,
-} from './modules/media.js';
-import { pptCommand } from './modules/ppt.js';
-import {
-  welcomeCommand, goodbyeCommand, kickallCommand, kickccCommand,
-  setdescCommand as setgdescCommand, setgppCommand, approveallCommand, declineallCommand,
-  leaveCommand, joinCommand, openCommand, closeCommand, tagallCommand, hidetagCommand, muteCommand, unmuteCommand,
-  archiveCommand, unarchiveCommand, clearchatCommand,
-  rejectcallsCommand, attachCallRejector, pddCommand
-} from './modules/group.js';
-import { setppCommand, setaboutCommand, chatstatsCommand, blockCommand, unblockCommand, blocklistCommand, unblockallCommand, setstatusCommand, getstatusCommand, getpairCommand, setsessionCommand, addsessionCommand, delsessionCommand, setvarCommand, getvarCommand, delvarCommand, addownerCommand, delownerCommand, ownerlistCommand } from './modules/owner.js';
-import { gitdlCommand, mfdlCommand } from './modules/downloader.js';
-import { igCommand, tiktokCommand, fbCommand } from './modules/social.js';
-import { attachPresenceTracker, stalkCommand } from './modules/presence-track.js';
 import { extractInteractiveResponse, matchChoice } from './lib/buttons.js';
-import { textmakerCommand, handleTextmakerCommand } from './modules/textmaker.js';
-import { EPHOTO_EFFECTS } from './lib/ephoto360.js';
-import { geminiCommand, photoCommand } from './modules/gemini.js';
-import { pinchatCommand, unpinchatCommand } from './modules/pin.js';
-import { disappearingCommand } from './modules/disappearing.js';
-import { playCommand, ytvCommand, videoCommand, ytdlCommand } from './modules/ytdlp-commands.js';
-import { wpCommand, dpCommand } from './modules/theme.js';
 
+// ─────────────────────────────────────────────
+//  Lazy loader for cold command handlers
+// ─────────────────────────────────────────────
+function lazy(modPath, fnName) {
+    let cached = null;
+    return async function (...args) {
+        if (!cached) {
+            const mod = await import(modPath);
+            const fn = mod[fnName];
+            if (typeof fn !== 'function') {
+                throw new Error(`[router] ${modPath} has no export ${fnName}`);
+            }
+            cached = fn;
+        }
+        return cached.apply(this, args);
+    };
+}
+
+// ── Cold handlers (only loaded when the command is invoked) ──
+const pingCommand     = lazy('./modules/ping.js', 'pingCommand');
+const aliveCommand    = lazy('./modules/ping.js', 'aliveCommand');
+const uptimeCommand   = lazy('./modules/ping.js', 'uptimeCommand');
+const restartCommand  = lazy('./modules/ping.js', 'restartCommand');
+const helpCommand     = lazy('./modules/help.js', 'helpCommand');
+const getppCommand    = lazy('./modules/profile.js', 'getppCommand');
+const getjidCommand   = lazy('./modules/jid.js', 'getjidCommand');
+const updateCommand   = lazy('./modules/update.js', 'updateCommand');
+const prefixCommand   = lazy('./modules/prefix.js', 'prefixCommand');
+const dlCommand       = lazy('./modules/download.js', 'ytdlCommand');
+const mp3Command      = lazy('./modules/download.js', 'mp3Command');
+const pdlCommand      = lazy('./modules/download.js', 'pdlCommand');
+const pdlzipCommand   = lazy('./modules/download.js', 'pdlzipCommand');
+const twitterCommand  = lazy('./modules/download.js', 'twitterCommand');
+const pinterestCommand= lazy('./modules/download.js', 'pinterestCommand');
+const threadsCommand  = lazy('./modules/download.js', 'threadsCommand');
+const redditCommand   = lazy('./modules/download.js', 'redditCommand');
+const youtubeCommand  = lazy('./modules/download.js', 'youtubeCommand');
+const urlCommand      = lazy('./modules/url.js', 'urlCommand');
+const usermanualCommand = lazy('./modules/usermanual.js', 'usermanualCommand');
+
+const currencyCommand = lazy('./modules/utility.js', 'currencyCommand');
+const qrCommand       = lazy('./modules/utility.js', 'qrCommand');
+const defineCommand   = lazy('./modules/utility.js', 'defineCommand');
+const weatherCommand  = lazy('./modules/utility.js', 'weatherCommand');
+const pwnedCommand    = lazy('./modules/utility.js', 'pwnedCommand');
+const ownerCommand    = lazy('./modules/utility.js', 'ownerCommand');
+const scriptCommand   = lazy('./modules/utility.js', 'scriptCommand');
+const modeCommand     = lazy('./modules/utility.js', 'modeCommand');
+const shortenCommand  = lazy('./modules/utility.js', 'shortenCommand');
+const newsCommand     = lazy('./modules/utility.js', 'newsCommand');
+const hackernewsCommand = lazy('./modules/utility.js', 'hackernewsCommand');
+const wikiCommand     = lazy('./modules/utility.js', 'wikiCommand');
+const jokeCommand     = lazy('./modules/utility.js', 'jokeCommand');
+const adviceCommand   = lazy('./modules/utility.js', 'adviceCommand');
+const factCommand     = lazy('./modules/utility.js', 'factCommand');
+
+const bookCommand     = lazy('./modules/media.js', 'bookCommand');
+const imageCommand    = lazy('./modules/media.js', 'imageCommand');
+const movieCommand    = lazy('./modules/media.js', 'movieCommand');
+const songInfoCommand = lazy('./modules/media.js', 'songCommand');
+const lyricsCommand   = lazy('./modules/media.js', 'lyricsCommand');
+const coupleppCommand = lazy('./modules/media.js', 'coupleppCommand');
+const pptCommand      = lazy('./modules/ppt.js', 'pptCommand');
+
+const welcomeCommand    = lazy('./modules/group.js', 'welcomeCommand');
+const goodbyeCommand    = lazy('./modules/group.js', 'goodbyeCommand');
+const kickallCommand    = lazy('./modules/group.js', 'kickallCommand');
+const kickccCommand     = lazy('./modules/group.js', 'kickccCommand');
+const setgdescCommand   = lazy('./modules/group.js', 'setdescCommand');
+const setgppCommand     = lazy('./modules/group.js', 'setgppCommand');
+const approveallCommand = lazy('./modules/group.js', 'approveallCommand');
+const declineallCommand = lazy('./modules/group.js', 'declineallCommand');
+const leaveCommand      = lazy('./modules/group.js', 'leaveCommand');
+const joinCommand       = lazy('./modules/group.js', 'joinCommand');
+const openCommand       = lazy('./modules/group.js', 'openCommand');
+const closeCommand      = lazy('./modules/group.js', 'closeCommand');
+const tagallCommand     = lazy('./modules/group.js', 'tagallCommand');
+const hidetagCommand    = lazy('./modules/group.js', 'hidetagCommand');
+const muteCommand       = lazy('./modules/group.js', 'muteCommand');
+const unmuteCommand     = lazy('./modules/group.js', 'unmuteCommand');
+const archiveCommand    = lazy('./modules/group.js', 'archiveCommand');
+const unarchiveCommand  = lazy('./modules/group.js', 'unarchiveCommand');
+const clearchatCommand  = lazy('./modules/group.js', 'clearchatCommand');
+const rejectcallsCommand= lazy('./modules/group.js', 'rejectcallsCommand');
+const pddCommand        = lazy('./modules/group.js', 'pddCommand');
+
+const setppCommand      = lazy('./modules/owner.js', 'setppCommand');
+const setaboutCommand   = lazy('./modules/owner.js', 'setaboutCommand');
+const chatstatsCommand  = lazy('./modules/owner.js', 'chatstatsCommand');
+const blockCommand      = lazy('./modules/owner.js', 'blockCommand');
+const unblockCommand    = lazy('./modules/owner.js', 'unblockCommand');
+const blocklistCommand  = lazy('./modules/owner.js', 'blocklistCommand');
+const unblockallCommand = lazy('./modules/owner.js', 'unblockallCommand');
+const setstatusCommand  = lazy('./modules/owner.js', 'setstatusCommand');
+const getstatusCommand  = lazy('./modules/owner.js', 'getstatusCommand');
+const getpairCommand    = lazy('./modules/owner.js', 'getpairCommand');
+const setsessionCommand = lazy('./modules/owner.js', 'setsessionCommand');
+const addsessionCommand = lazy('./modules/owner.js', 'addsessionCommand');
+const delsessionCommand = lazy('./modules/owner.js', 'delsessionCommand');
+const setvarCommand     = lazy('./modules/owner.js', 'setvarCommand');
+const getvarCommand     = lazy('./modules/owner.js', 'getvarCommand');
+const delvarCommand     = lazy('./modules/owner.js', 'delvarCommand');
+const addownerCommand   = lazy('./modules/owner.js', 'addownerCommand');
+const delownerCommand   = lazy('./modules/owner.js', 'delownerCommand');
+const ownerlistCommand  = lazy('./modules/owner.js', 'ownerlistCommand');
+
+const gitdlCommand = lazy('./modules/downloader.js', 'gitdlCommand');
+const mfdlCommand  = lazy('./modules/downloader.js', 'mfdlCommand');
+const igCommand    = lazy('./modules/social.js', 'igCommand');
+const tiktokCommand= lazy('./modules/social.js', 'tiktokCommand');
+const fbCommand    = lazy('./modules/social.js', 'fbCommand');
+const stalkCommand = lazy('./modules/presence-track.js', 'stalkCommand');
+const textmakerCommand = lazy('./modules/textmaker.js', 'textmakerCommand');
+const handleTextmakerCommand = lazy('./modules/textmaker.js', 'handleTextmakerCommand');
+const geminiCommand = lazy('./modules/gemini.js', 'geminiCommand');
+const photoCommand  = lazy('./modules/gemini.js', 'photoCommand');
+const pinchatCommand   = lazy('./modules/pin.js', 'pinchatCommand');
+const unpinchatCommand = lazy('./modules/pin.js', 'unpinchatCommand');
+const disappearingCommand = lazy('./modules/disappearing.js', 'disappearingCommand');
+const playCommand   = lazy('./modules/ytdlp-commands.js', 'playCommand');
+const ytvCommand    = lazy('./modules/ytdlp-commands.js', 'ytvCommand');
+const videoCommand  = lazy('./modules/ytdlp-commands.js', 'videoCommand');
+const ytdlCommand   = lazy('./modules/ytdlp-commands.js', 'ytdlCommand');
+const wpCommand     = lazy('./modules/theme.js', 'wpCommand');
+const dpCommand     = lazy('./modules/theme.js', 'dpCommand');
+
+// getMode + EPHOTO list, resolved lazily via cached promises
+let _getModePromise = null;
+function getModeLazy() {
+    if (!_getModePromise) {
+        _getModePromise = import('./modules/utility.js').then(m => m.getMode);
+    }
+    return _getModePromise.then(fn => fn());
+}
+
+let _ephotoListPromise = null;
+function getEphotoList() {
+    if (!_ephotoListPromise) {
+        _ephotoListPromise = import('./lib/ephoto360.js').then(m => [...Object.keys(m.EPHOTO_EFFECTS), 'textmaker']);
+    }
+    return _ephotoListPromise;
+}
+
+// ─────────────────────────────────────────────
 const CRITICAL_COMMANDS = new Set([
   'ghost', 'peek', 'lurk', 'schedule', 'disappearing',
   'kick', 'add', 'promote', 'demote',
@@ -76,11 +177,17 @@ const CRITICAL_COMMANDS = new Set([
 
 const attachedSockets = new WeakSet();
 
-function attachBackground(sock) {
+async function attachBackground(sock) {
   if (!sock || attachedSockets.has(sock)) return;
   attachedSockets.add(sock);
-  try { attachPresenceTracker(sock); } catch (e) { console.error('[router] attachPresenceTracker', e.message); }
-  try { attachCallRejector(sock); } catch (e) { console.error('[router] attachCallRejector', e.message); }
+  try {
+    const m = await import('./modules/presence-track.js');
+    if (m?.attachPresenceTracker) m.attachPresenceTracker(sock);
+  } catch (e) { console.error('[router] attachPresenceTracker', e.message); }
+  try {
+    const m = await import('./modules/group.js');
+    if (m?.attachCallRejector) m.attachCallRejector(sock);
+  } catch (e) { console.error('[router] attachCallRejector', e.message); }
 }
 
 function extractQuotedText(msg) {
@@ -143,31 +250,14 @@ function plainText(msg) {
 
   const interactiveId = extractInteractiveResponse(msg);
   if (interactiveId) {
-    if (interactiveId.startsWith('book_dl_')) {
-      return `${prefix}book dl ${interactiveId.replace('book_dl_', '')}`;
-    }
-    if (interactiveId.startsWith('menu_')) {
-      return `${prefix}help ${interactiveId.replace('menu_', '')}`;
-    }
-    if (interactiveId.startsWith('.')) {
-      return prefix === '.' ? interactiveId : prefix + interactiveId.slice(1);
-    }
-    if (!interactiveId.startsWith(prefix)) {
-      return `${prefix}${interactiveId}`;
-    }
+    if (interactiveId.startsWith('book_dl_')) return `${prefix}book dl ${interactiveId.replace('book_dl_', '')}`;
+    if (interactiveId.startsWith('menu_')) return `${prefix}help ${interactiveId.replace('menu_', '')}`;
+    if (interactiveId.startsWith('.')) return prefix === '.' ? interactiveId : prefix + interactiveId.slice(1);
+    if (!interactiveId.startsWith(prefix)) return `${prefix}${interactiveId}`;
     return interactiveId;
   }
 
   return '';
-}
-
-function extractEditKeyId(update) {
-  const msg = update.update?.message || update.message;
-  const protoKey = msg?.protocolMessage?.key;
-  if (protoKey?.id) return protoKey.id;
-  const editedKey = msg?.editedMessage?.key;
-  if (editedKey?.id) return editedKey.id;
-  return update.key?.id || null;
 }
 
 const processedCommands = new Set();
@@ -175,14 +265,12 @@ function markCommandProcessed(msgId) {
   if (!msgId) return false;
   if (processedCommands.has(msgId)) return true;
   processedCommands.add(msgId);
-  if (processedCommands.size > 1000) {
-    processedCommands.delete(processedCommands.values().next().value);
-  }
+  if (processedCommands.size > 1000) processedCommands.delete(processedCommands.values().next().value);
   return false;
 }
 
 export async function dispatch(sock, update, sessionId = 'main') {
-  attachBackground(sock);
+  await attachBackground(sock);
   if (update.type && update.type !== 'notify' && update.type !== 'append') return;
 
   for (const msg of update.messages || []) {
@@ -233,11 +321,7 @@ export async function dispatch(sock, update, sessionId = 'main') {
         );
         const mediaPath = ledgerRec?.file || null;
         const timestamp = msg.messageTimestamp ? (Number(msg.messageTimestamp) * 1000) : Date.now();
-
-        logMessageHistory({
-          sessionId, direction, chatJid: chat, senderJid: sender,
-          messageText: text, mediaType, mediaPath, timestamp, msgId
-        });
+        logMessageHistory({ sessionId, direction, chatJid: chat, senderJid: sender, messageText: text, mediaType, mediaPath, timestamp, msgId });
       } catch (e) { console.error('[router] logMessageHistory', e.message); }
 
       if (chat === 'status@broadcast') continue;
@@ -261,23 +345,20 @@ export async function dispatch(sock, update, sessionId = 'main') {
 
       if (text && !text.startsWith(prefix)) {
         const chosenId = matchChoice(chat, msgSender, text);
-        if (chosenId) {
-          text = chosenId.startsWith(prefix) ? chosenId : `${prefix}${chosenId}`;
-        }
+        if (chosenId) text = chosenId.startsWith(prefix) ? chosenId : `${prefix}${chosenId}`;
       }
 
       if (!text.startsWith(prefix)) continue;
-
       const withoutPrefix = text.slice(prefix.length);
       if (!withoutPrefix.trim()) continue;
-
       if (msg.key?.id && markCommandProcessed(msg.key.id)) continue;
 
       const firstSpace = withoutPrefix.indexOf(' ');
       const verb = (firstSpace === -1 ? withoutPrefix : withoutPrefix.slice(0, firstSpace)).toLowerCase();
       const rest = firstSpace === -1 ? [] : withoutPrefix.slice(firstSpace + 1).trim().split(/\s+/);
 
-      const mode = getMode();
+      let mode = 'public';
+      try { mode = await getModeLazy(); } catch { mode = 'public'; }
       if (!senderIsOwner) {
         if (mode === 'private') continue;
         if (CRITICAL_COMMANDS.has(verb)) {
@@ -286,19 +367,20 @@ export async function dispatch(sock, update, sessionId = 'main') {
         }
       }
 
-      const EPHOTO_LIST = [...Object.keys(EPHOTO_EFFECTS), 'textmaker'];
+      let EPHOTO_LIST = [];
+      try { EPHOTO_LIST = await getEphotoList(); } catch { EPHOTO_LIST = ['textmaker']; }
 
       const KNOWN = new Set([...CRITICAL_COMMANDS, ...EPHOTO_LIST,
-        'dl', 'download', 'mp3', 'song', 'songinfo', 'help', 'menu', 'ping', 'usermanual',
+        'dl', 'download', 'mp3', 'songinfo', 'help', 'menu', 'ping', 'usermanual',
         'currency', 'qr', 'define', 'weather', 'pwned', 'owner', 'script', 'repo',
         'book', 'books', 'img', 'image', 'movie', 'lyrics', 'ppt', 'couplepp',
         'welcome', 'goodbye', 'getpp', 'ig', 'tiktok', 'fb',
         'igpost', 'tiktokpost', 'fbpost', 'pdl', 'pdlzip', 'postdl',
         'alive', 'uptime', 'restart', 'replymode', 'reqlocation',
-        'twitter', 'tw', 'pinterest', 'pin', 'threads', 'reddit', 'soundcloud', 'sc', 'spotify', 'spot', 'youtube', 'yt',
-        'gemini', 'photo', 'pinchat', 'unpinchat', 'pdd', 'tag', 'disappearing', 'play', 'ytv', 'video', 'ytdl',
+        'twitter', 'tw', 'pinterest', 'pin', 'threads', 'reddit', 'youtube', 'yt',
+        'gemini', 'photo', 'pinchat', 'unpinchat', 'disappearing', 'play', 'ytv', 'video', 'ytdl',
         'shorten', 'tinyurl', 'shorturl', 'news', 'hackernews', 'hn', 'wiki', 'wikipedia', 'joke', 'advice', 'fact',
-        'wp', 'dp', 'resetwp'
+        'wp', 'dp', 'resetwp',
       ]);
 
       if (KNOWN.has(verb)) {
@@ -329,27 +411,16 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'restart': await restartCommand(csock, chat, msg); break;
           case 'reset': {
             const target = (rest[0] || '').toLowerCase();
-            if (target === 'wp' || target === 'wallpaper') {
-              await wpCommand(csock, chat, msg, rest, 'reset');
-            } else {
-              await restartCommand(csock, chat, msg);
-            }
+            if (target === 'wp' || target === 'wallpaper') await wpCommand(csock, chat, msg, rest, 'reset');
+            else await restartCommand(csock, chat, msg);
             break;
           }
           case 'wp':
-            if ((rest[0] || '').toLowerCase() === 'reset') {
-              await wpCommand(csock, chat, msg, rest, 'reset');
-            } else {
-              await wpCommand(csock, chat, msg, rest);
-            }
+            if ((rest[0] || '').toLowerCase() === 'reset') await wpCommand(csock, chat, msg, rest, 'reset');
+            else await wpCommand(csock, chat, msg, rest);
             break;
-          case 'dp':
-            await dpCommand(csock, chat, msg, rest);
-            break;
-          case 'resetwp':
-            await wpCommand(csock, chat, msg, rest, 'reset');
-            break;
-          case 'song': await songCommand(csock, chat, msg, rest); break;
+          case 'dp': await dpCommand(csock, chat, msg, rest); break;
+          case 'resetwp': await wpCommand(csock, chat, msg, rest, 'reset'); break;
           case 'play': await playCommand(csock, chat, msg, rest); break;
           case 'ytv':
           case 'video': await ytvCommand(csock, chat, msg, rest); break;
@@ -367,10 +438,6 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'pin': await pinterestCommand(csock, chat, msg, rest); break;
           case 'threads': await threadsCommand(csock, chat, msg, rest); break;
           case 'reddit': await redditCommand(csock, chat, msg, rest); break;
-          case 'soundcloud':
-          case 'sc': await soundcloudCommand(csock, chat, msg, rest); break;
-          case 'spotify':
-          case 'spot': await spotifyCommand(csock, chat, msg, rest); break;
           case 'youtube':
           case 'yt': await youtubeCommand(csock, chat, msg, rest); break;
           case 'textmaker': await textmakerCommand(csock, chat, msg, rest); break;
@@ -421,10 +488,7 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'repo': await scriptCommand(csock, chat, msg); break;
           case 'mode': await modeCommand(csock, chat, msg, rest); break;
           case 'replymode': {
-            if (!senderIsOwner) {
-              await sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg });
-              break;
-            }
+            if (!senderIsOwner) { await sock.sendMessage(chat, { text: '⛔ Owner only.' }, { quoted: msg }); break; }
             const modeArg = (rest[0] || '').toLowerCase();
             if (modeArg === 'text' || modeArg === 'buttons') {
               setReplyMode(modeArg);
@@ -510,51 +574,26 @@ export async function dispatchUpdate(sock, update) {
       const upd = u.update || {};
       const outerMsg = upd.message || u.message;
       if (upd.messageStubType === WAMessageStubType.REVOKE || upd.message === null) {
-        await revealDelete(sock, {
-          key: u.key,
-          participant: u.participant || u.key.participant,
-          message: { protocolMessage: { type: 0, key: u.key } }
-        });
+        await revealDelete(sock, { key: u.key, participant: u.participant || u.key.participant, message: { protocolMessage: { type: 0, key: u.key } } });
         continue;
       }
       if (!outerMsg) continue;
       if (outerMsg.secretEncryptedMessage?.secretEncType === 2) {
-        await revealSecretEdit(sock, {
-          key: u.key,
-          participant: u.participant || u.key.participant,
-          message: { secretEncryptedMessage: outerMsg.secretEncryptedMessage }
-        });
+        await revealSecretEdit(sock, { key: u.key, participant: u.participant || u.key.participant, message: { secretEncryptedMessage: outerMsg.secretEncryptedMessage } });
         continue;
       }
       if (outerMsg.protocolMessage) {
         const pm = outerMsg.protocolMessage;
-        const envelope = {
-          key: u.key,
-          participant: u.participant || u.key.participant,
-          message: { protocolMessage: pm }
-        };
-        if (pm.type === 14 || pm.type === 'MESSAGE_EDIT') {
-          await revealEdit(sock, envelope);
-        } else if (pm.type === 0 || pm.type === 'REVOKE') {
-          await revealDelete(sock, envelope);
-        }
+        const envelope = { key: u.key, participant: u.participant || u.key.participant, message: { protocolMessage: pm } };
+        if (pm.type === 14 || pm.type === 'MESSAGE_EDIT') await revealEdit(sock, envelope);
+        else if (pm.type === 0 || pm.type === 'REVOKE') await revealDelete(sock, envelope);
         continue;
       }
       const editedWrapper = outerMsg.editedMessage;
       if (editedWrapper) {
         const recoveredId = editedWrapper.key?.id || u.key?.id || null;
         const originalKey = { ...u.key, id: recoveredId };
-        await revealEdit(sock, {
-          key: originalKey,
-          participant: u.participant || u.key.participant,
-          message: {
-            protocolMessage: {
-              type: 14,
-              key: originalKey,
-              editedMessage: editedWrapper.message || editedWrapper
-            }
-          }
-        });
+        await revealEdit(sock, { key: originalKey, participant: u.participant || u.key.participant, message: { protocolMessage: { type: 14, key: originalKey, editedMessage: editedWrapper.message || editedWrapper } } });
       }
     } catch (e) { console.error('[dispatchUpdate]', e.message); }
   }

@@ -323,7 +323,10 @@ async function promptNumber(label = 'number') {
 function spawnSession(root, id, number) {
   const dir = makeInstance(root, id);
   const maxOldSpace = process.env.WRAITH_MAX_OLD_SPACE_SIZE || '256';
-  const args = [`--max-old-space-size=${maxOldSpace}`, '--expose-gc'];
+  const args = [
+    `--max-old-space-size=${maxOldSpace}`,
+    '--max-semi-space-size=16',
+  ];
   if (process.env.WRAITH_V8_POOL_SIZE) {
     args.push(`--v8-pool-size=${process.env.WRAITH_V8_POOL_SIZE}`);
   }

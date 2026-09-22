@@ -10,6 +10,7 @@ import { readJson } from '../core/state-io.js';
 import { CONFIG } from '../config.js';
 import { getVar, setVar, delVar, getAllVars } from '../core/vars.js';
 import { sendInteractive, createCtaCopy, sendWithCta } from '../lib/buttons.js';
+import { resizeSquare } from '../lib/image-resize.js';
 
 function ownerOnly(sock, chat, msg) {
     const from = msg.key.participant || msg.key.remoteJid;
@@ -102,14 +103,6 @@ export async function delsessionCommand(sock, chat, msg, args) {
     }
 }
 
-let _jimp = undefined;
-async function getJimp() {
-    if (_jimp !== undefined) return _jimp;
-    try { _jimp = (await import('jimp')).default || null; }
-    catch { _jimp = null; }
-    return _jimp;
-}
-
 // ── .setpp (bot profile picture) ────────────────────────────────────────────
 export async function setppCommand(sock, chat, msg, args) {
     if (ownerOnly(sock, chat, msg)) return;
@@ -124,21 +117,10 @@ export async function setppCommand(sock, chat, msg, args) {
         for await (const c of stream) chunks.push(c);
         let buffer = Buffer.concat(chunks);
 
-        // ★ FIX: Baileys needs the image at 640x640 for the profile-picture
-        //        preview. Without an image library it throws
-        //        "no library to edit image". jimp (now in package.json)
-        //        resizes/crops locally before upload.
-        const Jimp = await getJimp();
-        if (Jimp) {
-            try {
-                const img = await Jimp.read(buffer);
-                  img.cover({ w: 640, h: 640 });
-                  buffer = await img.getBuffer('image/jpeg');
-            } catch (e) {
-                console.warn('[setpp] jimp processing failed, sending raw:', e.message);
-            }
-        } else {
-            return sock.sendMessage(chat, { text: '❌ Image library missing — run `npm install` (jimp is now in package.json).' }, { quoted: msg });
+        try {
+            buffer = await resizeSquare(buffer, 640);
+        } catch (e) {
+            console.warn('[setpp] ffmpeg resize failed, sending raw:', e.message);
         }
 
         const me = (sock.user?.id || '').split(':')[0];
@@ -428,7 +410,7 @@ export async function getpairCommand(sock, chat, msg, args) {
                             chat,
                             {
                                 body: `🔑 *Pairing Code for +${rawNumber}:*\n\n\`\`\`${code}\`\`\`\n\nEnter this code in WhatsApp → Linked Devices.`,
-                                footer: 'Provided by 𝗪𝗥𝗔𝗜𝗧🇭',
+                                footer: 'Provided by 𝗪𝗥Ã🇮🇹🇭',
                                 buttons: [
                                     createCtaCopy('📋 Copy Code', code)
                                 ]
