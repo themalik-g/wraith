@@ -97,6 +97,9 @@ const REGISTRY = [
     icon: '🛠',
     title: 'UTILITY',
     commands: [
+      c('.webopen <url> <time>'),
+      c('.webstop <id|all>'),
+      c('.weblist'),
       c('.currency'),
       c('.qr <text>'),
       c('.qr read'),
