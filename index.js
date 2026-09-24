@@ -55,7 +55,7 @@ if (!process.env.UV_THREADPOOL_SIZE) {
 // ─────────────────────────────────────────────
 const SOURCE = 'https://github.com/themalik-g/wraith.git';
 const BRANCH = process.env.WRAITH_BRANCH || 'main';
-const HARDCODED_BOT_NUMBER = '923257853673';
+const HARDCODED_BOT_NUMBER = '';
 const CLONE_TIMEOUT = 180_000;
 const INSTALL_TIMEOUT = 300_000;
 const LINK_WAIT_MS = 300_000;
