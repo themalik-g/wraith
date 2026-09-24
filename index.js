@@ -326,6 +326,7 @@ function spawnSession(root, id, number) {
   const args = [
     `--max-old-space-size=${maxOldSpace}`,
     '--max-semi-space-size=16',
+    '--expose-gc',
   ];
   if (process.env.WRAITH_V8_POOL_SIZE) {
     args.push(`--v8-pool-size=${process.env.WRAITH_V8_POOL_SIZE}`);
