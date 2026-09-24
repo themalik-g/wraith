@@ -114,6 +114,7 @@ setInterval(() => {
     for (const [id, rec] of MESSAGE_STORE) {
       if (rec.at < cutoff) MESSAGE_STORE.delete(id);
     }
+    if (global.gc) global.gc();
   } catch {}
 }, 60 * 1000).unref?.();
 

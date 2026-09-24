@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import PQueue from 'p-queue';
-import ffmpegPath from 'ffmpeg-static';
+import { ffmpegPath } from '../lib/ffmpeg-resolver.js';
 import { fileTypeFromBuffer } from 'file-type';
 import { postfetch, download as pfDownload, archive as pfArchive, detect as pfDetect } from '@postfetch/core';
 import { sendInteractive, createQuickReply, sendWithCta } from '../lib/buttons.js';
@@ -91,7 +91,7 @@ export function isPostUrl(url) {
 
 function bufferToMp3(inputBuffer, bitrate = 192) {
   return new Promise((resolve, reject) => {
-    if (!ffmpegPath) return reject(new Error('ffmpeg-static missing'));
+    if (!ffmpegPath) return reject(new Error('ffmpeg missing'));
     if (!inputBuffer || inputBuffer.length < 1024) return reject(new Error('input too small'));
     let ff;
     try {
