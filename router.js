@@ -141,6 +141,14 @@ const ytdlCommand   = lazy('./modules/ytdlp-commands.js', 'ytdlCommand');
 const wpCommand     = lazy('./modules/theme.js', 'wpCommand');
 const dpCommand     = lazy('./modules/theme.js', 'dpCommand');
 
+const prayertimesCommand = lazy('./modules/islamic.js', 'prayertimesCommand');
+const quranCommand       = lazy('./modules/islamic.js', 'quranCommand');
+const soraCommand        = lazy('./modules/islamic.js', 'soraCommand');
+const paraCommand        = lazy('./modules/islamic.js', 'paraCommand');
+const muslimCommand      = lazy('./modules/islamic.js', 'muslimCommand');
+const bukhariCommand     = lazy('./modules/islamic.js', 'bukhariCommand');
+const searchQuranCommand = lazy('./modules/islamic.js', 'searchQuranCommand');
+
 // getMode + EPHOTO list, resolved lazily via cached promises
 let _getModePromise = null;
 function getModeLazy() {
@@ -381,6 +389,7 @@ export async function dispatch(sock, update, sessionId = 'main') {
         'gemini', 'photo', 'pinchat', 'unpinchat', 'disappearing', 'play', 'ytv', 'video', 'ytdl',
         'shorten', 'tinyurl', 'shorturl', 'news', 'hackernews', 'hn', 'wiki', 'wikipedia', 'joke', 'advice', 'fact',
         'wp', 'dp', 'resetwp',
+        'prayertimes', 'pts', 'quran', 'sora', 'para', 'muslim', 'bukhari', 'search',
       ]);
 
       if (KNOWN.has(verb)) {
@@ -479,6 +488,19 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'joke': await jokeCommand(csock, chat, msg); break;
           case 'advice': await adviceCommand(csock, chat, msg); break;
           case 'fact': await factCommand(csock, chat, msg); break;
+          case 'prayertimes':
+          case 'pts': await prayertimesCommand(csock, chat, msg, rest); break;
+          case 'quran': await quranCommand(csock, chat, msg, rest); break;
+          case 'sora': await soraCommand(csock, chat, msg, rest); break;
+          case 'para': await paraCommand(csock, chat, msg, rest); break;
+          case 'muslim': await muslimCommand(csock, chat, msg, rest); break;
+          case 'bukhari': await bukhariCommand(csock, chat, msg, rest); break;
+          case 'search': {
+            if ((rest[0] || '').toLowerCase() === 'quran') {
+              await searchQuranCommand(csock, chat, msg, rest.slice(1));
+            }
+            break;
+          }
           case 'pwned': await pwnedCommand(csock, chat, msg, rest); break;
           case 'owner': await ownerCommand(csock, chat, msg, rest); break;
           case 'addowner': await addownerCommand(csock, chat, msg, rest); break;
