@@ -390,6 +390,7 @@ export async function dispatch(sock, update, sessionId = 'main') {
         'shorten', 'tinyurl', 'shorturl', 'news', 'hackernews', 'hn', 'wiki', 'wikipedia', 'joke', 'advice', 'fact',
         'wp', 'dp', 'resetwp',
         'prayertimes', 'pts', 'quran', 'sora', 'para', 'muslim', 'bukhari', 'search',
+        'islamic', 'hadith',
       ]);
 
       if (KNOWN.has(verb)) {
@@ -459,6 +460,8 @@ export async function dispatch(sock, update, sessionId = 'main') {
           case 'prefix': await prefixCommand(csock, chat, msg, rest); break;
           case 'help':
           case 'menu': await helpCommand(csock, chat, msg, rest); break;
+          case 'islamic':
+          case 'hadith': await helpCommand(csock, chat, msg, ['islamic']); break;
           case 'usermanual': await usermanualCommand(csock, chat, msg); break;
           case 'schedule': await scheduleCommand(csock, chat, msg, rest); break;
           case 'kick': await adminAction(csock, chat, msg, rest, 'remove'); break;

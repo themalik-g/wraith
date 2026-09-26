@@ -271,70 +271,62 @@ export async function soraCommand(sock, chat, msg, args) {
     return sendWithCta(sock, chat, `⚠️ *Surah "${input}" not found.* Please provide a valid Surah name or number (1–114).`, { quoted: msg });
   }
 
-  // First priority: Online PDF fetching resource
   const paddedNum = String(surahNum).padStart(3, '0');
-  const pdfUrls = [
-    `https://ia800701.us.archive.org/30/items/QuranPdfSurahBySurah/${paddedNum}.pdf`,
-    `https://raw.githubusercontent.com/al-quran/pdf-quran/main/surah/${surahNum}.pdf`
-  ];
 
-  for (const pdfUrl of pdfUrls) {
-    try {
-      const pdfRes = await fetch(pdfUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-      if (pdfRes.ok && pdfRes.headers.get('content-type')?.includes('pdf')) {
-        const arrayBuf = await pdfRes.arrayBuffer();
-        const buffer = Buffer.from(arrayBuf);
-        if (buffer.length > 1000) {
-          return await sock.sendMessage(chat, {
-            document: buffer,
-            fileName: `Surah_${paddedNum}.pdf`,
-            mimetype: 'application/pdf',
-            caption: `📖 *Surah ${surahNum} Document*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`
-          }, { quoted: msg });
-        }
-      }
-    } catch (e) {
-      // ignore and try next or fallback
+  // Fetch Surah metadata to get English / Arabic names
+  let surahMeta = null;
+  try {
+    const metaRes = await fetch(`https://api.alquran.cloud/v1/surah/${surahNum}`);
+    const metaData = await metaRes.json();
+    if (metaData.code === 200 && metaData.data) {
+      surahMeta = metaData.data;
     }
+  } catch (e) {
+    // Ignore metadata error
   }
 
-  // Fallback: Fetch text verses and deliver formatted message
+  const surahTitle = surahMeta?.englishName || `Surah ${surahNum}`;
+  const surahArabic = surahMeta?.name || '';
+  const surahTrans = surahMeta?.englishNameTranslation ? ` (${surahMeta.englishNameTranslation})` : '';
+
+  let surahFilename = null;
   try {
-    const url = `https://api.alquran.cloud/v1/surah/${surahNum}/editions/quran-uthmani,en.sahih`;
-    const res = await fetch(url);
-    const data = await res.json();
-
-    if (data.code !== 200 || !data.data || data.data.length < 2) {
-      return sendWithCta(sock, chat, `❌ Could not fetch Surah ${surahNum}.`, { quoted: msg });
+    const archiveMetaRes = await fetch(`https://archive.org/metadata/002SurahBaqarah`);
+    const archiveMetaData = await archiveMetaRes.json();
+    const pdfs = (archiveMetaData.files || []).filter(f => f.name.endsWith('.pdf') && !f.name.endsWith('_text.pdf'));
+    const matchedFile = pdfs.find(f => f.name.startsWith(paddedNum));
+    if (matchedFile) {
+      surahFilename = matchedFile.name;
     }
+  } catch (e) {
+    // Ignore archive metadata error
+  }
 
-    const araSurah = data.data[0];
-    const engSurah = data.data[1];
+  if (!surahFilename) {
+    return sendWithCta(sock, chat, `❌ Could not resolve document filename for Surah ${surahNum}.`, { quoted: msg });
+  }
 
-    let header = `┌──❮ 📖 *SURAH ${araSurah.englishName.toUpperCase()}* ❯──\n` +
-      `│ 📌 *Surah Number:* ${araSurah.number}\n` +
-      `│ 📑 *English Name:* ${araSurah.englishName} (${araSurah.englishNameTranslation})\n` +
-      `│ 🔢 *Verses:* ${araSurah.numberOfAyahs} | *Type:* ${araSurah.revelationType}\n` +
-      `├───────────────────\n`;
+  const pdfUrl = `https://archive.org/download/002SurahBaqarah/${encodeURIComponent(surahFilename)}`;
 
-    let content = '';
-    const maxVerses = Math.min(araSurah.ayahs.length, 15); // Show first 15 verses in text mode if long
-    for (let i = 0; i < maxVerses; i++) {
-      const a = araSurah.ayahs[i];
-      const e = engSurah.ayahs[i];
-      content += `[${a.numberInSurah}] ${a.text}\n_${e.text}_\n\n`;
+  try {
+    const pdfRes = await fetch(pdfUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (pdfRes.ok) {
+      const arrayBuf = await pdfRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuf);
+      if (buffer.length > 1000) {
+        const cleanName = surahFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
+        return await sock.sendMessage(chat, {
+          document: buffer,
+          fileName: cleanName,
+          mimetype: 'application/pdf',
+          caption: `📖 *Surah ${surahNum}: ${surahTitle}* ${surahArabic}${surahTrans}\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`
+        }, { quoted: msg });
+      }
     }
-
-    if (araSurah.ayahs.length > 15) {
-      content += `_...and ${araSurah.ayahs.length - 15} more verses._\n`;
-    }
-
-    const footer = `└───────────────────\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`;
-
-    await sendWithCta(sock, chat, header + content + footer, { quoted: msg });
+    return sendWithCta(sock, chat, `❌ Could not download PDF document for Surah ${surahNum}.`, { quoted: msg });
   } catch (err) {
     console.error('[sora] Error:', err);
-    await sendWithCta(sock, chat, `❌ Error fetching Surah: ${err.message}`, { quoted: msg });
+    await sendWithCta(sock, chat, `❌ Error downloading Surah document: ${err.message}`, { quoted: msg });
   }
 }
 
@@ -351,35 +343,27 @@ export async function paraCommand(sock, chat, msg, args) {
       `*Example:* \`.para 11\``, { quoted: msg });
   }
 
+  const paddedPara = String(paraNum).padStart(2, '0');
+  const pdfUrl = `https://archive.org/download/quran_para_no._1_to_30_aks/para_no._${paddedPara}_aks.pdf`;
+
   try {
-    const url = `https://api.alquran.cloud/v1/juz/${paraNum}/quran-uthmani`;
-    const res = await fetch(url);
-    const data = await res.json();
-
-    if (data.code !== 200 || !data.data || !data.data.ayahs) {
-      return sendWithCta(sock, chat, `❌ Could not fetch Para ${paraNum}.`, { quoted: msg });
+    const pdfRes = await fetch(pdfUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (pdfRes.ok) {
+      const arrayBuf = await pdfRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuf);
+      if (buffer.length > 1000) {
+        return await sock.sendMessage(chat, {
+          document: buffer,
+          fileName: `Quran_Para_${paddedPara}.pdf`,
+          mimetype: 'application/pdf',
+          caption: `📖 *Quran Para / Juz ${paraNum} Document*\n\nProvided by 𝗪𝗥𝗔𝗜𝗧🇭`
+        }, { quoted: msg });
+      }
     }
-
-    const ayahs = data.data.ayahs;
-    const totalAyahs = ayahs.length;
-    const firstAyah = ayahs[0];
-    const lastAyah = ayahs[totalAyahs - 1];
-
-    const reply = `┌──❮ 📖 *QURAN PARA / JUZ ${paraNum}* ❯──
-│ 🔢 *Para Number:* ${paraNum} / 30
-│ 📊 *Total Verses in Para:* ${totalAyahs}
-│ 🟢 *Starts At:* Surah ${firstAyah.surah.englishName} (${firstAyah.surah.number}), Ayah ${firstAyah.numberInSurah}
-│ 🔴 *Ends At:* Surah ${lastAyah.surah.englishName} (${lastAyah.surah.number}), Ayah ${lastAyah.numberInSurah}
-├───────────────────
-│ 🕌 *Opening Verse:*
-│ ${firstAyah.text}
-└───────────────────
-Provided by 𝗪𝗥𝗔𝗜𝗧🇭`;
-
-    await sendWithCta(sock, chat, reply, { quoted: msg });
+    return sendWithCta(sock, chat, `❌ Could not download PDF document for Para ${paraNum}.`, { quoted: msg });
   } catch (err) {
     console.error('[para] Error:', err);
-    await sendWithCta(sock, chat, `❌ Error fetching Para details: ${err.message}`, { quoted: msg });
+    await sendWithCta(sock, chat, `❌ Error downloading Para document: ${err.message}`, { quoted: msg });
   }
 }
 
