@@ -148,6 +148,9 @@ const paraCommand        = lazy('./modules/islamic.js', 'paraCommand');
 const muslimCommand      = lazy('./modules/islamic.js', 'muslimCommand');
 const bukhariCommand     = lazy('./modules/islamic.js', 'bukhariCommand');
 const searchQuranCommand = lazy('./modules/islamic.js', 'searchQuranCommand');
+const quransearchCommand = lazy('./modules/islamic.js', 'quransearchCommand');
+const hadeessearchCommand = lazy('./modules/islamic.js', 'hadeessearchCommand');
+const islamsearchCommand = lazy('./modules/islamic.js', 'islamsearchCommand');
 
 // getMode + EPHOTO list, resolved lazily via cached promises
 let _getModePromise = null;
@@ -390,7 +393,8 @@ export async function dispatch(sock, update, sessionId = 'main') {
         'shorten', 'tinyurl', 'shorturl', 'news', 'hackernews', 'hn', 'wiki', 'wikipedia', 'joke', 'advice', 'fact',
         'wp', 'dp', 'resetwp',
         'prayertimes', 'pts', 'quran', 'sora', 'para', 'muslim', 'bukhari', 'search',
-        'islamic', 'hadith',
+        'islamic', 'hadith', 'quransearch', 'hadeessearch', 'islamsearch', 'qs', 'hs', 'is',
+        'relocation',
       ]);
 
       if (KNOWN.has(verb)) {
@@ -524,7 +528,14 @@ export async function dispatch(sock, update, sessionId = 'main') {
             }
             break;
           }
+          case 'relocation':
           case 'reqlocation': await reqlocationCommand(csock, chat, msg); break;
+          case 'quransearch':
+          case 'qs': await quransearchCommand(csock, chat, msg, rest); break;
+          case 'hadeessearch':
+          case 'hs': await hadeessearchCommand(csock, chat, msg, rest); break;
+          case 'islamsearch':
+          case 'is': await islamsearchCommand(csock, chat, msg, rest); break;
           case 'book':
           case 'books': await bookCommand(csock, chat, msg, rest); break;
           case 'img':

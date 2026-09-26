@@ -4,6 +4,21 @@
 // ─────────────────────────────────────────────
 
 import { sendWithCta } from '../lib/buttons.js';
+import { getVar } from '../core/vars.js';
+
+// Hadith Books Mapping
+const HADITH_BOOKS = {
+  'bukhari': 'bukhari', 'sahih bukhari': 'bukhari', 'sahihbukhari': 'bukhari',
+  'muslim': 'muslim', 'sahih muslim': 'muslim', 'sahihmuslim': 'muslim',
+  'abudawud': 'abudawud', 'abudawud': 'abudawud', 'dawud': 'abudawud',
+  'tirmidhi': 'tirmidhi', 'attirmidhi': 'tirmidhi', 'tirmizi': 'tirmidhi',
+  'nasai': 'nasai', 'annasai': 'nasai', 'nasa\'i': 'nasai',
+  'ibnmajah': 'ibnmajah', 'ibnmaja': 'ibnmajah', 'majah': 'ibnmajah',
+  'malik': 'malik', 'muwatta': 'malik',
+  'nawawi': 'nawawi', '40nawawi': 'nawawi',
+  'qudsi': 'qudsi',
+  'dehlawi': 'dehlawi'
+};
 
 // Surah Name Mapping (Names to Surah Number 1..114)
 const SURAH_MAP = {
@@ -491,5 +506,376 @@ export async function searchQuranCommand(sock, chat, msg, args) {
   } catch (err) {
     console.error('[searchQuran] Error:', err);
     await sendWithCta(sock, chat, `❌ Error searching Quran: ${err.message}`, { quoted: msg });
+  }
+}
+
+/**
+ * Gemini AI Islamic Reference Engine Helper
+ */
+async function fetchIslamicReferencesFromGemini(query, mode) {
+  const apiKey = getVar('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    const err = new Error('GEMINI_API_KEY_MISSING');
+    err.userFriendly = true;
+    throw err;
+  }
+
+  let promptContent = '';
+  let schema = {};
+
+  if (mode === 'quran') {
+    promptContent = `Provide up to 5 of the most relevant Quran verses for the following question or topic: "${query}". Return exact Surah numbers (1-114) and Ayah numbers.`;
+    schema = {
+      type: 'object',
+      properties: {
+        quran_references: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              surah: { type: 'integer' },
+              ayah: { type: 'integer' }
+            },
+            required: ['surah', 'ayah']
+          }
+        }
+      },
+      required: ['quran_references']
+    };
+  } else if (mode === 'hadees') {
+    promptContent = `Provide up to 5 of the most relevant authentic Hadiths for the following question or topic: "${query}". Use collection book key from: bukhari, muslim, abudawud, tirmidhi, nasai, ibnmajah, malik, nawawi, qudsi, dehlawi.`;
+    schema = {
+      type: 'object',
+      properties: {
+        hadith_references: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              book: { type: 'string' },
+              hadith_number: { type: 'integer' }
+            },
+            required: ['book', 'hadith_number']
+          }
+        }
+      },
+      required: ['hadith_references']
+    };
+  } else {
+    // mode === 'islam'
+    promptContent = `Provide up to 5 of the most relevant Quran verses and up to 5 of the most relevant authentic Hadiths for the following question or topic: "${query}". Use collection book key from: bukhari, muslim, abudawud, tirmidhi, nasai, ibnmajah, malik, nawawi, qudsi, dehlawi for Hadiths.`;
+    schema = {
+      type: 'object',
+      properties: {
+        quran_references: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              surah: { type: 'integer' },
+              ayah: { type: 'integer' }
+            },
+            required: ['surah', 'ayah']
+          }
+        },
+        hadith_references: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              book: { type: 'string' },
+              hadith_number: { type: 'integer' }
+            },
+            required: ['book', 'hadith_number']
+          }
+        }
+      },
+      required: ['quran_references', 'hadith_references']
+    };
+  }
+
+  const systemInstruction = `You are a specialized Islamic reference lookup assistant. For any asked question or topic, provide only related Hadith numbers and related verses from the Quran in structured JSON format. Do not write full texts, only provide accurate references.`;
+
+  const payload = {
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: promptContent }]
+      }
+    ],
+    systemInstruction: {
+      parts: [{ text: systemInstruction }]
+    },
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+      temperature: 0.2
+    }
+  };
+
+  const models = [
+    'gemini-3.5-flash-lite',
+    'gemini-2.5-flash-lite',
+    'gemini-1.5-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-2.5-flash'
+  ];
+
+  let lastError = null;
+  for (const model of models) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Gemini HTTP ${res.status}: ${errText}`);
+      }
+
+      const json = await res.json();
+      const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) {
+        throw new Error('Empty response candidate from Gemini');
+      }
+
+      return JSON.parse(rawText);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('Failed to query Gemini API');
+}
+
+async function fetchVerseDetails(surah, ayah) {
+  try {
+    const url = `https://api.alquran.cloud/v1/ayah/${surah}:${ayah}/editions/quran-uthmani,en.sahih`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.code === 200 && data.data && data.data.length >= 2) {
+      return {
+        surah,
+        ayah,
+        surahName: data.data[0].surah?.englishName || `Surah ${surah}`,
+        arabic: data.data[0].text,
+        english: data.data[1].text
+      };
+    }
+  } catch (e) {
+    console.error(`[fetchVerseDetails] ${surah}:${ayah}`, e.message);
+  }
+  return null;
+}
+
+function normalizeBookName(rawBook) {
+  if (!rawBook) return 'bukhari';
+  const clean = String(rawBook).toLowerCase().replace(/[^a-z]/g, '');
+  if (HADITH_BOOKS[clean]) return HADITH_BOOKS[clean];
+  for (const [k, v] of Object.entries(HADITH_BOOKS)) {
+    if (clean.includes(k) || k.includes(clean)) return v;
+  }
+  return 'bukhari';
+}
+
+async function fetchHadithDetails(rawBook, num) {
+  const book = normalizeBookName(rawBook);
+  try {
+    const { arabic, english } = await getHadith(book, num);
+    if (arabic || english) {
+      const bookTitles = {
+        bukhari: 'Sahih Bukhari',
+        muslim: 'Sahih Muslim',
+        abudawud: 'Sunan Abu Dawud',
+        tirmidhi: 'Jami` at-Tirmidhi',
+        nasai: 'Sunan an-Nasa\'i',
+        ibnmajah: 'Sunan Ibn Majah',
+        malik: 'Muwatta Malik',
+        nawawi: 'Forty Hadith Nawawi',
+        qudsi: 'Hadith Qudsi',
+        dehlawi: 'Hadith Dehlawi'
+      };
+      return {
+        book,
+        bookTitle: bookTitles[book] || book.toUpperCase(),
+        num,
+        arabic,
+        english
+      };
+    }
+  } catch (e) {
+    console.error(`[fetchHadithDetails] ${rawBook} #${num}`, e.message);
+  }
+  return null;
+}
+
+/**
+ * .quransearch <query>
+ */
+export async function quransearchCommand(sock, chat, msg, args) {
+  const query = (args || []).join(' ').trim();
+  if (!query) {
+    return sendWithCta(sock, chat, `📖 *Quran AI Search*\n\n` +
+      `*Usage:* \`.quransearch <question_or_topic>\`\n` +
+      `*Example:* \`.quransearch verses about patience in hardship\``, { quoted: msg });
+  }
+
+  try {
+    const aiData = await fetchIslamicReferencesFromGemini(query, 'quran');
+    const refs = (aiData?.quran_references || []).slice(0, 5);
+
+    if (refs.length === 0) {
+      return sendWithCta(sock, chat, `❌ No relevant Quran references found for "*${query}*".`, { quoted: msg });
+    }
+
+    const fetchedVerses = (await Promise.all(
+      refs.map(r => fetchVerseDetails(r.surah, r.ayah))
+    )).filter(Boolean);
+
+    if (fetchedVerses.length === 0) {
+      return sendWithCta(sock, chat, `❌ Could not fetch verse data for topic "*${query}*".`, { quoted: msg });
+    }
+
+    let reply = `┌──❮ 📖 *QURAN SEARCH* ❯──\n` +
+      `│ 🔍 *Topic:* ${query}\n` +
+      `├───────────────────\n\n`;
+
+    for (const v of fetchedVerses) {
+      reply += `📌 *${v.surahName} (${v.surah}:${v.ayah})*\n` +
+        `🕌 *Arabic:*\n${v.arabic}\n\n` +
+        `🇬🇧 *English:*\n${v.english}\n\n` +
+        `───────────────────\n\n`;
+    }
+
+    reply += `Provided by 𝗪𝗥𝗔𝗜𝗧🇭`;
+
+    await sendWithCta(sock, chat, reply.trim(), { quoted: msg });
+  } catch (err) {
+    console.error('[quransearch] Error:', err);
+    if (err.message === 'GEMINI_API_KEY_MISSING') {
+      return sendWithCta(sock, chat, `⚠️ *Please add your GEMINI_API_KEY to environment variables (\`.setvar GEMINI_API_KEY <key>\`) to use AI Islamic Search.*`, { quoted: msg });
+    }
+    await sendWithCta(sock, chat, `❌ Error executing Quran search: ${err.message}`, { quoted: msg });
+  }
+}
+
+/**
+ * .hadeessearch <query>
+ */
+export async function hadeessearchCommand(sock, chat, msg, args) {
+  const query = (args || []).join(' ').trim();
+  if (!query) {
+    return sendWithCta(sock, chat, `📜 *Hadees AI Search*\n\n` +
+      `*Usage:* \`.hadeessearch <question_or_topic>\`\n` +
+      `*Example:* \`.hadeessearch hadith about seeking knowledge\``, { quoted: msg });
+  }
+
+  try {
+    const aiData = await fetchIslamicReferencesFromGemini(query, 'hadees');
+    const refs = (aiData?.hadith_references || []).slice(0, 5);
+
+    if (refs.length === 0) {
+      return sendWithCta(sock, chat, `❌ No relevant Hadees references found for "*${query}*".`, { quoted: msg });
+    }
+
+    const fetchedHadiths = (await Promise.all(
+      refs.map(r => fetchHadithDetails(r.book, r.hadith_number))
+    )).filter(Boolean);
+
+    if (fetchedHadiths.length === 0) {
+      return sendWithCta(sock, chat, `❌ Could not fetch Hadees data for topic "*${query}*".`, { quoted: msg });
+    }
+
+    let reply = `┌──❮ 📜 *HADEES SEARCH* ❯──\n` +
+      `│ 🔍 *Topic:* ${query}\n` +
+      `├───────────────────\n\n`;
+
+    for (const h of fetchedHadiths) {
+      reply += `📌 *${h.bookTitle} (#${h.num})*\n` +
+        (h.arabic ? `🕌 *Arabic:*\n${h.arabic}\n\n` : '') +
+        (h.english ? `🇬🇧 *English:*\n${h.english}\n\n` : '') +
+        `───────────────────\n\n`;
+    }
+
+    reply += `Provided by 𝗪𝗥𝗔𝗜𝗧🇭`;
+
+    await sendWithCta(sock, chat, reply.trim(), { quoted: msg });
+  } catch (err) {
+    console.error('[hadeessearch] Error:', err);
+    if (err.message === 'GEMINI_API_KEY_MISSING') {
+      return sendWithCta(sock, chat, `⚠️ *Please add your GEMINI_API_KEY to environment variables (\`.setvar GEMINI_API_KEY <key>\`) to use AI Islamic Search.*`, { quoted: msg });
+    }
+    await sendWithCta(sock, chat, `❌ Error executing Hadees search: ${err.message}`, { quoted: msg });
+  }
+}
+
+/**
+ * .islamsearch <query>
+ */
+export async function islamsearchCommand(sock, chat, msg, args) {
+  const query = (args || []).join(' ').trim();
+  if (!query) {
+    return sendWithCta(sock, chat, `🕋 *Islam AI Search (Quran & Hadees)*\n\n` +
+      `*Usage:* \`.islamsearch <question_or_topic>\`\n` +
+      `*Example:* \`.islamsearch importance of charity\``, { quoted: msg });
+  }
+
+  try {
+    const aiData = await fetchIslamicReferencesFromGemini(query, 'islam');
+    const quranRefs = (aiData?.quran_references || []).slice(0, 5);
+    const hadithRefs = (aiData?.hadith_references || []).slice(0, 5);
+
+    if (quranRefs.length === 0 && hadithRefs.length === 0) {
+      return sendWithCta(sock, chat, `❌ No relevant references found for "*${query}*".`, { quoted: msg });
+    }
+
+    const [fetchedVerses, fetchedHadiths] = await Promise.all([
+      Promise.all(quranRefs.map(r => fetchVerseDetails(r.surah, r.ayah))),
+      Promise.all(hadithRefs.map(r => fetchHadithDetails(r.book, r.hadith_number)))
+    ]);
+
+    const validVerses = fetchedVerses.filter(Boolean);
+    const validHadiths = fetchedHadiths.filter(Boolean);
+
+    if (validVerses.length === 0 && validHadiths.length === 0) {
+      return sendWithCta(sock, chat, `❌ Could not fetch reference data for topic "*${query}*".`, { quoted: msg });
+    }
+
+    let reply = `┌──❮ 🕋 *ISLAM SEARCH* ❯──\n` +
+      `│ 🔍 *Topic:* ${query}\n` +
+      `├───────────────────\n\n`;
+
+    if (validVerses.length > 0) {
+      reply += `📖 *QURANIC VERSES:*\n\n`;
+      for (const v of validVerses) {
+        reply += `📌 *${v.surahName} (${v.surah}:${v.ayah})*\n` +
+          `🕌 *Arabic:*\n${v.arabic}\n\n` +
+          `🇬🇧 *English:*\n${v.english}\n\n` +
+          `───────────────────\n\n`;
+      }
+    }
+
+    if (validHadiths.length > 0) {
+      reply += `📜 *AUTHENTIC HADEES:*\n\n`;
+      for (const h of validHadiths) {
+        reply += `📌 *${h.bookTitle} (#${h.num})*\n` +
+          (h.arabic ? `🕌 *Arabic:*\n${h.arabic}\n\n` : '') +
+          (h.english ? `🇬🇧 *English:*\n${h.english}\n\n` : '') +
+          `───────────────────\n\n`;
+      }
+    }
+
+    reply += `Provided by 𝗪𝗥𝗔𝗜𝗧🇭`;
+
+    await sendWithCta(sock, chat, reply.trim(), { quoted: msg });
+  } catch (err) {
+    console.error('[islamsearch] Error:', err);
+    if (err.message === 'GEMINI_API_KEY_MISSING') {
+      return sendWithCta(sock, chat, `⚠️ *Please add your GEMINI_API_KEY to environment variables (\`.setvar GEMINI_API_KEY <key>\`) to use AI Islamic Search.*`, { quoted: msg });
+    }
+    await sendWithCta(sock, chat, `❌ Error executing Islam search: ${err.message}`, { quoted: msg });
   }
 }
