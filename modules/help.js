@@ -115,6 +115,22 @@ const REGISTRY = [
     ],
   },
   {
+    id: 'islamic',
+    aliases: ['quran', 'hadith'],
+    icon: '🕌',
+    title: 'ISLAMIC',
+    commands: [
+      c('.prayertimes <city>'),
+      c('.pts <city>'),
+      c('.quran <surah:ayah>'),
+      c('.sora <name_or_number>'),
+      c('.para <1-30>'),
+      c('.muslim <number>'),
+      c('.bukhari <number>'),
+      c('.search quran <topic>'),
+    ],
+  },
+  {
     id: 'media',
     icon: '📚',
     title: 'MEDIA & AI',
