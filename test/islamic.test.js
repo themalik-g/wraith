@@ -1,4 +1,5 @@
-import { prayertimesCommand, quranCommand, soraCommand, paraCommand, muslimCommand, bukhariCommand, searchQuranCommand } from '../modules/islamic.js';
+import { prayertimesCommand, quranCommand, soraCommand, paraCommand, muslimCommand, bukhariCommand, searchQuranCommand, quransearchCommand, hadeessearchCommand, islamsearchCommand } from '../modules/islamic.js';
+import { reqlocationCommand } from '../modules/location.js';
 
 async function runTests() {
   console.log('--- Testing Islamic Commands ---');
@@ -35,7 +36,47 @@ async function runTests() {
   console.log('\n7. Testing .search quran patience');
   await searchQuranCommand(mockSock, '12345@s.whatsapp.net', mockMsg, ['patience']);
 
-  console.log('\n--- All Islamic Command Tests Completed ---');
+  console.log('\n8. Testing .quransearch without GEMINI_API_KEY');
+  await quransearchCommand(mockSock, '12345@s.whatsapp.net', mockMsg, ['patience']);
+
+  console.log('\n9. Testing .hadeessearch without GEMINI_API_KEY');
+  await hadeessearchCommand(mockSock, '12345@s.whatsapp.net', mockMsg, ['seeking knowledge']);
+
+  console.log('\n10. Testing .islamsearch without GEMINI_API_KEY');
+  await islamsearchCommand(mockSock, '12345@s.whatsapp.net', mockMsg, ['charity']);
+
+  console.log('\n11. Testing .relocation / .reqlocation');
+  await reqlocationCommand(mockSock, '12345@s.whatsapp.net', mockMsg);
+
+  console.log('\n12. Testing .islamsearch with mock Gemini API key & mocked Gemini response');
+  process.env.GEMINI_API_KEY = 'test_key';
+  const originalFetch = global.fetch;
+  global.fetch = async (url, opts) => {
+    if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [{
+            content: {
+              parts: [{
+                text: JSON.stringify({
+                  quran_references: [{ surah: 2, ayah: 255 }],
+                  hadith_references: [{ book: 'bukhari', hadith_number: 1 }]
+                })
+              }]
+            }
+          }]
+        })
+      };
+    }
+    return originalFetch(url, opts);
+  };
+
+  await islamsearchCommand(mockSock, '12345@s.whatsapp.net', mockMsg, ['Ayat al Kursi and Intention']);
+  global.fetch = originalFetch;
+  delete process.env.GEMINI_API_KEY;
+
+  console.log('\n--- All Islamic & Location Command Tests Completed ---');
 }
 
 runTests().catch(console.error);

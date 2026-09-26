@@ -105,6 +105,7 @@ const REGISTRY = [
       c('.pwned <password>'),
       c('.url (reply to media)'),
       c('.reqlocation'),
+      c('.relocation'),
       c('.shorten <url>'),
       c('.news [topic]'),
       c('.hackernews'),
@@ -116,7 +117,7 @@ const REGISTRY = [
   },
   {
     id: 'islamic',
-    aliases: ['quran', 'hadith'],
+    aliases: ['quran', 'hadith', 'hadees'],
     icon: '🕌',
     title: 'ISLAMIC',
     commands: [
@@ -128,6 +129,9 @@ const REGISTRY = [
       c('.muslim <number>'),
       c('.bukhari <number>'),
       c('.search quran <topic>'),
+      c('.quransearch <query>'),
+      c('.hadeessearch <query>'),
+      c('.islamsearch <query>'),
     ],
   },
   {
